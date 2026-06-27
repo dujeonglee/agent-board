@@ -21,6 +21,15 @@
   const esc = (s) =>
     (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+  // ISO → "MM-DD HH:MM" local (empty for missing)
+  function fmtDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
   async function load() {
     const posts = await fetch("/api/posts").then((r) => r.json());
     $posts.innerHTML = "";
@@ -48,6 +57,9 @@
       (p.model_id ? `<span class="model-tag">${esc(p.model_id)}</span>` : "") +
       `</div>` +
       `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— 아직 질문 없음</span>"}</div>` +
+      `<div class="post-meta">생성 ${fmtDate(p.created_at)}` +
+      (p.last_query_at ? ` · 마지막 ${fmtDate(p.last_query_at)}` : "") +
+      `</div>` +
       `</div>` +
       `<div class="post-side">` +
       `<span class="st"><span class="dot ${st.cls}"></span>${st.label}</span>` +

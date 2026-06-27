@@ -68,6 +68,8 @@ class TestPostsApi:
         assert posts[0]["topic"] == "DOOM 만들기"
         assert posts[0]["status"] == "idle"  # never opened
         assert posts[0]["last_query"] is None
+        assert posts[0]["created_at"]  # creation date present
+        assert posts[0]["last_query_at"] is None  # no query yet
 
     def test_create_writes_directive(self, tmp_path):
         cfg, _, c = _client(tmp_path)
@@ -223,3 +225,5 @@ class TestUiWired:
         # per-post model selection
         assert 'id="new-model"' in html
         assert "/api/models" in js and "model_id" in js
+        # created / last-query dates on the card
+        assert "post-meta" in js and "created_at" in js and "last_query_at" in js

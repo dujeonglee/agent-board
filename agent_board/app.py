@@ -44,13 +44,15 @@ class ForceActive(BaseModel):
 def _post_view(config: Config, store: Store, post) -> dict:
     """A post + its derived (live) fields for the list."""
     ws = config.workspace_for(post.post_id)
+    lq = sessions.last_query_record(ws, post.session_id)
     return {
         "post_id": post.post_id,
         "topic": post.topic,
         "model_id": post.model_id,
         "force_active": post.force_active,
         "created_at": post.created_at,
-        "last_query": sessions.last_query(ws, post.session_id),
+        "last_query": lq["text"] if lq else None,
+        "last_query_at": lq.get("ts") if lq else None,
         "status": sessions.status(ws, post.session_id),
     }
 

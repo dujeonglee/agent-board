@@ -20,11 +20,11 @@ def _session_dir(workspace: Path, session_id: str) -> Path:
     return Path(workspace) / ".agent-cli" / "sessions" / session_id
 
 
-def last_query(workspace: Path, session_id: str | None) -> str | None:
-    """The most recent user query text for this session, or None.
+def last_query_record(workspace: Path, session_id: str | None) -> dict | None:
+    """The most recent user query as ``{"text", "ts"}`` (ISO timestamp), or None.
 
     Reads history.jsonl from the end so the last query is found without caring
-    about everything before it."""
+    about everything before it. One read serves both text and timestamp."""
     if not session_id:
         return None
     path = _session_dir(workspace, session_id) / "history.jsonl"
@@ -38,8 +38,14 @@ def last_query(workspace: Path, session_id: str | None) -> str | None:
         except json.JSONDecodeError:
             continue
         if rec.get("role") == "user" and rec.get("kind") == "query":
-            return rec.get("text") or rec.get("content")
+            return {"text": rec.get("text") or rec.get("content"), "ts": rec.get("ts")}
     return None
+
+
+def last_query(workspace: Path, session_id: str | None) -> str | None:
+    """The most recent user query text for this session, or None."""
+    rec = last_query_record(workspace, session_id)
+    return rec["text"] if rec else None
 
 
 def status(workspace: Path, session_id: str | None) -> str:

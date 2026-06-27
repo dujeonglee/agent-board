@@ -49,6 +49,7 @@ header h1 { margin: 0; font-size: 18px; }
 .post-topic { font-weight: 600; }
 .post-last { color: #9aa1ad; font-size: 12.5px; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.post-meta { color: #6b7280; font-size: 11px; margin-top: 3px; }
 .muted { color: #6b7280; }
 
 .post-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }

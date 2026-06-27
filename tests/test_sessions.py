@@ -67,6 +67,32 @@ class TestLastQuery:
         _history(ws, "S1", [{"role": "assistant", "kind": "final", "text": "done"}])
         assert sessions.last_query(ws, "S1") is None
 
+    def test_record_returns_text_and_ts(self, tmp_path):
+        ws = tmp_path / "ws"
+        _history(
+            ws,
+            "S1",
+            [
+                {
+                    "role": "user",
+                    "kind": "query",
+                    "text": "처음",
+                    "ts": "2026-06-01T00:00:00+00:00",
+                },
+                {
+                    "role": "user",
+                    "kind": "query",
+                    "text": "마지막",
+                    "ts": "2026-06-02T09:30:00+00:00",
+                },
+            ],
+        )
+        rec = sessions.last_query_record(ws, "S1")
+        assert rec == {"text": "마지막", "ts": "2026-06-02T09:30:00+00:00"}
+
+    def test_record_none_when_no_session(self, tmp_path):
+        assert sessions.last_query_record(tmp_path / "ws", None) is None
+
 
 class TestStatus:
     """3-state: working (LLM 응답 중) / running (대기) / idle (꺼짐)."""
