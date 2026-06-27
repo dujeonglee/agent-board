@@ -1,0 +1,59 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: #0e0f13;
+  color: #dfe1e6;
+  font-size: 14px;
+}
+header {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,.07);
+}
+header h1 { margin: 0; font-size: 18px; }
+.hint { color: #7d8595; font-size: 12px; }
+
+#new {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.07);
+}
+#new-topic { flex: 0 1 320px; }
+#new-directive { flex: 1; resize: vertical; }
+#new input, #new textarea {
+  padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  border: 1px solid rgba(255,255,255,.12); background: #16181f; color: #dfe1e6;
+  font-family: inherit;
+}
+#new-create {
+  padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
+  background: #4d8eff; color: #fff; font-weight: 600;
+}
+
+#posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 880px; }
+.empty { color: #7d8595; padding: 24px 0; }
+
+.post {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 10px;
+  background: #16181f; border: 1px solid rgba(255,255,255,.07);
+}
+.post-main { flex: 1; min-width: 0; }
+.post-topic { font-weight: 600; }
+.post-last { color: #9aa1ad; font-size: 12.5px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.muted { color: #6b7280; }
+
+.post-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.dot { width: 9px; height: 9px; border-radius: 50%; }
+.dot.on { background: #3fb950; box-shadow: 0 0 6px #3fb95066; }
+.dot.off { background: #3a4150; }
+.fa { font-size: 12px; color: #9aa1ad; cursor: pointer; user-select: none; }
+.post-side .open {
+  padding: 6px 12px; border-radius: 8px; border: none; cursor: pointer;
+  background: #4d8eff; color: #fff; font-weight: 600;
+}
+.post-side .del {
+  padding: 6px 9px; border-radius: 8px; cursor: pointer;
+  background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
+}
+.post-side .del:hover { color: #f85149; border-color: #f85149; }

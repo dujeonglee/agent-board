@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agent-board</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>agent-board</h1>
+    <span class="hint">글 하나 = agent-cli 세션</span>
+  </header>
+
+  <section id="new">
+    <input id="new-topic" type="text" placeholder="주제 — 예: DOOM 만들기" maxlength="200">
+    <textarea id="new-directive" rows="2"
+      placeholder="DIRECTIVE.md (선택) — 이 세션에 항상 적용할 지시"></textarea>
+    <button id="new-create" type="button">+ 새 글</button>
+  </section>
+
+  <main id="posts"></main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
