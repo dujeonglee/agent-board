@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import time
@@ -82,6 +83,25 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def stop_instance(workspace: Path, session_id: str | None) -> bool:
+    """Terminate a post's running instance (SIGTERM by pid from web.json).
+    Returns True if a live instance was signalled. Called BEFORE removing the
+    workspace so the instance isn't orphaned with a deleted cwd."""
+    if not session_id:
+        return False
+    info = read_web_json(workspace, session_id)
+    if not info:
+        return False
+    pid = info.get("pid")
+    if pid and pid_alive(pid):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return False
+        return True
+    return False
+
+
 def _session_dir(workspace: Path, session_id: str) -> Path:
     return Path(workspace) / ".agent-cli" / "sessions" / session_id
 
@@ -133,7 +153,11 @@ def spawn(config: Config, post: Post, *, port: int, token: str) -> subprocess.Po
     workspace = config.workspace_for(post.post_id)
     workspace.mkdir(parents=True, exist_ok=True)
     cmd = build_spawn_cmd(config, post, port=port, token=token)
-    return subprocess.Popen(cmd, cwd=str(workspace))
+    # start_new_session: the instance runs in its own session/process group, so
+    # it is independent of the board — it self-reaps on idle (--idle-timeout),
+    # survives a board restart (re-attached via web.json), and a board Ctrl+C
+    # does not abruptly SIGINT it. Explicit teardown goes through stop_instance.
+    return subprocess.Popen(cmd, cwd=str(workspace), start_new_session=True)
 
 
 def await_ready(

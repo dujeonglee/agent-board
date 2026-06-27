@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent_board import sessions
+from agent_board import instances, sessions
 from agent_board.config import Config
 from agent_board.keepalive import (
     KeepAliveManager,
@@ -102,9 +102,13 @@ def create_app(
 
     @app.delete("/api/posts/{post_id}")
     async def delete_post(post_id: str):
-        if store.get(post_id) is None:
+        post = store.get(post_id)
+        if post is None:
             raise HTTPException(status_code=404, detail="no such post")
         await keepalive.disable(post_id)
+        # kill the running instance BEFORE removing its workspace, else it is
+        # orphaned with a deleted cwd (fails to save its session on exit).
+        instances.stop_instance(config.workspace_for(post_id), post.session_id)
         ws = config.workspace_for(post_id).resolve()
         # safety: only ever remove a board-owned dir under the workspaces root
         if config.workspaces_root in ws.parents and ws.is_dir():
