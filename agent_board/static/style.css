@@ -78,3 +78,20 @@ header h1 { margin: 0; font-size: 18px; }
   background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
 }
 .post-side .del:hover { color: #f85149; border-color: #f85149; }
+
+/* ── mobile / narrow screens ── */
+@media (max-width: 640px) {
+  header, #new, #posts { padding-left: 14px; padding-right: 14px; }
+
+  /* new-post form: stack vertically, full width (was a squished flex row) */
+  #new { flex-direction: column; }
+  #new-topic, #new-directive, #new-model, #new-create {
+    flex: none; width: 100%; max-width: none;
+  }
+
+  /* cards: let the action row wrap under the topic instead of squishing */
+  .post { flex-wrap: wrap; }
+  .post-main { flex-basis: 100%; }
+  .post-side { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  .post-last { white-space: normal; }
+}

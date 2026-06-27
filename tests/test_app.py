@@ -222,7 +222,10 @@ class TestUiWired:
         assert "confirm(" in js  # delete is destructive
         # 3-state status indicator (working/running/idle)
         assert "working" in js and "응답 중" in js
-        assert "dot.busy" in c.get("/static/style.css").text
+        css = c.get("/static/style.css").text
+        assert "dot.busy" in css
+        assert "@media" in css  # responsive (mobile) layout
+        assert 'name="viewport"' in html
         # per-post model selection
         assert 'id="new-model"' in html
         assert "/api/models" in js and "model_id" in js
