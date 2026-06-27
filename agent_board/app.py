@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -54,6 +55,25 @@ def _post_view(config: Config, store: Store, post) -> dict:
     }
 
 
+async def restore_state(config: Config, store: Store, router, keepalive) -> None:
+    """After a board restart the in-memory route map + keepalive tasks are gone,
+    but detached instances may still be alive (start_new_session). Re-register a
+    route for each live instance and restore force-active keepalives so an
+    already-open browser keeps working without a manual re-open."""
+    loop = asyncio.get_event_loop()
+    posts = await loop.run_in_executor(None, store.list_posts)
+    for post in posts:
+        if post.session_id:
+            ws = config.workspace_for(post.post_id)
+            info = await loop.run_in_executor(
+                None, instances.read_web_json, ws, post.session_id
+            )
+            if info and await loop.run_in_executor(None, instances.alive, info):
+                router.ensure_route(post.post_id, info["port"])
+        if post.force_active:
+            await keepalive.enable(post.post_id)
+
+
 def create_app(
     config: Config,
     *,
@@ -77,7 +97,12 @@ def create_app(
             connect=make_sse_connect(default_port_for(config, store))
         )
 
-    app = FastAPI(title="agent-board")
+    @asynccontextmanager
+    async def lifespan(_app):
+        await restore_state(config, store, router, keepalive)
+        yield
+
+    app = FastAPI(title="agent-board", lifespan=lifespan)
     router.mount(app)  # /s/<post_id>/* reverse proxy
 
     @app.get("/")
