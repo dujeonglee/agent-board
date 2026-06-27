@@ -41,9 +41,30 @@ agent-board
 3. **유지(force-active)**: 접속자 0 이어도 인스턴스를 살려둠(idle 종료 방지).
 4. **🗑 삭제**: 글 + 인스턴스 종료 + 워크스페이스 삭제.
 
-## 아키텍처 (v1)
-브라우저 → **보드(직접 프록시, SSE 무버퍼)** → agent-cli 인스턴스(127.0.0.1, loopback).
-프로덕션은 보드 프록시 자리에 **Caddy 게이트웨이**(TLS·인증)를 두는 경로로 승급 예정.
+## 아키텍처 · 게이트웨이
+`AGENT_BOARD_GATEWAY` 로 라우팅 데이터 평면을 고른다:
+
+- **`board-proxy`(기본)** — 보드가 직접 `/s/<id>/*` 를 SSE 무버퍼로 프록시. 무의존,
+  로컬/소규모. 보드가 데이터 경로에 있음(재시작 시 연결 끊김→자동 재연결).
+- **`caddy`(프로덕션)** — 보드가 Caddy admin API 로 `/s/<id>` 라우트를 등록, **Caddy 가
+  인스턴스로 직접 프록시**. 보드는 데이터 경로 밖(TLS·단일포트·재시작 견고).
+
+### 프로덕션 배포 (caddy)
+```bash
+# 1) 비밀번호 해시 생성
+caddy hash-password --plaintext 'secret'      # → $2a$14$...
+
+# 2) deploy/Caddyfile 의 도메인·해시 수정 후 Caddy 기동 (admin 127.0.0.1:2019)
+# 3) 보드를 caddy 모드로
+AGENT_BOARD_GATEWAY=caddy \
+AGENT_BOARD_CADDY_BASIC_AUTH='alice:$2a$14$...' \
+agent-board
+```
+- 동봉: `deploy/Caddyfile`, `deploy/agent-board.service`(systemd).
+- **보안**: 각 `/s/<id>` 동적 라우트에 **basic_auth 핸들러가 직접 포함**되어(보드가 삽입)
+  삽입 순서와 무관하게 **인증 우회 불가**. 단 단위테스트는 admin API 호출만 검증하므로,
+  배포 후 **반드시** `curl` 로 인증을 실측하라(Caddyfile 하단 체크리스트 — 토큰 없이
+  `/s/<id>/api/health` → 401 이어야 함).
 
 ## 설계 문서
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — 요구사항

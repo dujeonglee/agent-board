@@ -121,6 +121,28 @@ class TestPostsApi:
         assert ka.disabled == [pid]
 
 
+class TestGatewaySelection:
+    def _proxy_paths(self, tmp_path, gateway):
+        cfg = Config(
+            data_dir=tmp_path / "d", workspaces_root=tmp_path / "w", gateway=gateway
+        )
+        store = Store(cfg.db_path)
+        app = create_app(
+            cfg, store=store, orchestrator=FakeOrch(), keepalive=FakeKeepalive()
+        )
+        # the /s/<id> reverse-proxy catch-all (NOT the /api/posts/{post_id} API)
+        return [
+            p for r in app.routes if (p := getattr(r, "path", "")).startswith("/s/")
+        ]
+
+    def test_caddy_gateway_does_not_mount_proxy_catchall(self, tmp_path):
+        # Caddy owns /s/<id> routing → the board must not mount the proxy.
+        assert self._proxy_paths(tmp_path, "caddy") == []
+
+    def test_board_proxy_gateway_mounts_catchall(self, tmp_path):
+        assert self._proxy_paths(tmp_path, "board-proxy")  # non-empty
+
+
 class TestUiWired:
     def test_static_and_js_wired(self, tmp_path):
         _, _, c = _client(tmp_path)

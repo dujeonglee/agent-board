@@ -93,3 +93,74 @@ class BoardProxyRouter:
             media_type=upstream.headers.get("content-type"),
             background=BackgroundTask(upstream.aclose),
         )
+
+
+class CaddyRouter:
+    """Production router (DESIGN §9): registers ``/s/<post_id>/*`` routes in a
+    Caddy gateway via its admin API, so the board stays OUT of the data path
+    (TLS, single port, restart-resilient streaming all handled by Caddy).
+
+    ★ Auth-safety: each dynamic route EMBEDS the ``authentication`` handler
+    before ``reverse_proxy`` when ``basic_auth`` is configured, so a proxied
+    instance is never reachable unauthenticated — independent of where the
+    route lands in Caddy's route list (no bypass via insertion order).
+    """
+
+    def __init__(
+        self,
+        admin_url: str = "http://127.0.0.1:2019",
+        *,
+        server: str = "srv0",
+        basic_auth: str = "",
+        client: httpx.Client | None = None,
+    ):
+        self._admin = admin_url.rstrip("/")
+        self._server = server
+        self._basic_auth = basic_auth  # "username:bcrypt-hash" or ""
+        self._client = client or httpx.Client(timeout=5.0)
+
+    def mount(self, app: FastAPI) -> None:
+        # Caddy serves /s/<id>; the board does not. Nothing to mount.
+        pass
+
+    def _route_id(self, post_id: str) -> str:
+        return f"agentboard-{post_id}"
+
+    def _auth_handler(self) -> dict | None:
+        if not self._basic_auth or ":" not in self._basic_auth:
+            return None
+        username, _, password_hash = self._basic_auth.partition(":")
+        return {
+            "handler": "authentication",
+            "providers": {
+                "http_basic": {
+                    "accounts": [{"username": username, "password": password_hash}]
+                }
+            },
+        }
+
+    def ensure_route(self, post_id: str, port: int) -> None:
+        rid = self._route_id(post_id)
+        # Idempotent replace: drop any stale route for this post first (re-open
+        # gets a fresh port), then insert at index 0.
+        self._client.delete(f"{self._admin}/id/{rid}")
+        handle: list[dict] = []
+        auth = self._auth_handler()
+        if auth:
+            handle.append(auth)
+        handle.append({"handler": "rewrite", "strip_path_prefix": f"/s/{post_id}"})
+        handle.append(
+            {"handler": "reverse_proxy", "upstreams": [{"dial": f"127.0.0.1:{port}"}]}
+        )
+        route = {
+            "@id": rid,
+            "match": [{"path": [f"/s/{post_id}", f"/s/{post_id}/*"]}],
+            "handle": handle,
+        }
+        self._client.put(
+            f"{self._admin}/config/apps/http/servers/{self._server}/routes/0",
+            json=route,
+        )
+
+    def remove_route(self, post_id: str) -> None:
+        self._client.delete(f"{self._admin}/id/{self._route_id(post_id)}")

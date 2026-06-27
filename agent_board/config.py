@@ -20,6 +20,10 @@ class Config:
     idle_timeout: int = 300  # --idle-timeout passed to spawned instances
     gateway: str = "board-proxy"  # board-proxy (v1) | caddy
     caddy_admin: str = "http://127.0.0.1:2019"
+    # "username:bcrypt-hash" (from `caddy hash-password`). When set with
+    # gateway=caddy, the board embeds basic_auth into EACH dynamic /s/<id>
+    # route so a proxied instance can never be reached unauthenticated.
+    caddy_basic_auth: str = ""
     port_min: int = 50000
     port_max: int = 60000
 
@@ -48,4 +52,8 @@ class Config:
             agent_cli_bin=os.environ.get("AGENT_BOARD_CLI", "agent-cli"),
             idle_timeout=int(os.environ.get("AGENT_BOARD_IDLE_TIMEOUT", "300")),
             gateway=os.environ.get("AGENT_BOARD_GATEWAY", "board-proxy"),
+            caddy_admin=os.environ.get(
+                "AGENT_BOARD_CADDY_ADMIN", "http://127.0.0.1:2019"
+            ),
+            caddy_basic_auth=os.environ.get("AGENT_BOARD_CADDY_BASIC_AUTH", ""),
         )

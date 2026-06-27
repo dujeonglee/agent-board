@@ -1,0 +1,37 @@
+# agent-board — Caddy gateway (gateway=caddy / B2)
+#
+# Topology:
+#   browser ──TLS──> Caddy ──┬─ /s/<id>/*  → agent-cli instance (127.0.0.1:<port>)
+#                            │                (routes added/removed by the board
+#                            │                 via the admin API; each embeds
+#                            │                 basic_auth → no auth bypass)
+#                            └─ everything   → board control plane (127.0.0.1:8001)
+#
+# The board stays OUT of the data path: Caddy proxies /s/<id> straight to the
+# instance (TLS, single port, restart-resilient streaming).
+#
+# Run the board with:
+#   AGENT_BOARD_GATEWAY=caddy
+#   AGENT_BOARD_CADDY_BASIC_AUTH="alice:$(caddy hash-password --plaintext 'secret')"
+# so the SAME credential guards both the board paths (below) and the dynamic
+# /s/<id> instance routes (embedded by the board).
+
+{
+	# Admin API the board calls to register /s/<id> routes. Loopback only.
+	admin 127.0.0.1:2019
+}
+
+board.example.com {
+	# Board UI/API (/, /api/posts, /static). Generate the hash with:
+	#   caddy hash-password --plaintext 'your-password'
+	basic_auth {
+		alice $2a$14$REPLACE_WITH_BCRYPT_HASH
+	}
+	reverse_proxy 127.0.0.1:8001
+}
+
+# ── After deploy, VERIFY auth is NOT bypassed (security-critical) ──
+#   1) open a post in the board so an instance spawns + a route registers
+#   2) curl -sk https://board.example.com/s/<post_id>/api/health   → 401
+#   3) curl -sk -u alice:secret https://board.example.com/s/<post_id>/api/health → 200
+# If step 2 returns 200, auth is being bypassed — do NOT expose the board.

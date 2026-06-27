@@ -24,7 +24,7 @@ from agent_board.keepalive import (
     make_sse_connect,
 )
 from agent_board.orchestrator import Orchestrator, RealBackend
-from agent_board.router import BoardProxyRouter
+from agent_board.router import BoardProxyRouter, CaddyRouter
 from agent_board.store import Store
 
 _STATIC = Path(__file__).parent / "static"
@@ -61,7 +61,13 @@ def create_app(
     keepalive=None,
 ) -> FastAPI:
     store = store or Store(config.db_path)
-    router = router or BoardProxyRouter()
+    if router is None:
+        # gateway=caddy → Caddy proxies /s/<id> (board out of the data path);
+        # board-proxy (default) → the board reverse-proxies it in-process.
+        if config.gateway == "caddy":
+            router = CaddyRouter(config.caddy_admin, basic_auth=config.caddy_basic_auth)
+        else:
+            router = BoardProxyRouter()
     if orchestrator is None:
         orchestrator = Orchestrator(config, store, backend=RealBackend(config, router))
     if keepalive is None:

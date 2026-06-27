@@ -1,0 +1,33 @@
+# systemd unit for the agent-board control plane (gateway=caddy / B2).
+# Install: copy to /etc/systemd/system/, edit paths/creds, then
+#   systemctl daemon-reload && systemctl enable --now agent-board
+# Caddy runs as its own service (e.g. the official caddy.service) using
+# deploy/Caddyfile.
+
+[Unit]
+Description=agent-board control plane
+After=network.target
+# Caddy must be up so the board can register routes via the admin API.
+Wants=caddy.service
+After=caddy.service
+
+[Service]
+Type=simple
+User=agentboard
+WorkingDirectory=/opt/agent-board
+# agent-cli must be on PATH for the board to spawn instances.
+Environment=PATH=/opt/agent-board/.venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=AGENT_BOARD_HOST=127.0.0.1
+Environment=AGENT_BOARD_PORT=8001
+Environment=AGENT_BOARD_HOME=/var/lib/agent-board
+Environment=AGENT_BOARD_GATEWAY=caddy
+Environment=AGENT_BOARD_CADDY_ADMIN=http://127.0.0.1:2019
+# Same credential Caddy uses for the board paths (see deploy/Caddyfile):
+#   AGENT_BOARD_CADDY_BASIC_AUTH="alice:$(caddy hash-password --plaintext 'secret')"
+Environment=AGENT_BOARD_CADDY_BASIC_AUTH=alice:$2a$14$REPLACE_WITH_BCRYPT_HASH
+ExecStart=/opt/agent-board/.venv/bin/agent-board
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
