@@ -38,6 +38,10 @@ class Config:
     def db_path(self) -> Path:
         return self.data_dir / "board.db"
 
+    @property
+    def log_file(self) -> Path:
+        return self.data_dir / "board.log"
+
     def workspace_for(self, post_id: str) -> Path:
         """The (derived) workspace directory for a post. Always under
         ``workspaces_root`` — the board owns it, so creation/deletion is safe

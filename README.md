@@ -34,6 +34,9 @@ agent-board
 | `AGENT_BOARD_CLI` | `agent-cli` | spawn 바이너리 |
 | `AGENT_BOARD_IDLE_TIMEOUT` | `300` | 인스턴스 `--idle-timeout` (초). viewer 0 이 이만큼 지속되면 자가종료 |
 
+> access 로그(`/api/posts` 폴링 등)는 콘솔이 아니라 **`<DATA_DIR>/board.log`** (회전,
+> 5MB×3)에 쌓입니다. 콘솔엔 startup·에러만.
+
 ## 사용
 1. **새 글**: 주제 + (선택) DIRECTIVE.md + (선택) **모델** → 빈 워크스페이스 자동 생성.
    모델 드롭다운은 agent-cli 레지스트리(`~/.agent-cli/models.json`,

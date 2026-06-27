@@ -31,6 +31,52 @@ from agent_board.store import Store
 _STATIC = Path(__file__).parent / "static"
 
 
+def build_log_config(log_file: str | Path) -> dict:
+    """uvicorn logging config: access logs (the /api/posts polling) → a rotating
+    file so the console stays clean; startup + errors still print to stderr."""
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "()": "uvicorn.logging.DefaultFormatter",
+                "fmt": "%(levelprefix)s %(message)s",
+            },
+            "access": {
+                "()": "uvicorn.logging.AccessFormatter",
+                "fmt": '%(asctime)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            },
+        },
+        "handlers": {
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stderr",
+            },
+            "access_file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "formatter": "access",
+                "filename": str(log_file),
+                "maxBytes": 5_000_000,
+                "backupCount": 3,
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "uvicorn.error": {
+                "handlers": ["default"],
+                "level": "INFO",
+                "propagate": False,
+            },
+            "uvicorn.access": {
+                "handlers": ["access_file"],
+                "level": "INFO",
+                "propagate": False,
+            },
+        },
+    }
+
+
 class NewPost(BaseModel):
     topic: str
     directive: str | None = None
@@ -197,10 +243,17 @@ def main() -> None:  # pragma: no cover
     # default 8001, not 8000 — omlx-server (agent-cli's LLM backend) commonly
     # holds 8000.
     port = int(os.environ.get("AGENT_BOARD_PORT", "8001"))
+    config.data_dir.mkdir(parents=True, exist_ok=True)  # so the log file can open
     print(
         f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"
     )
-    uvicorn.run(create_app(config), host=host, port=port)
+    print(f"  access log → {config.log_file}")
+    uvicorn.run(
+        create_app(config),
+        host=host,
+        port=port,
+        log_config=build_log_config(config.log_file),
+    )
 
 
 if __name__ == "__main__":  # python -m agent_board.app
