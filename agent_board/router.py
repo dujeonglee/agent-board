@@ -13,6 +13,7 @@ from __future__ import annotations
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 # response headers the proxy must NOT copy verbatim — they describe the upstream
 # framing, which StreamingResponse re-derives for the chunked relay.
@@ -78,16 +79,17 @@ class BoardProxyRouter:
             if k.lower() not in _DROP_RESP_HEADERS
         }
 
-        async def body():
-            try:
-                async for chunk in upstream.aiter_raw():
-                    yield chunk
-            finally:
-                await upstream.aclose()
-
+        # Close the upstream via a BackgroundTask, NOT a generator ``finally``:
+        # on client disconnect Starlette cancels the body iterator, and an
+        # ``await aclose()`` inside the cancelled ``finally`` can itself be
+        # interrupted before it completes — leaking the upstream SSE so agent-cli
+        # keeps counting a viewer that has gone (roster grows on every browser
+        # reconnect). The background task runs after the response ends (incl.
+        # disconnect), outside the cancelled scope, so it always closes.
         return StreamingResponse(
-            body(),
+            upstream.aiter_raw(),
             status_code=upstream.status_code,
             headers=resp_headers,
             media_type=upstream.headers.get("content-type"),
+            background=BackgroundTask(upstream.aclose),
         )

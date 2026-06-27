@@ -12,6 +12,7 @@ real loopback port; the board proxies to it and we assert the bytes + streaming.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import socket
 
 import httpx
@@ -81,7 +82,13 @@ async def upstream():
                 await asyncio.sleep(0.02)
     yield port
     server.should_exit = True
-    await task
+    # bounded teardown — never let a lingering stream hang the whole suite
+    try:
+        await asyncio.wait_for(task, timeout=5)
+    except asyncio.TimeoutError:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 def _board_app(router) -> FastAPI:
