@@ -40,6 +40,10 @@ def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> lis
         "--base-path",
         f"/s/{post.post_id}",
     ]
+    if post.model_id:
+        # agent-cli resolves the full definition (provider/url/key) from its own
+        # registry; the board only passes the chosen id.
+        cmd += ["--model", post.model_id]
     if post.session_id:
         cmd += ["--resume", post.session_id]
     return cmd

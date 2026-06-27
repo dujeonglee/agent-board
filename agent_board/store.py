@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS posts (
   topic          TEXT NOT NULL,
   session_id     TEXT UNIQUE,
   directive      TEXT,
+  model_id       TEXT,
   force_active   INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   last_opened_at TEXT
@@ -32,8 +33,13 @@ CREATE INDEX IF NOT EXISTS idx_posts_recent
   ON posts(last_opened_at DESC, created_at DESC);
 """
 
+# additive, nullable migrations for DBs created before a column existed —
+# old rows get NULL (no behaviour change), so resuming an old DB never breaks.
+_MIGRATIONS = {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"}
+
 _COLS = (
-    "post_id, topic, session_id, directive, force_active, created_at, last_opened_at"
+    "post_id, topic, session_id, directive, model_id, force_active, "
+    "created_at, last_opened_at"
 )
 
 
@@ -47,6 +53,7 @@ def _row_to_post(row: sqlite3.Row) -> Post:
         topic=row["topic"],
         session_id=row["session_id"],
         directive=row["directive"],
+        model_id=row["model_id"],
         force_active=bool(row["force_active"]),
         created_at=row["created_at"],
         last_opened_at=row["last_opened_at"],
@@ -61,23 +68,37 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(posts)")}
+        for col, ddl in _MIGRATIONS.items():
+            if col not in cols:
+                self._conn.execute(ddl)
 
     def close(self) -> None:
         self._conn.close()
 
     # ── writes ──────────────────────────────────────────────
-    def create_post(self, *, topic: str, directive: str | None = None) -> Post:
+    def create_post(
+        self,
+        *,
+        topic: str,
+        directive: str | None = None,
+        model_id: str | None = None,
+    ) -> Post:
         post = Post(
             post_id=uuid.uuid4().hex,
             topic=topic,
             directive=directive,
+            model_id=model_id,
             created_at=_now(),
         )
         self._conn.execute(
-            "INSERT INTO posts (post_id, topic, directive, force_active, created_at) "
-            "VALUES (?, ?, ?, 0, ?)",
-            (post.post_id, post.topic, post.directive, post.created_at),
+            "INSERT INTO posts (post_id, topic, directive, model_id, force_active, "
+            "created_at) VALUES (?, ?, ?, ?, 0, ?)",
+            (post.post_id, post.topic, post.directive, post.model_id, post.created_at),
         )
         self._conn.commit()
         return post

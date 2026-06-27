@@ -35,7 +35,10 @@ agent-board
 | `AGENT_BOARD_IDLE_TIMEOUT` | `300` | 인스턴스 `--idle-timeout` (초). viewer 0 이 이만큼 지속되면 자가종료 |
 
 ## 사용
-1. **새 글**: 주제 + (선택) DIRECTIVE.md → 빈 워크스페이스가 자동 생성됨.
+1. **새 글**: 주제 + (선택) DIRECTIVE.md + (선택) **모델** → 빈 워크스페이스 자동 생성.
+   모델 드롭다운은 agent-cli 레지스트리(`~/.agent-cli/models.json`,
+   `AGENT_BOARD_MODELS_JSON` 로 변경)에서 채워지며, 고른 id 가 spawn 시 `--model` 로
+   전달됨(키/정의는 agent-cli 가 자기 레지스트리에서 해석 — 보드에 안 흩어짐).
    기존 코드는 글을 연 뒤 📁 업로드 또는 에이전트에게 `git clone` 으로 투입.
 2. **열기**: spawn-or-attach 후 `/s/<post_id>/` 로 접속 → agent-cli UI.
 3. **유지(force-active)**: 접속자 0 이어도 인스턴스를 살려둠(idle 종료 방지).

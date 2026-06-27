@@ -174,6 +174,38 @@ class TestGatewaySelection:
         assert self._proxy_paths(tmp_path, "board-proxy")  # non-empty
 
 
+class TestModelSelection:
+    def test_api_models_lists_registry(self, tmp_path):
+        import json
+
+        reg = tmp_path / "models.json"
+        reg.write_text(json.dumps({"models": {"Qwen-X": {"provider": "omlx"}}}))
+        cfg = Config(
+            data_dir=tmp_path / "d", workspaces_root=tmp_path / "w", models_json=reg
+        )
+        store = Store(cfg.db_path)
+        c = TestClient(
+            create_app(
+                cfg, store=store, orchestrator=FakeOrch(), keepalive=FakeKeepalive()
+            )
+        )
+        out = c.get("/api/models").json()
+        assert out == [{"id": "Qwen-X", "provider": "omlx", "context_window": None}]
+
+    def test_create_with_model_id_persists(self, tmp_path):
+        cfg, store, c = _client(tmp_path)
+        pid = c.post("/api/posts", json={"topic": "t", "model_id": "Qwen-X"}).json()[
+            "post_id"
+        ]
+        assert store.get(pid).model_id == "Qwen-X"
+        assert c.get("/api/posts").json()[0]["model_id"] == "Qwen-X"
+
+    def test_create_without_model_id_is_none(self, tmp_path):
+        _, store, c = _client(tmp_path)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        assert store.get(pid).model_id is None
+
+
 class TestUiWired:
     def test_static_and_js_wired(self, tmp_path):
         _, _, c = _client(tmp_path)
@@ -188,3 +220,6 @@ class TestUiWired:
         # 3-state status indicator (working/running/idle)
         assert "working" in js and "응답 중" in js
         assert "dot.busy" in c.get("/static/style.css").text
+        # per-post model selection
+        assert 'id="new-model"' in html
+        assert "/api/models" in js and "model_id" in js

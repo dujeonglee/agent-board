@@ -24,9 +24,17 @@ header h1 { margin: 0; font-size: 18px; }
   border: 1px solid rgba(255,255,255,.12); background: #16181f; color: #dfe1e6;
   font-family: inherit;
 }
+#new-model {
+  padding: 8px 10px; border-radius: 8px; font-size: 13px; max-width: 220px;
+  border: 1px solid rgba(255,255,255,.12); background: #16181f; color: #dfe1e6;
+}
 #new-create {
   padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
   background: #4d8eff; color: #fff; font-weight: 600;
+}
+.model-tag {
+  margin-left: 8px; font-size: 11px; font-weight: 500; color: #9aa1ad;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 5px; padding: 1px 6px;
 }
 
 #posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 880px; }

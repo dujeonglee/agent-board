@@ -19,6 +19,7 @@ class Post:
     topic: str
     session_id: str | None = None  # filled on first open (agent-cli session)
     directive: str | None = None  # DIRECTIVE.md content (optional)
+    model_id: str | None = None  # agent-cli model id → `--model` (None = default)
     force_active: bool = False
     created_at: str = ""
     last_opened_at: str | None = None

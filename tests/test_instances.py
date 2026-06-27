@@ -78,6 +78,17 @@ class TestBuildSpawnCmd:
         cmd = instances.build_spawn_cmd(cfg, Post("p1", "t"), port=1, token="x")
         assert cmd[cmd.index("--idle-timeout") + 1] == "42"
 
+    def test_model_flag_when_set(self, tmp_path):
+        post = Post(post_id="p1", topic="t", model_id="Qwen3.6-27B")
+        cmd = instances.build_spawn_cmd(_cfg(tmp_path), post, port=1, token="x")
+        assert cmd[cmd.index("--model") + 1] == "Qwen3.6-27B"
+
+    def test_no_model_flag_when_unset(self, tmp_path):
+        cmd = instances.build_spawn_cmd(
+            _cfg(tmp_path), Post("p1", "t"), port=1, token="x"
+        )
+        assert "--model" not in cmd  # provider default
+
 
 class TestPickFreePort:
     def test_returns_bindable_port_in_range(self):

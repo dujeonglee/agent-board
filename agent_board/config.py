@@ -24,12 +24,15 @@ class Config:
     # gateway=caddy, the board embeds basic_auth into EACH dynamic /s/<id>
     # route so a proxied instance can never be reached unauthenticated.
     caddy_basic_auth: str = ""
+    # agent-cli model registry the board reads to list selectable models.
+    models_json: Path = Path.home() / ".agent-cli" / "models.json"
     port_min: int = 50000
     port_max: int = 60000
 
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir).resolve()
         self.workspaces_root = Path(self.workspaces_root).resolve()
+        self.models_json = Path(self.models_json)
 
     @property
     def db_path(self) -> Path:
@@ -56,4 +59,10 @@ class Config:
                 "AGENT_BOARD_CADDY_ADMIN", "http://127.0.0.1:2019"
             ),
             caddy_basic_auth=os.environ.get("AGENT_BOARD_CADDY_BASIC_AUTH", ""),
+            models_json=Path(
+                os.environ.get(
+                    "AGENT_BOARD_MODELS_JSON",
+                    Path.home() / ".agent-cli" / "models.json",
+                )
+            ),
         )

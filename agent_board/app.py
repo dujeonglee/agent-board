@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent_board import instances, sessions
+from agent_board import instances, models_registry, sessions
 from agent_board.config import Config
 from agent_board.keepalive import (
     KeepAliveManager,
@@ -33,6 +33,7 @@ _STATIC = Path(__file__).parent / "static"
 class NewPost(BaseModel):
     topic: str
     directive: str | None = None
+    model_id: str | None = None
 
 
 class ForceActive(BaseModel):
@@ -45,6 +46,7 @@ def _post_view(config: Config, store: Store, post) -> dict:
     return {
         "post_id": post.post_id,
         "topic": post.topic,
+        "model_id": post.model_id,
         "force_active": post.force_active,
         "created_at": post.created_at,
         "last_query": sessions.last_query(ws, post.session_id),
@@ -85,6 +87,11 @@ def create_app(
     if _STATIC.is_dir():
         app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
+    @app.get("/api/models")
+    async def list_models():
+        # selectable models from agent-cli's registry (admin-managed)
+        return models_registry.list_models(config.models_json)
+
     @app.get("/api/posts")
     async def list_posts():
         loop = asyncio.get_event_loop()
@@ -93,7 +100,9 @@ def create_app(
 
     @app.post("/api/posts")
     async def create_post(body: NewPost):
-        post = store.create_post(topic=body.topic, directive=body.directive)
+        post = store.create_post(
+            topic=body.topic, directive=body.directive, model_id=body.model_id
+        )
         ws = config.workspace_for(post.post_id)
         try:
             ws.mkdir(parents=True, exist_ok=True)

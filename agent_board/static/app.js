@@ -5,7 +5,18 @@
   const $posts = document.getElementById("posts");
   const $topic = document.getElementById("new-topic");
   const $directive = document.getElementById("new-directive");
+  const $model = document.getElementById("new-model");
   const $create = document.getElementById("new-create");
+
+  async function loadModels() {
+    const models = await fetch("/api/models").then((r) => r.json());
+    models.forEach((m) => {
+      const o = document.createElement("option");
+      o.value = m.id;
+      o.textContent = m.provider ? `${m.id} (${m.provider})` : m.id;
+      $model.appendChild(o);
+    });
+  }
 
   const esc = (s) =>
     (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -33,7 +44,9 @@
     const st = STATUS[p.status] || STATUS.idle;
     el.innerHTML =
       `<div class="post-main">` +
-      `<div class="post-topic">${esc(p.topic)}</div>` +
+      `<div class="post-topic">${esc(p.topic)}` +
+      (p.model_id ? `<span class="model-tag">${esc(p.model_id)}</span>` : "") +
+      `</div>` +
       `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— 아직 질문 없음</span>"}</div>` +
       `</div>` +
       `<div class="post-side">` +
@@ -85,7 +98,11 @@
     await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: topic, directive: directive || null }),
+      body: JSON.stringify({
+        topic: topic,
+        directive: directive || null,
+        model_id: $model.value || null,
+      }),
     });
     $topic.value = "";
     $directive.value = "";
@@ -97,6 +114,7 @@
     if (e.key === "Enter") create();
   });
 
+  loadModels();
   load();
   setInterval(load, 5000); // refresh status periodically
 })();
