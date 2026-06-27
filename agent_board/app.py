@@ -137,7 +137,18 @@ def create_app(
 
 
 def main() -> None:  # pragma: no cover
+    import os
+
     import uvicorn
 
     config = Config.from_env()
-    uvicorn.run(create_app(config), host="0.0.0.0", port=8000)
+    host = os.environ.get("AGENT_BOARD_HOST", "0.0.0.0")
+    port = int(os.environ.get("AGENT_BOARD_PORT", "8000"))
+    print(
+        f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"
+    )
+    uvicorn.run(create_app(config), host=host, port=port)
+
+
+if __name__ == "__main__":  # python -m agent_board.app
+    main()
