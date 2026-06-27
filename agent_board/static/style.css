@@ -11,7 +11,11 @@ header {
   padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,.07);
 }
 header h1 { margin: 0; font-size: 18px; }
-.hint { color: #7d8595; font-size: 12px; }
+.open-mode {
+  margin-left: auto; color: #9aa1ad; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  user-select: none;
+}
 
 #new {
   display: flex; gap: 8px; align-items: flex-start;

@@ -233,3 +233,8 @@ class TestUiWired:
         assert "post-meta" in js and "created_at" in js and "last_query_at" in js
         # "needs your answer" indicator for pending ask/confirm
         assert "awaiting_input" in js and "응답 필요" in js
+        # open in new tab by default + "현재 페이지에서 열기" toggle
+        assert 'id="same-tab"' in html and "현재 페이지에서 열기" in html
+        assert "window.open" in js
+        assert "라이브러리 만들기" in html  # topic placeholder
+        assert "글 하나 = agent-cli 세션" not in html  # hint removed

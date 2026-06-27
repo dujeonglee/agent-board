@@ -7,6 +7,13 @@
   const $directive = document.getElementById("new-directive");
   const $model = document.getElementById("new-model");
   const $create = document.getElementById("new-create");
+  const $sameTab = document.getElementById("same-tab");
+
+  // "open in current page" preference persists across reloads (default: new tab)
+  $sameTab.checked = localStorage.getItem("agentboard_same_tab") === "1";
+  $sameTab.addEventListener("change", () =>
+    localStorage.setItem("agentboard_same_tab", $sameTab.checked ? "1" : "0")
+  );
 
   async function loadModels() {
     const models = await fetch("/api/models").then((r) => r.json());
@@ -81,12 +88,22 @@
   }
 
   async function open(post_id) {
+    const sameTab = $sameTab.checked;
+    // Open the new tab SYNCHRONOUSLY (inside the click gesture) so the popup
+    // blocker allows it; the await below would otherwise break the gesture.
+    const win = sameTab ? null : window.open("", "_blank");
     const r = await fetch(`/api/posts/${post_id}/open`, { method: "POST" });
     if (!r.ok) {
+      if (win) win.close();
       alert("열기 실패: " + r.status);
       return;
     }
-    location.href = (await r.json()).url; // → /s/<post_id>/
+    const url = (await r.json()).url; // → /s/<post_id>/
+    if (sameTab) {
+      location.href = url;
+    } else {
+      win.location.href = url;
+    }
   }
 
   async function forceActive(post_id, enabled) {

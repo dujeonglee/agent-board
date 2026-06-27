@@ -9,11 +9,13 @@
 <body>
   <header>
     <h1>agent-board</h1>
-    <span class="hint">글 하나 = agent-cli 세션</span>
+    <label class="open-mode" title="끄면 새 탭에서 열림">
+      <input type="checkbox" id="same-tab"> 현재 페이지에서 열기
+    </label>
   </header>
 
   <section id="new">
-    <input id="new-topic" type="text" placeholder="주제 — 예: DOOM 만들기" maxlength="200">
+    <input id="new-topic" type="text" placeholder="주제 - 예: 라이브러리 만들기" maxlength="200">
     <textarea id="new-directive" rows="2"
       placeholder="DIRECTIVE.md (선택) — 이 세션에 항상 적용할 지시"></textarea>
     <select id="new-model" title="모델 (선택 안 하면 기본)">
