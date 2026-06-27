@@ -21,22 +21,27 @@ from agent_board.store import Store
 class FakeBackend:
     """Stand-in for instances.*: records spawns, fakes readiness."""
 
-    def __init__(self, *, already_up=False, port=50001, session_id="NEWSID"):
+    def __init__(
+        self, *, already_up=False, port=50001, session_id="NEWSID", token="TOK"
+    ):
         self.already_up = already_up
         self.port = port
         self.session_id = session_id
+        self.token = token
         self.spawns = 0
         self.routes: dict[str, int] = {}
 
     # instances-like surface
-    def current_port(self, workspace, session_id):
-        # returns live port if up, else None
-        return self.port if (self.already_up and session_id) else None
+    def info(self, post):
+        # {port, token} if up, else None
+        if self.already_up and post.session_id:
+            return {"port": self.port, "token": self.token}
+        return None
 
-    def spawn_and_wait(self, config, post, *, port, token):
+    def spawn_and_wait(self, post, *, port, token):
         self.spawns += 1
-        self.already_up = True  # instance is now running (current_port will see it)
-        return port, self.session_id  # (port, discovered session_id)
+        self.already_up = True  # instance is now running (info will see it)
+        return self.session_id  # discovered session_id
 
     def pick_free_port(self):
         return self.port
@@ -66,7 +71,8 @@ async def test_first_open_spawns_and_persists_session_id(setup):
     assert be.spawns == 1
     assert store.get(post.post_id).session_id == "S-FIRST"  # persisted
     assert be.routes[post.post_id] == be.port  # route registered
-    assert f"/s/{post.post_id}/" in url
+    assert url.startswith(f"/s/{post.post_id}/")
+    assert "token=" in url  # agent-cli frontend needs the token in the URL
     assert store.get(post.post_id).last_opened_at  # touched
 
 

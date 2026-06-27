@@ -63,7 +63,7 @@ def create_app(
     store = store or Store(config.db_path)
     router = router or BoardProxyRouter()
     if orchestrator is None:
-        orchestrator = Orchestrator(config, store, backend=RealBackend(router))
+        orchestrator = Orchestrator(config, store, backend=RealBackend(config, router))
     if keepalive is None:
         keepalive = KeepAliveManager(
             connect=make_sse_connect(default_port_for(config, store))
