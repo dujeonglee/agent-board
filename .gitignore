@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+.venv/
+venv/
+
+# Board runtime data (never commit)
+*.db
+*.db-wal
+*.db-shm
+/data/
+/workspaces/
