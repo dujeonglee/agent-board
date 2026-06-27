@@ -143,7 +143,9 @@ def main() -> None:  # pragma: no cover
 
     config = Config.from_env()
     host = os.environ.get("AGENT_BOARD_HOST", "0.0.0.0")
-    port = int(os.environ.get("AGENT_BOARD_PORT", "8000"))
+    # default 8001, not 8000 — omlx-server (agent-cli's LLM backend) commonly
+    # holds 8000.
+    port = int(os.environ.get("AGENT_BOARD_PORT", "8001"))
     print(
         f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"
     )
