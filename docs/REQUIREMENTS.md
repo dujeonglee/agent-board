@@ -34,7 +34,8 @@ v1 은 `BoardProxyRouter`(무의존, in-process e2e 테스트 쉬움)로 가고,
 - **라우팅**: 경로 prefix `/s/<post_id>/*`(게이트웨이가 strip → 인스턴스는 `/api/...` 수신).
 
 ## 3. v1 범위
-- **글 목록**: 각 글에 **주제 + 마지막 쿼리** 표시. (마지막 쿼리는 세션 history 에서 유도)
+- **글 목록**: 각 글에 **주제 + 마지막 쿼리 + 상태** 표시. (마지막 쿼리는 세션 history,
+  상태는 🔵응답 중(LLM 생성)/🟢대기/⚪꺼짐 — `/api/health` 의 busy 로 유도)
 - **새 글**: **주제, DIRECTIVE.md(선택)** 입력. **workspace 는 글마다 자동 생성**(사용자
   경로 입력 없음 — 5번 참조).
 - **클릭 → 접속**: spawn-or-attach 후 보드 프록시 경유 접속.
@@ -107,3 +108,7 @@ v1 은 `BoardProxyRouter`(무의존, in-process e2e 테스트 쉬움)로 가고,
 - 인스턴스 파일 `web.json` (spawn-or-attach) — v4.14.0
 - `--trust-local` (loopback 토큰 면제) — v4.15.0
 - `--base-path <prefix>` (경로 prefix 라우팅) — v4.16.0
+- `pagehide`→SSE 해제 (유령 viewer/누적 방지) — v4.17.1
+- `/api/health` 의 `busy` (3단계 상태) — v4.17.2
+- auto-review 인터럽트 정지 — v4.17.3
+- **권장 인스턴스 버전: agent-cli ≥ 4.17.3**

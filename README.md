@@ -4,18 +4,53 @@
 세션 하나 + 워크스페이스 + 주제**. 글을 클릭하면 그 세션의 agent-cli web UI 에 접속한다.
 
 - 인스턴스는 **온디맨드로 떴다가 idle 시 스스로 종료**(agent-cli `--idle-timeout`),
-  다음 접속에 `--resume` 으로 재기동.
+  다음 접속에 `--resume` 으로 재기동. 보드를 재시작해도 살아있는 인스턴스에 재attach.
+- 게시글마다 **상태 표시**: 🔵 응답 중(LLM 생성) / 🟢 대기 / ⚪ 꺼짐.
 - agent-cli 는 **외부 CLI 로만 호출**하며 수정하지 않는다.
+
+## 요구사항
+- Python 3.10+
+- **`agent-cli` 가 PATH 에 있어야 함** (보드가 `agent-cli web ...` 를 spawn).
+  상태 표시(busy)·뒤로가기 정리까지 쓰려면 **agent-cli ≥ 4.17.3** 권장.
+- 모델 백엔드(omlx-server 등)는 agent-cli 설정을 그대로 사용.
+
+## 설치 · 실행
+```bash
+pip install -e ".[dev]"
+
+python -m agent_board.app          # → http://localhost:8001
+# 또는 콘솔 스크립트
+agent-board
+```
+
+### 설정 (환경변수)
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `AGENT_BOARD_HOST` | `0.0.0.0` | 바인드 호스트 |
+| `AGENT_BOARD_PORT` | `8001` | 보드 포트 (8000 은 omlx-server 가 흔히 점유) |
+| `AGENT_BOARD_HOME` | `./data` | 데이터 루트 (board.db + workspaces 의 기본 base) |
+| `AGENT_BOARD_DATA` | `$HOME` | `board.db` 위치 |
+| `AGENT_BOARD_WORKSPACES` | `$HOME/workspaces` | 글별 워크스페이스 루트 |
+| `AGENT_BOARD_CLI` | `agent-cli` | spawn 바이너리 |
+| `AGENT_BOARD_IDLE_TIMEOUT` | `300` | 인스턴스 `--idle-timeout` (초). viewer 0 이 이만큼 지속되면 자가종료 |
+
+## 사용
+1. **새 글**: 주제 + (선택) DIRECTIVE.md → 빈 워크스페이스가 자동 생성됨.
+   기존 코드는 글을 연 뒤 📁 업로드 또는 에이전트에게 `git clone` 으로 투입.
+2. **열기**: spawn-or-attach 후 `/s/<post_id>/` 로 접속 → agent-cli UI.
+3. **유지(force-active)**: 접속자 0 이어도 인스턴스를 살려둠(idle 종료 방지).
+4. **🗑 삭제**: 글 + 인스턴스 종료 + 워크스페이스 삭제.
+
+## 아키텍처 (v1)
+브라우저 → **보드(직접 프록시, SSE 무버퍼)** → agent-cli 인스턴스(127.0.0.1, loopback).
+프로덕션은 보드 프록시 자리에 **Caddy 게이트웨이**(TLS·인증)를 두는 경로로 승급 예정.
 
 ## 설계 문서
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — 요구사항
 - [docs/DESIGN.md](docs/DESIGN.md) — 모듈/API/DB/라이프사이클 설계
 
-## agent-cli 선행 기능 (v4.13+ 필요)
-`--idle-timeout` · 인스턴스 파일 `web.json` · `--trust-local` · `--base-path`
-
 ## 개발
 ```bash
-pip install -e ".[dev]"
-pytest
+pytest          # 전체 테스트
+ruff check agent_board/ tests/ && ruff format --check agent_board/ tests/
 ```
