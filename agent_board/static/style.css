@@ -44,9 +44,17 @@ header h1 { margin: 0; font-size: 18px; }
 .muted { color: #6b7280; }
 
 .post-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.dot { width: 9px; height: 9px; border-radius: 50%; }
+.st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+  color: #9aa1ad; min-width: 56px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .dot.on { background: #3fb950; box-shadow: 0 0 6px #3fb95066; }
 .dot.off { background: #3a4150; }
+.dot.busy { background: #4d8eff; box-shadow: 0 0 0 0 #4d8eff80;
+  animation: pulse 1s ease-out infinite; }
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 #4d8effaa; }
+  100% { box-shadow: 0 0 0 7px #4d8eff00; }
+}
 .fa { font-size: 12px; color: #9aa1ad; cursor: pointer; user-select: none; }
 .post-side .open {
   padding: 6px 12px; border-radius: 8px; border: none; cursor: pointer;

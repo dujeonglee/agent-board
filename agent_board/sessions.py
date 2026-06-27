@@ -43,11 +43,23 @@ def last_query(workspace: Path, session_id: str | None) -> str | None:
 
 
 def status(workspace: Path, session_id: str | None) -> str:
-    """``"running"`` if the instance is live (web.json + pid + health), else
-    ``"idle"`` (incl. a never-opened post)."""
+    """Three states derived from the live instance:
+
+    - ``"working"`` — up and the agent is processing a turn (LLM responding),
+    - ``"running"`` — up and idle (response done, waiting for input),
+    - ``"idle"``    — not running (incl. a never-opened post).
+
+    One /api/health call yields both liveness and the ``busy`` bit (agent-cli
+    >= 4.17.2; a missing ``busy`` field degrades to ``"running"``)."""
     if not session_id:
         return "idle"
     info = instances.read_web_json(workspace, session_id)
-    if info and instances.alive(info):
-        return "running"
-    return "idle"
+    if not info:
+        return "idle"
+    pid, port = info.get("pid"), info.get("port")
+    if not (pid and instances.pid_alive(pid) and port):
+        return "idle"
+    health = instances.health_info(port)
+    if health is None:
+        return "idle"
+    return "working" if health.get("busy") else "running"

@@ -132,13 +132,21 @@ def discover_session_id_by_pid(workspace: Path, pid: int) -> str | None:
     return None
 
 
-def health(port: int, *, timeout: float = 1.0) -> bool:
-    """Whether the instance answers /api/health 200 on loopback."""
+def health_info(port: int, *, timeout: float = 1.0) -> dict | None:
+    """The instance's /api/health body (``{status, busy}``), or None if it
+    doesn't answer 200 on loopback."""
     try:
         r = httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=timeout)
-        return r.status_code == 200
-    except httpx.HTTPError:
-        return False
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def health(port: int, *, timeout: float = 1.0) -> bool:
+    """Whether the instance answers /api/health 200 on loopback."""
+    return health_info(port, timeout=timeout) is not None
 
 
 def alive(info: dict) -> bool:

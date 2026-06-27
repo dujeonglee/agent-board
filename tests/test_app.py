@@ -132,3 +132,6 @@ class TestUiWired:
         assert "api/posts" in js  # list/create
         assert "/open" in js and "force_active" in js
         assert "confirm(" in js  # delete is destructive
+        # 3-state status indicator (working/running/idle)
+        assert "working" in js and "응답 중" in js
+        assert "dot.busy" in c.get("/static/style.css").text

@@ -69,6 +69,17 @@ class TestLastQuery:
 
 
 class TestStatus:
+    """3-state: working (LLM 응답 중) / running (대기) / idle (꺼짐)."""
+
+    def _web_json(self, tmp_path, **fields):
+        ws = tmp_path / "ws"
+        d = ws / ".agent-cli" / "sessions" / "S1"
+        d.mkdir(parents=True)
+        info = {"pid": 1, "port": 50001}
+        info.update(fields)
+        (d / "web.json").write_text(json.dumps(info))
+        return ws
+
     def test_idle_when_never_opened(self, tmp_path):
         assert sessions.status(tmp_path / "ws", None) == "idle"
 
@@ -77,18 +88,29 @@ class TestStatus:
         _history(ws, "S1", [_q("x")])  # session exists but not running
         assert sessions.status(ws, "S1") == "idle"
 
-    def test_running_when_alive(self, tmp_path, monkeypatch):
-        ws = tmp_path / "ws"
-        d = ws / ".agent-cli" / "sessions" / "S1"
-        d.mkdir(parents=True)
-        (d / "web.json").write_text(json.dumps({"pid": 1, "port": 50001}))
-        monkeypatch.setattr(sessions.instances, "alive", lambda info: True)
+    def test_idle_when_pid_dead(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: False)
+        assert sessions.status(ws, "S1") == "idle"
+
+    def test_idle_when_health_unreachable(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(sessions.instances, "health_info", lambda port: None)
+        assert sessions.status(ws, "S1") == "idle"
+
+    def test_running_when_alive_and_idle_worker(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            sessions.instances, "health_info", lambda port: {"busy": False}
+        )
         assert sessions.status(ws, "S1") == "running"
 
-    def test_idle_when_web_json_but_dead(self, tmp_path, monkeypatch):
-        ws = tmp_path / "ws"
-        d = ws / ".agent-cli" / "sessions" / "S1"
-        d.mkdir(parents=True)
-        (d / "web.json").write_text(json.dumps({"pid": 1, "port": 50001}))
-        monkeypatch.setattr(sessions.instances, "alive", lambda info: False)
-        assert sessions.status(ws, "S1") == "idle"
+    def test_working_when_busy(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            sessions.instances, "health_info", lambda port: {"busy": True}
+        )
+        assert sessions.status(ws, "S1") == "working"

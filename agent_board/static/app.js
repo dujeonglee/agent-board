@@ -20,17 +20,24 @@
     posts.forEach((p) => $posts.appendChild(card(p)));
   }
 
+  // status → {dot css class, label}. working = LLM 응답 중, running = 대기, idle = 꺼짐
+  const STATUS = {
+    working: { cls: "busy", label: "응답 중" },
+    running: { cls: "on", label: "대기" },
+    idle: { cls: "off", label: "꺼짐" },
+  };
+
   function card(p) {
     const el = document.createElement("div");
     el.className = "post";
-    const running = p.status === "running";
+    const st = STATUS[p.status] || STATUS.idle;
     el.innerHTML =
       `<div class="post-main">` +
       `<div class="post-topic">${esc(p.topic)}</div>` +
       `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— 아직 질문 없음</span>"}</div>` +
       `</div>` +
       `<div class="post-side">` +
-      `<span class="dot ${running ? "on" : "off"}" title="${running ? "running" : "idle"}"></span>` +
+      `<span class="st"><span class="dot ${st.cls}"></span>${st.label}</span>` +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
       `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> 유지</label>` +
       `<button class="open" type="button">열기</button>` +
