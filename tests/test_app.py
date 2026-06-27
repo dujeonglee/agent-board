@@ -70,6 +70,7 @@ class TestPostsApi:
         assert posts[0]["last_query"] is None
         assert posts[0]["created_at"]  # creation date present
         assert posts[0]["last_query_at"] is None  # no query yet
+        assert posts[0]["awaiting_input"] is False  # not waiting on input
 
     def test_create_writes_directive(self, tmp_path):
         cfg, _, c = _client(tmp_path)
@@ -227,3 +228,5 @@ class TestUiWired:
         assert "/api/models" in js and "model_id" in js
         # created / last-query dates on the card
         assert "post-meta" in js and "created_at" in js and "last_query_at" in js
+        # "needs your answer" indicator for pending ask/confirm
+        assert "awaiting_input" in js and "응답 필요" in js

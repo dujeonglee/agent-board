@@ -48,24 +48,34 @@ def last_query(workspace: Path, session_id: str | None) -> str | None:
     return rec["text"] if rec else None
 
 
-def status(workspace: Path, session_id: str | None) -> str:
-    """Three states derived from the live instance:
+_IDLE = {"status": "idle", "awaiting_input": False}
 
-    - ``"working"`` — up and the agent is processing a turn (LLM responding),
-    - ``"running"`` — up and idle (response done, waiting for input),
-    - ``"idle"``    — not running (incl. a never-opened post).
 
-    One /api/health call yields both liveness and the ``busy`` bit (agent-cli
-    >= 4.17.2; a missing ``busy`` field degrades to ``"running"``)."""
+def live_state(workspace: Path, session_id: str | None) -> dict:
+    """``{"status", "awaiting_input"}`` from ONE /api/health call:
+
+    - status: ``working`` (LLM responding) / ``running`` (up, idle) / ``idle`` (down),
+    - awaiting_input: an ask/confirm prompt is waiting for a reply.
+
+    agent-cli >= 4.17.2 supplies ``busy``; >= 4.17.5 supplies ``awaiting_input``
+    (missing fields degrade gracefully)."""
     if not session_id:
-        return "idle"
+        return dict(_IDLE)
     info = instances.read_web_json(workspace, session_id)
     if not info:
-        return "idle"
+        return dict(_IDLE)
     pid, port = info.get("pid"), info.get("port")
     if not (pid and instances.pid_alive(pid) and port):
-        return "idle"
+        return dict(_IDLE)
     health = instances.health_info(port)
     if health is None:
-        return "idle"
-    return "working" if health.get("busy") else "running"
+        return dict(_IDLE)
+    return {
+        "status": "working" if health.get("busy") else "running",
+        "awaiting_input": bool(health.get("awaiting_input")),
+    }
+
+
+def status(workspace: Path, session_id: str | None) -> str:
+    """The 3-state status string (see :func:`live_state`)."""
+    return live_state(workspace, session_id)["status"]

@@ -60,10 +60,14 @@ header h1 { margin: 0; font-size: 18px; }
 .dot.off { background: #3a4150; }
 .dot.busy { background: #4d8eff; box-shadow: 0 0 0 0 #4d8eff80;
   animation: pulse 1s ease-out infinite; }
+.dot.await { background: #f0a020; }
 @keyframes pulse {
   0%   { box-shadow: 0 0 0 0 #4d8effaa; }
   100% { box-shadow: 0 0 0 7px #4d8eff00; }
 }
+/* a post waiting for the user's ask/confirm reply — make it stand out */
+.st.await { color: #f0a020; font-weight: 600; }
+.post.needs-input { border-color: #f0a02066; background: #1d1a14; }
 .fa { font-size: 12px; color: #9aa1ad; cursor: pointer; user-select: none; }
 .post-side .open {
   padding: 6px 12px; border-radius: 8px; border: none; cursor: pointer;

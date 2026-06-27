@@ -45,6 +45,7 @@ def _post_view(config: Config, store: Store, post) -> dict:
     """A post + its derived (live) fields for the list."""
     ws = config.workspace_for(post.post_id)
     lq = sessions.last_query_record(ws, post.session_id)
+    state = sessions.live_state(ws, post.session_id)
     return {
         "post_id": post.post_id,
         "topic": post.topic,
@@ -53,7 +54,8 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "created_at": post.created_at,
         "last_query": lq["text"] if lq else None,
         "last_query_at": lq.get("ts") if lq else None,
-        "status": sessions.status(ws, post.session_id),
+        "status": state["status"],
+        "awaiting_input": state["awaiting_input"],
     }
 
 

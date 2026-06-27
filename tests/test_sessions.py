@@ -140,3 +140,20 @@ class TestStatus:
             sessions.instances, "health_info", lambda port: {"busy": True}
         )
         assert sessions.status(ws, "S1") == "working"
+
+    def test_live_state_awaiting_input(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            sessions.instances,
+            "health_info",
+            lambda port: {"busy": True, "awaiting_input": True},
+        )
+        state = sessions.live_state(ws, "S1")
+        assert state["awaiting_input"] is True and state["status"] == "working"
+
+    def test_live_state_idle_not_awaiting(self, tmp_path):
+        assert sessions.live_state(tmp_path / "ws", None) == {
+            "status": "idle",
+            "awaiting_input": False,
+        }

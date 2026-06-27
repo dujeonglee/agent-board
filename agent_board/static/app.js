@@ -49,8 +49,11 @@
 
   function card(p) {
     const el = document.createElement("div");
-    el.className = "post";
-    const st = STATUS[p.status] || STATUS.idle;
+    el.className = "post" + (p.awaiting_input ? " needs-input" : "");
+    // awaiting an ask/confirm reply takes precedence over the busy/idle label
+    const st = p.awaiting_input
+      ? { cls: "await", label: "❗ 응답 필요" }
+      : STATUS[p.status] || STATUS.idle;
     el.innerHTML =
       `<div class="post-main">` +
       `<div class="post-topic">${esc(p.topic)}` +
@@ -62,7 +65,7 @@
       `</div>` +
       `</div>` +
       `<div class="post-side">` +
-      `<span class="st"><span class="dot ${st.cls}"></span>${st.label}</span>` +
+      `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}</span>` +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
       `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> 유지</label>` +
       `<button class="open" type="button">열기</button>` +
