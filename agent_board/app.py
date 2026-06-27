@@ -112,6 +112,9 @@ def create_app(
         if post is None:
             raise HTTPException(status_code=404, detail="no such post")
         await keepalive.disable(post_id)
+        # deregister the gateway route (Caddy) / in-memory map (board-proxy) —
+        # else a deleted post leaves a dangling /s/<id> route behind.
+        router.remove_route(post_id)
         # kill the running instance BEFORE removing its workspace, else it is
         # orphaned with a deleted cwd (fails to save its session on exit).
         instances.stop_instance(config.workspace_for(post_id), post.session_id)

@@ -94,6 +94,37 @@ class TestPostsApi:
         _, _, c = _client(tmp_path)
         assert c.delete("/api/posts/nope").status_code == 404
 
+    def test_delete_deregisters_route(self, tmp_path):
+        # else a deleted post leaves a dangling /s/<id> gateway route (found in
+        # real-Caddy e2e: remove_route was never wired into delete).
+        class SpyRouter:
+            def __init__(self):
+                self.removed = []
+
+            def mount(self, app):
+                pass
+
+            def ensure_route(self, post_id, port):
+                pass
+
+            def remove_route(self, post_id):
+                self.removed.append(post_id)
+
+        cfg = Config(data_dir=tmp_path / "d", workspaces_root=tmp_path / "w")
+        store = Store(cfg.db_path)
+        spy = SpyRouter()
+        app = create_app(
+            cfg,
+            store=store,
+            router=spy,
+            orchestrator=FakeOrch(),
+            keepalive=FakeKeepalive(),
+        )
+        client = TestClient(app)
+        pid = client.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        client.delete(f"/api/posts/{pid}")
+        assert spy.removed == [pid]
+
     def test_open_calls_orchestrator(self, tmp_path):
         orch = FakeOrch()
         cfg, _, c = _client(tmp_path, orch=orch)
