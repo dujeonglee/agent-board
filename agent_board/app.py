@@ -30,6 +30,34 @@ from agent_board.store import Store
 
 _STATIC = Path(__file__).parent / "static"
 
+# default board port: 0xCAFE (51966). agent-cli web defaults to 0xC0DE (49374),
+# so the two don't collide out of the box; both are below the instance port
+# range (50000-60000) and clear of omlx-server's 8000.
+DEFAULT_PORT = 0xCAFE
+
+
+def pick_board_port(host: str, preferred: int) -> int:
+    """``preferred`` if bindable, else an OS-assigned free port — so a second
+    board (or a leftover on the port) starts on a fresh port instead of dying
+    with "address already in use". Mirrors agent-cli's web ``pick_port``."""
+    import socket
+
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    for candidate in (preferred, 0):
+        if candidate:  # a LIVE listener already answers → skip to fallback
+            with socket.socket() as c:
+                c.settimeout(0.2)
+                if c.connect_ex((probe_host, candidate)) == 0:
+                    continue
+        with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, candidate))
+            except OSError:
+                continue
+            return s.getsockname()[1]
+    return preferred  # let uvicorn surface the error
+
 
 def build_log_config(log_file: str | Path) -> dict:
     """uvicorn logging config: access logs (the /api/posts polling) → a rotating
@@ -240,9 +268,10 @@ def main() -> None:  # pragma: no cover
 
     config = Config.from_env()
     host = os.environ.get("AGENT_BOARD_HOST", "0.0.0.0")
-    # default 0xC0DE (49374) — "CODE" 🙂, and conveniently below the instance
-    # port range (50000-60000) and clear of omlx-server's 8000.
-    port = int(os.environ.get("AGENT_BOARD_PORT", str(0xC0DE)))
+    # AGENT_BOARD_PORT set → bind it exactly (fail loudly on conflict). Omitted →
+    # prefer 0xCAFE but dynamically fall back to a free port if it's taken.
+    explicit = os.environ.get("AGENT_BOARD_PORT")
+    port = int(explicit) if explicit else pick_board_port(host, DEFAULT_PORT)
     config.data_dir.mkdir(parents=True, exist_ok=True)  # so the log file can open
     print(
         f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0] - 2026-06-28
+
+### Added
+
+- **포트 충돌 시 다이나믹 fallback** — `AGENT_BOARD_PORT` 미지정 시 기본 포트가 사용
+  중이면 OS 할당 free 포트로 자동 전환(`pick_board_port`) → 두 번째 보드/잔류 프로세스가
+  "address already in use" 로 죽지 않음. `AGENT_BOARD_PORT` 명시 시엔 정확히 바인드(충돌
+  시 에러).
+
+### Changed
+
+- **기본 포트 0xC0DE → `0xCAFE` (51966)** — agent-cli web 기본(0xC0DE=49374)과 안
+  겹치게. (agent-cli 와 짝: cli=0xC0DE, board=0xCAFE.)
+
 ## [1.1.1] - 2026-06-28
 
 ### Changed
