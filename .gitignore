@@ -15,3 +15,6 @@ venv/
 *.db-shm
 /data/
 /workspaces/
+
+# agent-cli runtime scratch (if run inside the repo)
+.agent-cli/
