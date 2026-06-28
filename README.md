@@ -18,7 +18,7 @@
 ```bash
 pip install -e ".[dev]"
 
-python -m agent_board.app          # → http://localhost:8001
+python -m agent_board.app          # → http://localhost:49374
 # 또는 콘솔 스크립트
 agent-board
 ```
@@ -27,7 +27,7 @@ agent-board
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `AGENT_BOARD_HOST` | `0.0.0.0` | 바인드 호스트 |
-| `AGENT_BOARD_PORT` | `8001` | 보드 포트 (8000 은 omlx-server 가 흔히 점유) |
+| `AGENT_BOARD_PORT` | `49374` (0xC0DE) | 보드 포트 (인스턴스 50000~60000·omlx 8000 회피) |
 | `AGENT_BOARD_HOME` | `./data` | 데이터 루트 (board.db + workspaces 의 기본 base) |
 | `AGENT_BOARD_DATA` | `$HOME` | `board.db` 위치 |
 | `AGENT_BOARD_WORKSPACES` | `$HOME/workspaces` | 글별 워크스페이스 루트 |

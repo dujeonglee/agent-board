@@ -18,7 +18,7 @@ WorkingDirectory=/opt/agent-board
 # agent-cli must be on PATH for the board to spawn instances.
 Environment=PATH=/opt/agent-board/.venv/bin:/usr/local/bin:/usr/bin:/bin
 Environment=AGENT_BOARD_HOST=127.0.0.1
-Environment=AGENT_BOARD_PORT=8001
+Environment=AGENT_BOARD_PORT=49374
 Environment=AGENT_BOARD_HOME=/var/lib/agent-board
 Environment=AGENT_BOARD_GATEWAY=caddy
 Environment=AGENT_BOARD_CADDY_ADMIN=http://127.0.0.1:2019

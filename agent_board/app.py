@@ -240,9 +240,9 @@ def main() -> None:  # pragma: no cover
 
     config = Config.from_env()
     host = os.environ.get("AGENT_BOARD_HOST", "0.0.0.0")
-    # default 8001, not 8000 — omlx-server (agent-cli's LLM backend) commonly
-    # holds 8000.
-    port = int(os.environ.get("AGENT_BOARD_PORT", "8001"))
+    # default 0xC0DE (49374) — "CODE" 🙂, and conveniently below the instance
+    # port range (50000-60000) and clear of omlx-server's 8000.
+    port = int(os.environ.get("AGENT_BOARD_PORT", str(0xC0DE)))
     config.data_dir.mkdir(parents=True, exist_ok=True)  # so the log file can open
     print(
         f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"

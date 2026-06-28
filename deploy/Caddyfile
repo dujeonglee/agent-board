@@ -5,7 +5,7 @@
 #                            │                (routes added/removed by the board
 #                            │                 via the admin API; each embeds
 #                            │                 basic_auth → no auth bypass)
-#                            └─ everything   → board control plane (127.0.0.1:8001)
+#                            └─ everything   → board control plane (127.0.0.1:49374)
 #
 # The board stays OUT of the data path: Caddy proxies /s/<id> straight to the
 # instance (TLS, single port, restart-resilient streaming).
@@ -27,7 +27,7 @@ board.example.com {
 	basic_auth {
 		alice $2a$14$REPLACE_WITH_BCRYPT_HASH
 	}
-	reverse_proxy 127.0.0.1:8001
+	reverse_proxy 127.0.0.1:49374
 }
 
 # ── After deploy, VERIFY auth is NOT bypassed (security-critical) ──
