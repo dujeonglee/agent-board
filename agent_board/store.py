@@ -11,11 +11,11 @@ The sqlite3 calls are synchronous; the FastAPI layer wraps them in
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_board._sqlite import sqlite3  # stdlib sqlite3, or pysqlite3 fallback
 from agent_board.models import Post
 
 _SCHEMA = """

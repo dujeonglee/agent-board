@@ -4,13 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-board"
-version = "1.2.0"
+version = "1.2.1"
 description = "Forum-style board over agent-cli — each post is an agent-cli session + workspace"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "httpx>=0.27",
+    # SQLite fallback for Python builds without the stdlib ``sqlite3`` extension
+    # (locked-down servers). The ``agent_board._sqlite`` shim prefers stdlib
+    # sqlite3 and uses this only when absent. Wheel exists for x86_64 Linux;
+    # other platforms ship sqlite3 in their stdlib (macOS/conda/system Python).
+    "pysqlite3-binary>=0.5; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]

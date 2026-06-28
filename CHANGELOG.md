@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.1] - 2026-06-29
+
+### Fixed
+
+- **sqlite3 없는 Python 에서 `No module named '_sqlite3'` 로 기동 실패** — `store.py`
+  가 `import sqlite3` 를 모듈 최상단에 둬, stdlib sqlite3 확장이 없는 Python(잠금
+  서버·최소 빌드)에서 보드가 안 떴음. `agent_board._sqlite` shim(stdlib sqlite3 →
+  `pysqlite3-binary` 폴백)을 거치도록 변경 + `pysqlite3-binary` 의존성 추가(x86_64
+  Linux). agent-cli 와 동일한 해법.
+
 ## [1.2.0] - 2026-06-28
 
 ### Added
