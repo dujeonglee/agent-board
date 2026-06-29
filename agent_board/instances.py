@@ -169,7 +169,15 @@ def spawn(config: Config, post: Post, *, port: int, token: str) -> subprocess.Po
     # it is independent of the board — it self-reaps on idle (--idle-timeout),
     # survives a board restart (re-attached via web.json), and a board Ctrl+C
     # does not abruptly SIGINT it. Explicit teardown goes through stop_instance.
-    return subprocess.Popen(cmd, cwd=str(workspace), start_new_session=True)
+    #
+    # stdin=DEVNULL: spawn NON-interactively. Otherwise the child inherits the
+    # board's terminal stdin, agent-cli sees a TTY, and (when a prior session
+    # exists in the workspace) it BLOCKS on a "Resume it? [y/N]" prompt — the
+    # server never starts, web.json is never written, await_ready times out and
+    # /open returns 500. A null stdin makes agent-cli start fresh deterministically.
+    return subprocess.Popen(
+        cmd, cwd=str(workspace), start_new_session=True, stdin=subprocess.DEVNULL
+    )
 
 
 def await_ready(

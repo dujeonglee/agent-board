@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.2] - 2026-06-29
+
+### Fixed
+
+- **열기 500 — spawn 된 agent-cli 가 "Resume? [y/N]" 프롬프트로 멈춤** — 인스턴스를
+  spawn 할 때 stdin 을 안 끊어, 자식이 보드 터미널 stdin 을 물려받아 TTY 로 인식 →
+  워크스페이스에 기존 세션이 있으면 agent-cli 가 resume 여부를 대화형으로 물으며 블록 →
+  서버 미기동 → web.json 미생성 → `await_ready` 타임아웃 → `/open` 500. spawn 에
+  `stdin=DEVNULL` 추가(비대화형) → agent-cli 가 프롬프트 없이 결정적으로 기동.
+
 ## [1.2.1] - 2026-06-29
 
 ### Fixed

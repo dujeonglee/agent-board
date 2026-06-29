@@ -131,3 +131,22 @@ class TestWebJsonDiscovery:
         ws = tmp_path / "ws"
         _write_web_json(ws, "OLD", pid=999)
         assert instances.discover_session_id_by_pid(ws, 12345) is None
+
+
+class TestSpawnNonInteractive:
+    def test_spawn_detaches_stdin(self, tmp_path, monkeypatch):
+        # stdin=DEVNULL so agent-cli never blocks on a "Resume? [y/N]" prompt
+        # (would otherwise hang the instance → await_ready timeout → /open 500).
+        import subprocess
+
+        captured = {}
+
+        class _FakePopen:
+            def __init__(self, cmd, **kw):
+                captured.update(kw)
+                self.pid = 4321
+
+        monkeypatch.setattr(instances.subprocess, "Popen", _FakePopen)
+        instances.spawn(_cfg(tmp_path), Post("p1", "t"), port=50001, token="x")
+        assert captured["stdin"] is subprocess.DEVNULL
+        assert captured["start_new_session"] is True
