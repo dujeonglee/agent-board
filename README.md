@@ -34,7 +34,8 @@ agent-board
 | `AGENT_BOARD_CLI` | `agent-cli` | spawn 바이너리 |
 | `AGENT_BOARD_IDLE_TIMEOUT` | `300` | 인스턴스 `--idle-timeout` (초). viewer 0 이 이만큼 지속되면 자가종료 |
 
-> access 로그(`/api/posts` 폴링 등)는 콘솔이 아니라 **`<DATA_DIR>/board.log`** (회전,
+> access 로그는 **`<DATA_DIR>/board.log`**(회전), spawn 된 인스턴스 출력은
+> **`<workspace>/.agent-cli/instance.log`** 로 빠집니다 — 콘솔엔 startup·에러만. (이하 board.log:
 > 5MB×3)에 쌓입니다. 콘솔엔 startup·에러만.
 
 ## 사용

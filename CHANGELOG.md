@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1] - 2026-06-29
+
+### Changed
+
+- **spawn 된 agent-cli 인스턴스 출력을 콘솔 대신 파일로** — 인스턴스의 startup 배너
+  (UI/Token/Session)가 보드 콘솔로 inherit 돼 시끄럽던 것을 `<workspace>/.agent-cli/
+  instance.log` 로 리다이렉트(stderr 병합). 디버깅용으로 파일엔 남김.
+
 ## [1.3.0] - 2026-06-29
 
 ### Added

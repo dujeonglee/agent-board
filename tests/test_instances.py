@@ -147,9 +147,14 @@ class TestSpawnNonInteractive:
                 self.pid = 4321
 
         monkeypatch.setattr(instances.subprocess, "Popen", _FakePopen)
-        instances.spawn(_cfg(tmp_path), Post("p1", "t"), port=50001, token="x")
+        cfg = _cfg(tmp_path)
+        instances.spawn(cfg, Post("p1", "t"), port=50001, token="x")
         assert captured["stdin"] is subprocess.DEVNULL
         assert captured["start_new_session"] is True
+        # stdout → a log file (NOT the board console), stderr merged into it
+        assert captured["stdout"] not in (None, subprocess.DEVNULL)
+        assert captured["stderr"] is subprocess.STDOUT
+        assert (cfg.workspace_for("p1") / ".agent-cli" / "instance.log").exists()
 
 
 class TestProxyBypass:

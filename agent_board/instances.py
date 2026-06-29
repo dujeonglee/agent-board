@@ -180,9 +180,24 @@ def spawn(config: Config, post: Post, *, port: int, token: str) -> subprocess.Po
     # exists in the workspace) it BLOCKS on a "Resume it? [y/N]" prompt — the
     # server never starts, web.json is never written, await_ready times out and
     # /open returns 500. A null stdin makes agent-cli start fresh deterministically.
-    return subprocess.Popen(
-        cmd, cwd=str(workspace), start_new_session=True, stdin=subprocess.DEVNULL
-    )
+    #
+    # stdout/stderr → a per-workspace log file instead of the board console: the
+    # instance's startup banner (UI/Token/Session) would otherwise clutter the
+    # board's terminal. Kept on disk so it's still there to debug.
+    log_path = workspace / ".agent-cli" / "instance.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logf = log_path.open("a", encoding="utf-8")
+    try:
+        return subprocess.Popen(
+            cmd,
+            cwd=str(workspace),
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+        )
+    finally:
+        logf.close()  # the child has its own dup of the fd; the parent's isn't needed
 
 
 def await_ready(
