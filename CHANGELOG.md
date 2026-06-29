@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.3] - 2026-06-29
+
+### Fixed
+
+- **열기 500 — 사내 HTTP 프록시가 loopback 호출을 가로채던 문제** — `HTTP_PROXY` 가
+  설정된 사내 환경에서 보드의 내부 httpx 호출(health 체크·프록시·keepalive·Caddy admin)이
+  `127.0.0.1` 요청까지 프록시로 보내, 프록시가 "Access Denied" 회신 → health 실패 →
+  `await_ready` 타임아웃 → `/open` 500. 모든 내부 httpx 클라이언트에 `trust_env=False`
+  추가 → loopback 은 프록시를 우회. (임시 회피: `export NO_PROXY=127.0.0.1,localhost`)
+
 ## [1.2.2] - 2026-06-29
 
 ### Fixed

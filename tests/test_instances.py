@@ -150,3 +150,41 @@ class TestSpawnNonInteractive:
         instances.spawn(_cfg(tmp_path), Post("p1", "t"), port=50001, token="x")
         assert captured["stdin"] is subprocess.DEVNULL
         assert captured["start_new_session"] is True
+
+
+class TestProxyBypass:
+    def test_health_info_ignores_http_proxy(self, monkeypatch):
+        # A corporate HTTP_PROXY must NOT intercept loopback health checks
+        # (it "Access Denied"s 127.0.0.1 → await_ready timeout → /open 500).
+        import http.server
+        import socket
+        import threading
+
+        class _H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/api/health":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"status":"ok","busy":false}')
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        srv = http.server.HTTPServer(("127.0.0.1", port), _H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            # point the proxy at a dead address — if health_info honoured it,
+            # the request would fail; trust_env=False must bypass it.
+            monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+            monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+            info = instances.health_info(port)
+            assert info == {"status": "ok", "busy": False}
+        finally:
+            srv.shutdown()

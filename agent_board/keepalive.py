@@ -75,7 +75,8 @@ def make_sse_connect(
         if port is None:
             return
         url = f"http://127.0.0.1:{port}/api/stream"
-        async with httpx.AsyncClient(timeout=None) as client:
+        # trust_env=False: loopback SSE must bypass any corporate HTTP proxy.
+        async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
             async with client.stream("GET", url) as resp:
                 async for _ in resp.aiter_raw():
                     pass  # drain + hold the connection open (we are a viewer)

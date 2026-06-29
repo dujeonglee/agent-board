@@ -29,8 +29,10 @@ _DROP_RESP_HEADERS = {
 class BoardProxyRouter:
     def __init__(self):
         self._routes: dict[str, int] = {}  # post_id → upstream port
-        # one shared client (connection pooling); no timeout so SSE can hang open
-        self._client = httpx.AsyncClient(timeout=None)
+        # one shared client (connection pooling); no timeout so SSE can hang
+        # open. trust_env=False: loopback proxying must bypass any corporate
+        # HTTP proxy (which "Access Denied"s 127.0.0.1).
+        self._client = httpx.AsyncClient(timeout=None, trust_env=False)
 
     # ── Router interface ────────────────────────────────────
     def ensure_route(self, post_id: str, port: int) -> None:
@@ -117,7 +119,8 @@ class CaddyRouter:
         self._admin = admin_url.rstrip("/")
         self._server = server
         self._basic_auth = basic_auth  # "username:bcrypt-hash" or ""
-        self._client = client or httpx.Client(timeout=5.0)
+        # trust_env=False: Caddy admin API is on loopback — bypass corporate proxy.
+        self._client = client or httpx.Client(timeout=5.0, trust_env=False)
 
     def mount(self, app: FastAPI) -> None:
         # Caddy serves /s/<id>; the board does not. Nothing to mount.

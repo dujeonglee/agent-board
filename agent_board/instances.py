@@ -140,7 +140,12 @@ def health_info(port: int, *, timeout: float = 1.0) -> dict | None:
     """The instance's /api/health body (``{status, busy}``), or None if it
     doesn't answer 200 on loopback."""
     try:
-        r = httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=timeout)
+        # trust_env=False: never route this loopback call through a corporate
+        # HTTP proxy (HTTP_PROXY env) — the proxy returns "Access Denied" for
+        # 127.0.0.1, which made health checks fail → await_ready timeout → 500.
+        r = httpx.get(
+            f"http://127.0.0.1:{port}/api/health", timeout=timeout, trust_env=False
+        )
         if r.status_code != 200:
             return None
         return r.json()
