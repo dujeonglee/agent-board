@@ -174,6 +174,10 @@ def create_app(
         keepalive = KeepAliveManager(
             connect=make_sse_connect(default_port_for(config, store))
         )
+    # let the board-proxy revive a stopped instance when its old /s/<id> URL is
+    # hit (idle-reaped → reopen on access). Caddy mode returns 502 instead.
+    if hasattr(router, "set_reopen"):
+        router.set_reopen(orchestrator.open)
 
     @asynccontextmanager
     async def lifespan(_app):

@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0] - 2026-06-29
+
+### Added
+
+- **멈춘 인스턴스 자동 revive** — idle-reap 으로 종료된 글의 옛 `/s/<id>` URL 로 다시
+  접속하면, 보드 프록시가 인스턴스를 **재spawn(resume) 후 프록시**한다. 라우트가 없으면
+  접속 시 revive, 죽은 포트면(ConnectError) 한 번 revive+재시도(GET/HEAD). "접속하면
+  resume" 설계가 보드 목록뿐 아니라 **직접 URL 접속**에도 적용됨. (caddy 모드는 Caddy 가
+  502 반환.)
+
+### Fixed
+
+- **멈춘 인스턴스 옛 URL 접속 시 unhandled exception(500)** — board-proxy 가 죽은
+  포트로 프록시하다 `ConnectError` 가 안 잡혀 ASGI 예외가 났음. 이제 revive 또는 깨끗한
+  502/503(예외 아님).
+
 ## [1.2.3] - 2026-06-29
 
 ### Fixed

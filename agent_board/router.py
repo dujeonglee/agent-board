@@ -33,6 +33,10 @@ class BoardProxyRouter:
         # open. trust_env=False: loopback proxying must bypass any corporate
         # HTTP proxy (which "Access Denied"s 127.0.0.1).
         self._client = httpx.AsyncClient(timeout=None, trust_env=False)
+        # async reopen(post_id) — re-spawn/attach a stopped instance so hitting
+        # the old /s/<id> URL after idle-reap revives it (wired to the
+        # orchestrator's open). Must register the route before returning.
+        self._reopen = None
 
     # ── Router interface ────────────────────────────────────
     def ensure_route(self, post_id: str, port: int) -> None:
@@ -41,8 +45,22 @@ class BoardProxyRouter:
     def remove_route(self, post_id: str) -> None:
         self._routes.pop(post_id, None)
 
+    def set_reopen(self, reopen) -> None:
+        self._reopen = reopen
+
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def _revive(self, post_id: str) -> int | None:
+        """Re-open a stopped instance and return its fresh port (None if there's
+        no reopen hook, the post is unknown, or the spawn failed)."""
+        if self._reopen is None:
+            return None
+        try:
+            await self._reopen(post_id)  # spawn-or-attach + ensure_route
+        except Exception:
+            return None
+        return self._routes.get(post_id)
 
     # ── mount the catch-all proxy on the board app ──────────
     def mount(self, app: FastAPI) -> None:
@@ -60,18 +78,42 @@ class BoardProxyRouter:
             return RedirectResponse(f"/s/{post_id}/")
 
     async def _handle(self, request: Request, post_id: str, path: str):
-        port = self._routes.get(post_id)
+        # No route (board restarted / never opened here) → try to revive.
+        port = self._routes.get(post_id) or await self._revive(post_id)
         if port is None:
-            raise HTTPException(status_code=404, detail="post not running")
+            raise HTTPException(
+                status_code=503, detail="instance stopped — reopen from the board"
+            )
+        try:
+            return await self._proxy(request, post_id, path, port, body_stream=True)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # Stale route: the instance was idle-reaped, so the old /s/<id> URL
+            # now points at a dead port. Revive once and retry — but only for a
+            # safe method (no request body to re-stream); a POST to a dead
+            # instance just surfaces the error (reload reopens it).
+            if request.method in ("GET", "HEAD"):
+                port = await self._revive(post_id)
+                if port is not None:
+                    return await self._proxy(
+                        request, post_id, path, port, body_stream=False
+                    )
+            raise HTTPException(
+                status_code=502, detail="instance stopped — reopen from the board"
+            ) from None
 
+    async def _proxy(
+        self, request: Request, post_id: str, path: str, port: int, *, body_stream: bool
+    ):
         url = httpx.URL(f"http://127.0.0.1:{port}/{path}")
         if request.url.query:
             url = url.copy_with(query=request.url.query.encode("utf-8"))
         fwd_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
 
-        # stream the request body UP (uploads) and the response DOWN (SSE).
+        # stream the request body UP (uploads) and the response DOWN (SSE). On a
+        # retry (GET/HEAD) the body is already gone, so skip it.
+        content = request.stream() if body_stream else None
         upstream_req = self._client.build_request(
-            request.method, url, headers=fwd_headers, content=request.stream()
+            request.method, url, headers=fwd_headers, content=content
         )
         upstream = await self._client.send(upstream_req, stream=True)
 
