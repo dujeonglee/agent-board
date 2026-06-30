@@ -36,10 +36,13 @@ header h1 { margin: 0; font-size: 18px; }
   padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
   background: #4d8eff; color: #fff; font-weight: 600;
 }
-.model-tag {
-  margin-left: 8px; font-size: 11px; font-weight: 500; color: #9aa1ad;
-  border: 1px solid rgba(255,255,255,.12); border-radius: 5px; padding: 1px 6px;
+.model-sel {
+  font-size: 11px; color: #c8cdd6; background: #1b2029;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 5px; padding: 2px 4px;
+  max-width: 140px;
 }
+.model-sel:disabled { opacity: .5; cursor: not-allowed; }
+.viewers { font-size: 11px; color: #9aa1ad; }
 
 #posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 880px; }
 .empty { color: #7d8595; padding: 24px 0; }

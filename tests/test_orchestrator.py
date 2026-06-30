@@ -22,13 +22,23 @@ class FakeBackend:
     """Stand-in for instances.*: records spawns, fakes readiness."""
 
     def __init__(
-        self, *, already_up=False, port=50001, session_id="NEWSID", token="TOK"
+        self,
+        *,
+        already_up=False,
+        port=50001,
+        session_id="NEWSID",
+        token="TOK",
+        status=None,
+        viewers=0,
     ):
         self.already_up = already_up
         self.port = port
         self.session_id = session_id
         self.token = token
         self.spawns = 0
+        self.stops = 0
+        self.status = status  # override for the change_model gate
+        self.viewers = viewers
         self.routes: dict[str, int] = {}
 
     # instances-like surface
@@ -46,9 +56,23 @@ class FakeBackend:
     def pick_free_port(self):
         return self.port
 
+    def live_state(self, post):
+        st = self.status or (
+            "running" if (self.already_up and post.session_id) else "idle"
+        )
+        return {"status": st, "awaiting_input": False, "viewers": self.viewers}
+
+    def stop_instance(self, post):
+        self.already_up = False  # now down → info() returns None
+        self.stops += 1
+        return True
+
     # router-like surface
     def ensure_route(self, post_id, port):
         self.routes[post_id] = port
+
+    def remove_route(self, post_id):
+        self.routes.pop(post_id, None)
 
 
 @pytest.fixture
@@ -130,3 +154,83 @@ async def test_open_missing_post_raises(setup):
     orch = Orchestrator(cfg, store, backend=FakeBackend())
     with pytest.raises(KeyError):
         await orch.open("nope")
+
+
+class TestChangeModel:
+    """Per-post model change gate: allowed only when nobody is watching
+    (down, or up-and-idle with 0 human viewers). On success the model is
+    persisted + the instance stopped (kill → DEAD); force-active respawns."""
+
+    @pytest.mark.asyncio
+    async def test_dead_stores_model_no_spawn(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=False)  # status idle (down)
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t", model_id="old")
+        res = await orch.change_model(post.post_id, "new")
+        assert res == {"ok": True, "changed": True}
+        assert store.get(post.post_id).model_id == "new"
+        assert be.spawns == 0 and be.stops == 0  # lazy: next open uses it
+
+    @pytest.mark.asyncio
+    async def test_idle_no_viewers_stops_then_dead(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=True, status="running", viewers=0)
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t", model_id="old")
+        store.set_session_id(post.post_id, "S1")
+        be.ensure_route(post.post_id, be.port)
+        res = await orch.change_model(post.post_id, "new")
+        assert res["changed"] is True
+        assert store.get(post.post_id).model_id == "new"
+        assert be.stops == 1 and be.spawns == 0  # killed, left DEAD
+        assert post.post_id not in be.routes
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_busy(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=True, status="working", viewers=0)
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t", model_id="old")
+        store.set_session_id(post.post_id, "S1")
+        res = await orch.change_model(post.post_id, "new")
+        assert res == {"ok": False, "reason": "busy"}
+        assert store.get(post.post_id).model_id == "old"  # unchanged
+        assert be.stops == 0
+
+    @pytest.mark.asyncio
+    async def test_rejected_when_viewers_present(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=True, status="running", viewers=2)
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t", model_id="old")
+        store.set_session_id(post.post_id, "S1")
+        res = await orch.change_model(post.post_id, "new")
+        assert res == {"ok": False, "reason": "viewers"}
+        assert store.get(post.post_id).model_id == "old"
+
+    @pytest.mark.asyncio
+    async def test_force_active_excludes_keepalive_and_respawns(self, setup):
+        cfg, store = setup
+        # only the board's own keep-alive viewer is connected (viewers=1)
+        be = FakeBackend(already_up=True, status="running", viewers=1)
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t", model_id="old")
+        store.set_session_id(post.post_id, "S1")
+        store.set_force_active(post.post_id, True)
+        be.ensure_route(post.post_id, be.port)
+        res = await orch.change_model(post.post_id, "new")
+        assert res["changed"] is True  # keep-alive viewer excluded → allowed
+        assert store.get(post.post_id).model_id == "new"
+        assert be.stops == 1 and be.spawns == 1  # killed AND brought back up
+        assert be.routes[post.post_id] == be.port  # re-routed
+
+    @pytest.mark.asyncio
+    async def test_unchanged_is_noop(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=True, status="working")  # busy, but no-op wins
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t", model_id="same")
+        res = await orch.change_model(post.post_id, "same")
+        assert res == {"ok": True, "changed": False, "reason": "unchanged"}
+        assert be.stops == 0

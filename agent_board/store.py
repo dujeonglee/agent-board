@@ -111,6 +111,13 @@ class Store:
         )
         self._conn.commit()
 
+    def set_model(self, post_id: str, model_id: str | None) -> None:
+        self._conn.execute(
+            "UPDATE posts SET model_id = ? WHERE post_id = ?",
+            (model_id, post_id),
+        )
+        self._conn.commit()
+
     def set_force_active(self, post_id: str, enabled: bool) -> None:
         self._conn.execute(
             "UPDATE posts SET force_active = ? WHERE post_id = ?",

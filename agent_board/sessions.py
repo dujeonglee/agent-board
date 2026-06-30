@@ -48,17 +48,18 @@ def last_query(workspace: Path, session_id: str | None) -> str | None:
     return rec["text"] if rec else None
 
 
-_IDLE = {"status": "idle", "awaiting_input": False}
+_IDLE = {"status": "idle", "awaiting_input": False, "viewers": 0}
 
 
 def live_state(workspace: Path, session_id: str | None) -> dict:
-    """``{"status", "awaiting_input"}`` from ONE /api/health call:
+    """``{"status", "awaiting_input", "viewers"}`` from ONE /api/health call:
 
     - status: ``working`` (LLM responding) / ``running`` (up, idle) / ``idle`` (down),
-    - awaiting_input: an ask/confirm prompt is waiting for a reply.
+    - awaiting_input: an ask/confirm prompt is waiting for a reply,
+    - viewers: live browser subscribers on the instance (0 when down).
 
-    agent-cli >= 4.17.2 supplies ``busy``; >= 4.17.5 supplies ``awaiting_input``
-    (missing fields degrade gracefully)."""
+    agent-cli >= 4.17.2 supplies ``busy``; >= 4.17.5 ``awaiting_input``;
+    >= 4.17.11 ``viewers`` (missing fields degrade gracefully)."""
     if not session_id:
         return dict(_IDLE)
     info = instances.read_web_json(workspace, session_id)
@@ -73,6 +74,7 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     return {
         "status": "working" if health.get("busy") else "running",
         "awaiting_input": bool(health.get("awaiting_input")),
+        "viewers": int(health.get("viewers") or 0),
     }
 
 

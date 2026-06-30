@@ -15,14 +15,37 @@
     localStorage.setItem("agentboard_same_tab", $sameTab.checked ? "1" : "0")
   );
 
+  let MODELS = []; // registry, shared by the new-post form + per-post dropdowns
+
   async function loadModels() {
-    const models = await fetch("/api/models").then((r) => r.json());
-    models.forEach((m) => {
+    MODELS = await fetch("/api/models").then((r) => r.json());
+    MODELS.forEach((m) => {
       const o = document.createElement("option");
       o.value = m.id;
       o.textContent = m.provider ? `${m.id} (${m.provider})` : m.id;
       $model.appendChild(o);
     });
+  }
+
+  // per-post model <select>: current model selected, disabled when the gate
+  // (busy / someone watching) forbids a change — with a reason in the tooltip.
+  function modelSelect(p) {
+    const opts = ['<option value="">(기본)</option>'].concat(
+      MODELS.map(
+        (m) =>
+          `<option value="${esc(m.id)}"${m.id === p.model_id ? " selected" : ""}>${esc(m.id)}</option>`
+      )
+    );
+    let reason = "모델 변경";
+    if (!p.model_changeable) {
+      reason =
+        p.status === "working"
+          ? "응답 중 — 변경 불가"
+          : p.viewers > 0
+            ? `접속자 ${p.viewers}명 — 변경 불가`
+            : "변경 불가";
+    }
+    return `<select class="model-sel" title="${reason}"${p.model_changeable ? "" : " disabled"}>${opts.join("")}</select>`;
   }
 
   const esc = (s) =>
@@ -61,18 +84,20 @@
     const st = p.awaiting_input
       ? { cls: "await", label: "❗ 응답 필요" }
       : STATUS[p.status] || STATUS.idle;
+    const up = p.status === "running" || p.status === "working";
     el.innerHTML =
       `<div class="post-main">` +
-      `<div class="post-topic">${esc(p.topic)}` +
-      (p.model_id ? `<span class="model-tag">${esc(p.model_id)}</span>` : "") +
-      `</div>` +
+      `<div class="post-topic">${esc(p.topic)}</div>` +
       `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— 아직 질문 없음</span>"}</div>` +
       `<div class="post-meta">생성 ${fmtDate(p.created_at)}` +
       (p.last_query_at ? ` · 마지막 ${fmtDate(p.last_query_at)}` : "") +
       `</div>` +
       `</div>` +
       `<div class="post-side">` +
-      `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}</span>` +
+      `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}` +
+      (up ? ` <span class="viewers" title="접속자 수">👁 ${p.viewers}</span>` : "") +
+      `</span>` +
+      modelSelect(p) +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
       `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> 유지</label>` +
       `<button class="open" type="button">열기</button>` +
@@ -84,6 +109,11 @@
     el.querySelector(".fa-cb").addEventListener("change", (e) =>
       forceActive(p.post_id, e.target.checked)
     );
+    const sel = el.querySelector(".model-sel");
+    if (sel)
+      sel.addEventListener("change", (e) =>
+        changeModel(p, e.target.value, e.target)
+      );
     return el;
   }
 
@@ -112,6 +142,26 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: enabled }),
     });
+  }
+
+  async function changeModel(p, model_id, selectEl) {
+    const r = await fetch(`/api/posts/${p.post_id}/model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: model_id || null }),
+    });
+    if (!r.ok) {
+      // 409 = gate refused (state changed between render and click); revert + explain
+      let why = "변경 실패";
+      if (r.status === 409) {
+        const d = (await r.json()).detail;
+        why = d === "busy" ? "응답 중" : d === "viewers" ? "접속자 있음" : "변경 불가";
+      }
+      alert("모델 변경 실패: " + why);
+      selectEl.value = p.model_id || "";
+      return;
+    }
+    load(); // refresh — model + status (kill→DEAD, or force-active respawn)
   }
 
   async function del(p) {

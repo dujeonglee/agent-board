@@ -156,4 +156,15 @@ class TestStatus:
         assert sessions.live_state(tmp_path / "ws", None) == {
             "status": "idle",
             "awaiting_input": False,
+            "viewers": 0,
         }
+
+    def test_live_state_reports_viewers(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            sessions.instances,
+            "health_info",
+            lambda port: {"busy": False, "awaiting_input": False, "viewers": 3},
+        )
+        assert sessions.live_state(ws, "S1")["viewers"] == 3

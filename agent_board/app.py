@@ -115,11 +115,21 @@ class ForceActive(BaseModel):
     enabled: bool
 
 
+class SetModel(BaseModel):
+    model_id: str | None = None
+
+
 def _post_view(config: Config, store: Store, post) -> dict:
     """A post + its derived (live) fields for the list."""
     ws = config.workspace_for(post.post_id)
     lq = sessions.last_query_record(ws, post.session_id)
     state = sessions.live_state(ws, post.session_id)
+    status = state["status"]
+    # human viewers = live subscribers minus the force-active keep-alive's own one
+    viewers = max(0, state.get("viewers", 0) - (1 if post.force_active else 0))
+    # model is changeable only when nobody is watching: down, or up-and-idle with
+    # 0 human viewers (mirrors orchestrator.change_model's gate).
+    model_changeable = status == "idle" or (status == "running" and viewers == 0)
     return {
         "post_id": post.post_id,
         "topic": post.topic,
@@ -128,8 +138,10 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "created_at": post.created_at,
         "last_query": lq["text"] if lq else None,
         "last_query_at": lq.get("ts") if lq else None,
-        "status": state["status"],
+        "status": status,
         "awaiting_input": state["awaiting_input"],
+        "viewers": viewers,
+        "model_changeable": model_changeable,
     }
 
 
@@ -250,6 +262,20 @@ def create_app(
         except KeyError as e:  # belt-and-suspenders (race: deleted mid-open)
             raise HTTPException(status_code=404, detail="no such post") from e
         return JSONResponse({"url": url})
+
+    @app.post("/api/posts/{post_id}/model")
+    async def change_model(post_id: str, body: SetModel):
+        if store.get(post_id) is None:
+            raise HTTPException(status_code=404, detail="no such post")
+        try:
+            result = await orchestrator.change_model(post_id, body.model_id)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail="no such post") from e
+        if not result["ok"]:
+            # blocked by the gate (busy / someone watching) — 409 Conflict so the
+            # frontend can revert the dropdown and explain why.
+            raise HTTPException(status_code=409, detail=result["reason"])
+        return JSONResponse(result)
 
     @app.post("/api/posts/{post_id}/force_active")
     async def set_force_active(post_id: str, body: ForceActive):

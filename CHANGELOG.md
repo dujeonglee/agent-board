@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0] - 2026-06-30
+
+### Added
+
+- **게시물별 모델 변경 (드롭다운)** — 게시글 행의 모델 드롭다운으로 언제든 모델을 바꾼다.
+  여러 명이 쓰는 환경이라 **아무도 보고 있지 않을 때만** 허용: 인스턴스가 꺼져 있거나(idle),
+  떠 있어도 접속자 0 + 응답 중 아님(running). 응답 중(busy)이거나 접속자가 있으면 드롭다운이
+  **비활성**(`POST /api/posts/{id}/model`, 거부 시 409 `busy`/`viewers`). 변경 시 꺼진 글은
+  다음 열기에 새 모델로, 떠 있는 글은 멈춰(kill→DEAD) 다음 열기에 적용 — **force-active 글은
+  즉시 새 모델로 재시작**(유지 약속 보존). 세션은 `--resume` 으로 이어져 맥락 유지 + 모델만 교체.
+- **실시간 접속자 수 표시** — 목록 카드에 👁 N (라이브 SSE 구독자, 5초 폴링). force-active 의
+  보드 keepalive 1명은 제외한 실제 사람 수. agent-cli ≥ 4.17.11(`/api/health.viewers`) 필요.
+
+### Changed
+
+- `GET /api/posts` 각 글에 `viewers`·`model_changeable` 추가. `Store.set_model`,
+  `orchestrator.change_model`(per-post lock + apply 직전 게이트 재확인) 신설.
+
 ## [1.3.1] - 2026-06-29
 
 ### Changed

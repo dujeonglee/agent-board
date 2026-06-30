@@ -15,12 +15,18 @@ from agent_board.store import Store
 
 
 class FakeOrch:
-    def __init__(self):
+    def __init__(self, change_result=None):
         self.opened = []
+        self.model_changes = []
+        self._change_result = change_result or {"ok": True, "changed": True}
 
     async def open(self, post_id):
         self.opened.append(post_id)
         return f"/s/{post_id}/"
+
+    async def change_model(self, post_id, model_id):
+        self.model_changes.append((post_id, model_id))
+        return self._change_result
 
 
 class FakeKeepalive:
@@ -238,3 +244,36 @@ class TestUiWired:
         assert "window.open" in js
         assert "라이브러리 만들기" in html  # topic placeholder
         assert "글 하나 = agent-cli 세션" not in html  # hint removed
+
+
+class TestChangeModelApi:
+    def test_change_model_ok(self, tmp_path):
+        orch = FakeOrch()
+        _, _, c = _client(tmp_path, orch=orch)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        r = c.post(f"/api/posts/{pid}/model", json={"model_id": "Qwen3.6"})
+        assert r.status_code == 200
+        assert orch.model_changes == [(pid, "Qwen3.6")]
+
+    def test_change_model_blocked_is_409(self, tmp_path):
+        # gate refused (busy / someone watching) → 409 with the reason
+        orch = FakeOrch(change_result={"ok": False, "reason": "busy"})
+        _, _, c = _client(tmp_path, orch=orch)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        r = c.post(f"/api/posts/{pid}/model", json={"model_id": "x"})
+        assert r.status_code == 409 and r.json()["detail"] == "busy"
+
+    def test_change_model_unknown_post_404(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        assert (
+            c.post("/api/posts/nope/model", json={"model_id": "x"}).status_code == 404
+        )
+
+    def test_post_view_exposes_viewers_and_changeable(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        p = c.get("/api/posts").json()[0]
+        assert p["post_id"] == pid
+        assert p["viewers"] == 0
+        # never opened → idle (down) → model is changeable
+        assert p["model_changeable"] is True
