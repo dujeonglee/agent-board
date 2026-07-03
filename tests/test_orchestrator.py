@@ -40,6 +40,7 @@ class FakeBackend:
         self.status = status  # override for the change_model gate
         self.viewers = viewers
         self.routes: dict[str, int] = {}
+        self.last_spawn_token = None  # records the token the last spawn used
 
     # instances-like surface
     def info(self, post):
@@ -50,6 +51,8 @@ class FakeBackend:
 
     def spawn_and_wait(self, post, *, port, token):
         self.spawns += 1
+        self.last_spawn_token = token
+        self.token = token  # info() now reports the token this spawn used
         self.already_up = True  # instance is now running (info will see it)
         return self.session_id  # discovered session_id
 
@@ -234,3 +237,61 @@ class TestChangeModel:
         res = await orch.change_model(post.post_id, "same")
         assert res == {"ok": True, "changed": False, "reason": "unchanged"}
         assert be.stops == 0
+
+
+class TestRestart:
+    """Force-restart: stop the running instance and respawn — always allowed
+    (no busy/viewer gate), reusing the token (seamless reconnect) and resuming
+    the same session."""
+
+    @pytest.mark.asyncio
+    async def test_up_stops_and_respawns_reusing_token(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=True, token="TOK", session_id="S1")
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t")
+        store.set_session_id(post.post_id, "S1")
+        be.ensure_route(post.post_id, be.port)
+
+        url = await orch.restart(post.post_id)
+
+        assert be.stops == 1 and be.spawns == 1  # killed then brought back
+        assert be.last_spawn_token == "TOK"  # SAME token reused
+        assert "token=TOK" in url
+        assert be.routes[post.post_id] == be.port  # re-routed
+        assert store.get(post.post_id).session_id == "S1"  # same session resumed
+        assert store.get(post.post_id).last_opened_at  # touched
+
+    @pytest.mark.asyncio
+    async def test_down_just_spawns_no_stop(self, setup):
+        cfg, store = setup
+        be = FakeBackend(already_up=False, session_id="S1")
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t")
+        store.set_session_id(post.post_id, "S1")
+
+        url = await orch.restart(post.post_id)
+
+        assert be.stops == 0 and be.spawns == 1  # nothing to kill, just start
+        assert "token=" in url
+
+    @pytest.mark.asyncio
+    async def test_always_allowed_even_when_busy(self, setup):
+        cfg, store = setup
+        # working + viewers present: change_model would refuse, restart must not
+        be = FakeBackend(already_up=True, status="working", viewers=3, token="T")
+        orch = Orchestrator(cfg, store, backend=be)
+        post = store.create_post(topic="t")
+        store.set_session_id(post.post_id, "S1")
+        be.ensure_route(post.post_id, be.port)
+
+        await orch.restart(post.post_id)
+
+        assert be.stops == 1 and be.spawns == 1  # forced through regardless
+
+    @pytest.mark.asyncio
+    async def test_missing_post_raises(self, setup):
+        cfg, store = setup
+        orch = Orchestrator(cfg, store, backend=FakeBackend())
+        with pytest.raises(KeyError):
+            await orch.restart("nope")

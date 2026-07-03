@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0] - 2026-07-03
+
+### Added
+
+- **🔄 방별 재실행 버튼** — 게시글 카드의 🔄 로 그 방의 agent-cli 인스턴스를 **강제
+  재시작**(stop → respawn)한다. 새로 설치한 agent-cli 를 반영할 때 쓴다. **게이트 없이
+  언제든** 동작(응답 중·접속자 있어도 — `change_model` 과 달리 막지 않음). 죽이기 전
+  web.json 의 **토큰을 재사용**해 재spawn 하므로 이미 열려 있던 뷰어는 URL(`?token=`)이
+  그대로 유효해 자동 재연결되고, `--resume` 로 **같은 세션**을 이어간다. 버튼은 인스턴스가
+  떠 있을 때만 노출(꺼진 글은 "열기"가 이미 새로 spawn). `POST /api/posts/{id}/restart`,
+  `Orchestrator.restart`(per-post lock, `_ensure_up(reuse_token=…)` 신설).
+
 ## [1.4.0] - 2026-06-30
 
 ### Added

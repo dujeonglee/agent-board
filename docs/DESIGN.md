@@ -80,6 +80,7 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
 | POST | `/api/posts` | 새 글 `{topic, directive?}` → 생성 (workspace 자동) |
 | DELETE | `/api/posts/{id}` | 글 삭제 + 그 글의 워크스페이스 디렉토리 삭제(보드 소유) |
 | POST | `/api/posts/{id}/open` | spawn-or-attach → 라우트 등록 → `{url}` 반환(프론트 리다이렉트) |
+| POST | `/api/posts/{id}/restart` | 강제 재시작 = stop + respawn → `{url}` 반환. **게이트 없음**(busy/viewer 무시 — 새로 설치한 agent-cli 반영 목적). **토큰 재사용**(열려 있던 뷰어 자동 재연결) + `--resume` 로 같은 세션 유지 |
 | POST | `/api/posts/{id}/force_active` | `{enabled}` 토글 |
 | POST | `/api/posts/{id}/model` | `{model_id}` 변경 — 게이트 통과 200, 거부 409(`detail`=`busy`/`viewers`) (§16) |
 

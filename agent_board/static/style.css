@@ -85,6 +85,11 @@ header h1 { margin: 0; font-size: 18px; }
   background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
 }
 .post-side .del:hover { color: #f85149; border-color: #f85149; }
+.post-side .restart {
+  padding: 6px 9px; border-radius: 8px; cursor: pointer;
+  background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
+}
+.post-side .restart:hover { color: #4d8eff; border-color: #4d8eff; }
 
 /* ── mobile / narrow screens ── */
 @media (max-width: 640px) {

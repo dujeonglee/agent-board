@@ -100,12 +100,21 @@
       modelSelect(p) +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
       `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> 유지</label>` +
+      // 🔄 restart only when the instance is up — a down room's "열기" already
+      // spawns fresh, so restart is the ONLY way to force-replace a running
+      // process (e.g. to pick up an agent-cli update).
+      (up
+        ? `<button class="restart" type="button" title="재실행 — 프로세스를 재시작(새로 설치한 agent-cli 반영). 세션은 이어집니다.">🔄</button>`
+        : "") +
       `<button class="open" type="button">열기</button>` +
       `<button class="del" type="button" title="삭제(영구)">🗑</button>` +
       `</div>`;
 
     el.querySelector(".open").addEventListener("click", () => open(p.post_id));
     el.querySelector(".del").addEventListener("click", () => del(p));
+    const restartBtn = el.querySelector(".restart");
+    if (restartBtn)
+      restartBtn.addEventListener("click", () => restart(p.post_id));
     el.querySelector(".fa-cb").addEventListener("change", (e) =>
       forceActive(p.post_id, e.target.checked)
     );
@@ -134,6 +143,18 @@
     } else {
       win.location.href = url;
     }
+  }
+
+  async function restart(post_id) {
+    // Force-restart (always allowed — no busy/viewer gate). The reused token
+    // means anyone already in the room reconnects on their own; here we just
+    // refresh the board so the status reflects the respawn.
+    const r = await fetch(`/api/posts/${post_id}/restart`, { method: "POST" });
+    if (!r.ok) {
+      alert("재실행 실패: " + r.status);
+      return;
+    }
+    load();
   }
 
   async function forceActive(post_id, enabled) {

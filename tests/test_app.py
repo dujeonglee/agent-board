@@ -17,12 +17,17 @@ from agent_board.store import Store
 class FakeOrch:
     def __init__(self, change_result=None):
         self.opened = []
+        self.restarted = []
         self.model_changes = []
         self._change_result = change_result or {"ok": True, "changed": True}
 
     async def open(self, post_id):
         self.opened.append(post_id)
         return f"/s/{post_id}/"
+
+    async def restart(self, post_id):
+        self.restarted.append(post_id)
+        return f"/s/{post_id}/?token=T"
 
     async def change_model(self, post_id, model_id):
         self.model_changes.append((post_id, model_id))
@@ -146,6 +151,19 @@ class TestPostsApi:
     def test_open_missing_404(self, tmp_path):
         _, _, c = _client(tmp_path)
         assert c.post("/api/posts/nope/open").status_code == 404
+
+    def test_restart_calls_orchestrator(self, tmp_path):
+        orch = FakeOrch()
+        cfg, _, c = _client(tmp_path, orch=orch)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        r = c.post(f"/api/posts/{pid}/restart")
+        assert r.status_code == 200
+        assert r.json()["url"] == f"/s/{pid}/?token=T"
+        assert orch.restarted == [pid]
+
+    def test_restart_missing_404(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        assert c.post("/api/posts/nope/restart").status_code == 404
 
     def test_force_active_on_off(self, tmp_path):
         ka = FakeKeepalive()

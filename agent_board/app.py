@@ -263,6 +263,19 @@ def create_app(
             raise HTTPException(status_code=404, detail="no such post") from e
         return JSONResponse({"url": url})
 
+    @app.post("/api/posts/{post_id}/restart")
+    async def restart_post(post_id: str):
+        # Force-restart the instance (stop + respawn) so a freshly installed
+        # agent-cli is picked up. Always allowed (no busy/viewer gate); the same
+        # token is reused so open viewers reconnect without re-opening.
+        if store.get(post_id) is None:
+            raise HTTPException(status_code=404, detail="no such post")
+        try:
+            url = await orchestrator.restart(post_id)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail="no such post") from e
+        return JSONResponse({"url": url})
+
     @app.post("/api/posts/{post_id}/model")
     async def change_model(post_id: str, body: SetModel):
         if store.get(post_id) is None:

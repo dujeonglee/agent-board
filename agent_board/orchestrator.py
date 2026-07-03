@@ -78,15 +78,19 @@ class Orchestrator:
     def _lock(self, post_id: str) -> asyncio.Lock:
         return self._locks.setdefault(post_id, asyncio.Lock())
 
-    async def _ensure_up(self, post: Post) -> tuple[int, str]:
+    async def _ensure_up(
+        self, post: Post, *, reuse_token: str | None = None
+    ) -> tuple[int, str]:
         """Spawn-or-attach the instance + register its route; return
         ``(port, token)``. The CALLER must hold the post lock. Persists the
         session id on first spawn. Shared by ``open`` and the force-active
-        respawn in ``change_model``."""
+        respawn in ``change_model``. ``reuse_token`` (set by ``restart``) spawns
+        with a specific token instead of a fresh one so already-open viewers
+        reconnect without re-opening; ignored when the instance is already up."""
         info = self.backend.info(post)
         if info is None:  # not up → spawn
             port = self.backend.pick_free_port()
-            token = secrets.token_urlsafe(16)
+            token = reuse_token or secrets.token_urlsafe(16)
             loop = asyncio.get_event_loop()
             sid = await loop.run_in_executor(
                 None,
@@ -109,6 +113,28 @@ class Orchestrator:
         async with self._lock(post_id):
             post = self.store.get(post_id)  # re-read inside the lock
             _, token = await self._ensure_up(post)
+            self.store.touch_opened(post_id)
+        return f"/s/{post_id}/?token={token}"
+
+    async def restart(self, post_id: str) -> str:
+        """Force-restart a post's instance: stop the running process (if any)
+        and respawn, then return its board URL (with token). **Always allowed**
+        — no busy/viewer gate — because the point is to pick up a freshly
+        installed agent-cli. The SAME token is reused so already-open viewers
+        reconnect without re-opening, and the SAME session is resumed
+        (``--resume`` via the persisted session id). ``KeyError`` for an unknown
+        post."""
+        if self.store.get(post_id) is None:
+            raise KeyError(post_id)
+        async with self._lock(post_id):
+            post = self.store.get(post_id)  # re-read inside the lock
+            info = self.backend.info(post)
+            reuse_token = info["token"] if info else None
+            if info is not None:  # up → stop it, drop route, wait until dead
+                self.backend.stop_instance(post)
+                self.backend.remove_route(post_id)
+                await self._await_dead(post)  # don't attach to the dying one
+            _, token = await self._ensure_up(post, reuse_token=reuse_token)
             self.store.touch_opened(post_id)
         return f"/s/{post_id}/?token={token}"
 
