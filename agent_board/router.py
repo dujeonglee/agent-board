@@ -26,6 +26,25 @@ _DROP_RESP_HEADERS = {
 }
 
 
+async def _relay_body(upstream: httpx.Response):
+    """Relay the upstream response body, ending CLEANLY if the instance is
+    stopped mid-stream (force-restart / idle-reap / model change).
+
+    When the peer (agent-cli instance) is killed while an SSE stream
+    (``/api/stream``) is open, it closes the socket without a clean chunked EOF,
+    so httpx raises ``RemoteProtocolError`` ("peer closed connection without
+    sending complete message body") — a ``TransportError`` — on the next read.
+    Letting it bubble out of ``StreamingResponse`` surfaces as an unhandled ASGI
+    500 in the board log. Swallowing it and ending the generator closes the
+    browser's stream gracefully instead; its ``EventSource`` then reconnects
+    through the board and lands on the restarted/revived instance."""
+    try:
+        async for chunk in upstream.aiter_raw():
+            yield chunk
+    except httpx.TransportError:
+        return  # upstream vanished mid-stream — end the relay cleanly
+
+
 class BoardProxyRouter:
     def __init__(self):
         self._routes: dict[str, int] = {}  # post_id → upstream port
@@ -131,7 +150,7 @@ class BoardProxyRouter:
         # reconnect). The background task runs after the response ends (incl.
         # disconnect), outside the cancelled scope, so it always closes.
         return StreamingResponse(
-            upstream.aiter_raw(),
+            _relay_body(upstream),
             status_code=upstream.status_code,
             headers=resp_headers,
             media_type=upstream.headers.get("content-type"),

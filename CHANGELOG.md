@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.1] - 2026-07-03
+
+### Fixed
+
+- **강제 재시작 시 프록시 ASGI 오류(`RemoteProtocolError`) 제거** — 방을 🔄 재실행하면
+  인스턴스가 SSE 스트림(`/api/stream`)이 열린 채 죽는다. 상류가 깨끗한 chunked EOF 없이
+  소켓을 닫아 board 프록시의 httpx 읽기가 `RemoteProtocolError`("peer closed connection
+  without sending complete message body")를 던지고, 그게 `StreamingResponse` 밖으로
+  전파돼 board 로그에 ASGI 500 트레이스백이 찍혔다. `BoardProxyRouter` 가 상류 본문을
+  `_relay_body` 제너레이터로 중계하며 `httpx.TransportError`(=RemoteProtocolError 상위)를
+  삼켜 **스트림을 깨끗이 종료**한다 → 브라우저 EventSource 가 재연결해 재시작된 인스턴스에
+  안착. 재시작뿐 아니라 idle-reap·모델 변경 등 모든 상류 중도 종료에 적용.
+
 ## [1.5.0] - 2026-07-03
 
 ### Added

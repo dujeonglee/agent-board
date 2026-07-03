@@ -58,6 +58,18 @@ def _make_upstream() -> FastAPI:
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
+    @up.get("/api/broken-stream")
+    async def broken_stream():
+        # Emit one chunk, then die mid-stream — stands in for an instance killed
+        # by a force-restart while its SSE stream is open. uvicorn closes the
+        # connection without a clean chunked EOF, so the proxy's httpx read
+        # raises RemoteProtocolError (the bug this reproduces).
+        async def gen():
+            yield b"data: partial\n\n"
+            raise RuntimeError("upstream killed mid-stream")
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
     return up
 
 
@@ -135,6 +147,23 @@ class TestBoardProxyRouter:
                     if line.startswith("data: "):
                         ticks.append(line)
                 assert ticks == ["data: tick0", "data: tick1", "data: tick2"]
+
+    @pytest.mark.asyncio
+    async def test_upstream_disconnect_midstream_ends_cleanly(self, upstream):
+        # Force-restart kills the instance mid-SSE → the proxy must end the
+        # stream cleanly, NOT let RemoteProtocolError bubble as an ASGI 500.
+        router = BoardProxyRouter()
+        router.ensure_route("p1", upstream)
+        app = _board_app(router)
+        transport = httpx.ASGITransport(app=app)  # raises app exceptions by default
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            async with c.stream("GET", "/s/p1/api/broken-stream") as r:
+                assert r.status_code == 200
+                chunks = []
+                # must complete without raising (buggy version raised here)
+                async for chunk in r.aiter_raw():
+                    chunks.append(chunk)
+        assert b"partial" in b"".join(chunks)  # partial data relayed before EOF
 
     @pytest.mark.asyncio
     async def test_no_route_no_reopen_is_503(self, upstream):
