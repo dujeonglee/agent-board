@@ -21,11 +21,10 @@ def store(tmp_path):
 
 class TestStore:
     def test_create_returns_post_with_generated_id(self, store):
-        p = store.create_post(topic="DOOM 만들기", directive="한국어로")
+        p = store.create_post(topic="DOOM 만들기")
         assert isinstance(p, Post)
         assert p.post_id  # non-empty generated id
         assert p.topic == "DOOM 만들기"
-        assert p.directive == "한국어로"
         assert p.session_id is None
         assert p.force_active is False
         assert p.created_at  # stamped

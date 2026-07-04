@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.6.0] - 2026-07-05
+
+### Removed
+
+- **새 글 폼의 DIRECTIVE.md 입력 제거** — 2줄 textarea 로 directive 를 손으로 통짜
+  입력해 글 생성 시 `<workspace>/.agent-cli/DIRECTIVE.md` 로 기록하던 경로를 걷어냈다.
+  이 방식은 사실상 쓰이지 않았고, agent-cli 세션 내 **Directives 드로어**(성격·업무·지침
+  3축 + 템플릿·프리셋·학습)가 같은 파일을 훨씬 나은 UX 로 라이브 편집하므로 **중복이자
+  열등**했다. 프론트(textarea·JS·CSS), 백엔드(`NewPost.directive`, create_post 의
+  DIRECTIVE.md 기록), 데이터 모델(`Post.directive`), 스토어(스키마·`_COLS`·INSERT)에서
+  전부 제거.
+  - **마이그레이션 불필요·resume 안전**: `posts` 테이블의 기존 `directive` 컬럼은 그대로
+    두되 더 이상 SELECT/INSERT 하지 않는다 → 옛 DB 도 그대로 열린다. 기존 워크스페이스에
+    이미 기록된 `DIRECTIVE.md` 파일도 삭제하지 않으므로 그 방들은 계속 적용된다.
+  - **세션별 지시를 넣는 법**: agent-cli 세션의 Directives 드로어, 또는 전역
+    `~/.agent-cli/DIRECTIVE.md`.
+
+### Fixed
+
+- **버전 정합성** — `__init__.__version__` 이 1.5.1 로 뒤처져 있던 것을 pyproject 와
+  맞춰 정정(이번 릴리스에서 1.6.0 로 동기).
+
 ## [1.5.2] - 2026-07-04
 
 ### Fixed

@@ -107,7 +107,6 @@ def build_log_config(log_file: str | Path) -> dict:
 
 class NewPost(BaseModel):
     topic: str
-    directive: str | None = None
     model_id: str | None = None
 
 
@@ -219,16 +218,10 @@ def create_app(
 
     @app.post("/api/posts")
     async def create_post(body: NewPost):
-        post = store.create_post(
-            topic=body.topic, directive=body.directive, model_id=body.model_id
-        )
+        post = store.create_post(topic=body.topic, model_id=body.model_id)
         ws = config.workspace_for(post.post_id)
         try:
             ws.mkdir(parents=True, exist_ok=True)
-            if body.directive:
-                d = ws / ".agent-cli"
-                d.mkdir(parents=True, exist_ok=True)
-                (d / "DIRECTIVE.md").write_text(body.directive, encoding="utf-8")
         except OSError as e:
             store.delete(post.post_id)  # roll back the row (no orphan)
             raise HTTPException(status_code=500, detail=f"workspace: {e}") from e

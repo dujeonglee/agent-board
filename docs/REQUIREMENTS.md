@@ -36,8 +36,9 @@ v1 은 `BoardProxyRouter`(무의존, in-process e2e 테스트 쉬움)로 가고,
 ## 3. v1 범위
 - **글 목록**: 각 글에 **주제 + 마지막 쿼리 + 상태** 표시. (마지막 쿼리는 세션 history,
   상태는 🔵응답 중(LLM 생성)/🟢대기/⚪꺼짐 — `/api/health` 의 busy 로 유도)
-- **새 글**: **주제, DIRECTIVE.md(선택)** 입력. **workspace 는 글마다 자동 생성**(사용자
-  경로 입력 없음 — 5번 참조).
+- **새 글**: **주제**(+ 선택 모델) 입력. **workspace 는 글마다 자동 생성**(사용자
+  경로 입력 없음 — 5번 참조). (DIRECTIVE.md 는 보드가 더 이상 기록하지 않음 — agent-cli
+  세션 내 Directives 드로어에서 관리)
 - **클릭 → 접속**: spawn-or-attach 후 보드 프록시 경유 접속.
 - **idle 자가종료**: agent-cli `--idle-timeout`.
 - **Force-active 체크박스**: 켜면 그 인스턴스를 **계속 살림**(idle 종료 방지), 끄면 해제.
@@ -51,7 +52,6 @@ v1 은 `BoardProxyRouter`(무의존, in-process e2e 테스트 쉬움)로 가고,
   topic:         주제 (사용자 입력)
   workspace:     <WORKSPACES_ROOT>/<post_id>  (post_id 에서 파생, 항상 새 디렉토리)
   session_id:    agent-cli 세션 id (첫 open 에 발견해 저장, 그 전엔 NULL)
-  directive:     DIRECTIVE.md 내용 (선택)
   created_at:    생성 시각
   force_active:  bool
   // 파생(저장 안 함): last_query(세션 history), status(web.json+pid+health)
@@ -69,8 +69,9 @@ v1 은 `BoardProxyRouter`(무의존, in-process e2e 테스트 쉬움)로 가고,
   디렉토리를 점유할 수 없음(구조적 보장).
 - **기존 코드 투입 방법**: 새 글은 빈 워크스페이스로 시작하므로, 코드는 **📁 드로어
   파일/폴더 업로드** 또는 **에이전트에게 `git clone` 지시**로 넣는다.
-- **DIRECTIVE.md(선택)**: 글 생성 시 `<workspace>/.agent-cli/DIRECTIVE.md` 로 기록 →
-  agent-cli 가 해당 세션 프롬프트에 자동 포함.
+- **DIRECTIVE.md**: 보드는 더 이상 기록하지 않는다(글 생성 폼의 입력 제거). 세션별
+  지시는 agent-cli 세션 내 **Directives 드로어**(성격·업무·지침 3축, 템플릿·프리셋·학습)
+  또는 전역 `~/.agent-cli/DIRECTIVE.md` 로 관리한다.
 
 ## 6. 인증 · 접근
 - **개방형**: 누구나 **모든 글을 열람·참여** 가능 (v1 에 글별 소유권/권한 없음).

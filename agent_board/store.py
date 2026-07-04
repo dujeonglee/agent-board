@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS posts (
   post_id        TEXT PRIMARY KEY,
   topic          TEXT NOT NULL,
   session_id     TEXT UNIQUE,
-  directive      TEXT,
   model_id       TEXT,
   force_active   INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
@@ -35,12 +34,11 @@ CREATE INDEX IF NOT EXISTS idx_posts_recent
 
 # additive, nullable migrations for DBs created before a column existed —
 # old rows get NULL (no behaviour change), so resuming an old DB never breaks.
+# (The dropped ``directive`` column is simply left unqueried on old DBs — no
+# migration needed, so an old DB still resumes cleanly.)
 _MIGRATIONS = {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"}
 
-_COLS = (
-    "post_id, topic, session_id, directive, model_id, force_active, "
-    "created_at, last_opened_at"
-)
+_COLS = "post_id, topic, session_id, model_id, force_active, created_at, last_opened_at"
 
 
 def _now() -> str:
@@ -52,7 +50,6 @@ def _row_to_post(row: sqlite3.Row) -> Post:
         post_id=row["post_id"],
         topic=row["topic"],
         session_id=row["session_id"],
-        directive=row["directive"],
         model_id=row["model_id"],
         force_active=bool(row["force_active"]),
         created_at=row["created_at"],
@@ -85,20 +82,18 @@ class Store:
         self,
         *,
         topic: str,
-        directive: str | None = None,
         model_id: str | None = None,
     ) -> Post:
         post = Post(
             post_id=uuid.uuid4().hex,
             topic=topic,
-            directive=directive,
             model_id=model_id,
             created_at=_now(),
         )
         self._conn.execute(
-            "INSERT INTO posts (post_id, topic, directive, model_id, force_active, "
-            "created_at) VALUES (?, ?, ?, ?, 0, ?)",
-            (post.post_id, post.topic, post.directive, post.model_id, post.created_at),
+            "INSERT INTO posts (post_id, topic, model_id, force_active, "
+            "created_at) VALUES (?, ?, ?, 0, ?)",
+            (post.post_id, post.topic, post.model_id, post.created_at),
         )
         self._conn.commit()
         return post

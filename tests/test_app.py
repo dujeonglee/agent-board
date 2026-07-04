@@ -83,13 +83,14 @@ class TestPostsApi:
         assert posts[0]["last_query_at"] is None  # no query yet
         assert posts[0]["awaiting_input"] is False  # not waiting on input
 
-    def test_create_writes_directive(self, tmp_path):
+    def test_create_ignores_directive_and_writes_no_file(self, tmp_path):
+        # The board no longer writes DIRECTIVE.md — a stray ``directive`` key is
+        # ignored (extra field) and nothing is written to the workspace.
         cfg, _, c = _client(tmp_path)
-        pid = c.post(
-            "/api/posts", json={"topic": "t", "directive": "항상 한국어로"}
-        ).json()["post_id"]
-        d = cfg.workspace_for(pid) / ".agent-cli" / "DIRECTIVE.md"
-        assert d.read_text(encoding="utf-8") == "항상 한국어로"
+        r = c.post("/api/posts", json={"topic": "t", "directive": "항상 한국어로"})
+        assert r.status_code == 200
+        pid = r.json()["post_id"]
+        assert not (cfg.workspace_for(pid) / ".agent-cli" / "DIRECTIVE.md").exists()
 
     def test_create_requires_topic(self, tmp_path):
         _, _, c = _client(tmp_path)

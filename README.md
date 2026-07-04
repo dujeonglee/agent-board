@@ -41,7 +41,7 @@ agent-board
 > spawn 된 인스턴스 출력(배너 등) → **`<workspace>/.agent-cli/instance.log`**.
 
 ## 사용
-1. **새 글**: 주제 + (선택) DIRECTIVE.md + (선택) **모델** → 빈 워크스페이스 자동 생성.
+1. **새 글**: 주제 + (선택) **모델** → 빈 워크스페이스 자동 생성.
    모델 드롭다운은 agent-cli 레지스트리(`~/.agent-cli/models.json`,
    `AGENT_BOARD_MODELS_JSON` 로 변경)에서 채워지며, 고른 id 가 spawn 시 `--model` 로
    전달됨(키/정의는 agent-cli 가 자기 레지스트리에서 해석 — 보드에 안 흩어짐).

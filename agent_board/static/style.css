@@ -22,8 +22,7 @@ header h1 { margin: 0; font-size: 18px; }
   padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.07);
 }
 #new-topic { flex: 0 1 320px; }
-#new-directive { flex: 1; resize: vertical; }
-#new input, #new textarea {
+#new input {
   padding: 8px 10px; border-radius: 8px; font-size: 13px;
   border: 1px solid rgba(255,255,255,.12); background: #16181f; color: #dfe1e6;
   font-family: inherit;
@@ -126,7 +125,7 @@ header h1 { margin: 0; font-size: 18px; }
 
   /* new-post form: stack vertically, full width (was a squished flex row) */
   #new { flex-direction: column; }
-  #new-topic, #new-directive, #new-model, #new-create {
+  #new-topic, #new-model, #new-create {
     flex: none; width: 100%; max-width: none;
   }
 

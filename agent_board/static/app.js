@@ -4,7 +4,6 @@
 (function () {
   const $posts = document.getElementById("posts");
   const $topic = document.getElementById("new-topic");
-  const $directive = document.getElementById("new-directive");
   const $model = document.getElementById("new-model");
   const $create = document.getElementById("new-create");
   const $sameTab = document.getElementById("same-tab");
@@ -239,18 +238,15 @@
       $topic.focus();
       return;
     }
-    const directive = $directive.value.trim();
     await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: topic,
-        directive: directive || null,
         model_id: $model.value || null,
       }),
     });
     $topic.value = "";
-    $directive.value = "";
     load();
   }
 
