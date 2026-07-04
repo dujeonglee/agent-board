@@ -90,6 +90,35 @@ header h1 { margin: 0; font-size: 18px; }
   background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
 }
 .post-side .restart:hover { color: #4d8eff; border-color: #4d8eff; }
+.post-side .restart:disabled { cursor: default; opacity: .7; }
+/* while restarting: hide the 🔄 glyph and show a clean rotating ring spinner in
+   its place. `visibility:hidden` hides the emoji AND border but PRESERVES the
+   button's box (no layout jump — `color`/`font-size` tricks either fail on a
+   color emoji or collapse the box); the ::after re-shows itself with
+   `visibility:visible`. Only a thin ring turns — the box stays put. */
+.post-side .restart.spinning { position: relative; visibility: hidden; opacity: 1; }
+.post-side .restart.spinning::after {
+  content: ""; visibility: visible;
+  position: absolute; inset: 0; margin: auto;
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid rgba(77,142,255,.3); border-top-color: #4d8eff;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* transient action confirmation (restart, …) */
+#toast {
+  position: fixed; left: 50%; bottom: 24px;
+  transform: translateX(-50%) translateY(16px);
+  background: #1f2530; color: #e6e9ef;
+  border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
+  padding: 10px 16px; font-size: 14px; font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  opacity: 0; pointer-events: none; z-index: 100;
+  transition: opacity .2s ease, transform .2s ease;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.err { border-color: #f8514966; color: #ffb4ad; }
 
 /* ── mobile / narrow screens ── */
 @media (max-width: 640px) {

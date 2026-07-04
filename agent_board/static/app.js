@@ -114,7 +114,9 @@
     el.querySelector(".del").addEventListener("click", () => del(p));
     const restartBtn = el.querySelector(".restart");
     if (restartBtn)
-      restartBtn.addEventListener("click", () => restart(p.post_id));
+      restartBtn.addEventListener("click", () =>
+        restart(p.post_id, restartBtn, p.topic)
+      );
     el.querySelector(".fa-cb").addEventListener("change", (e) =>
       forceActive(p.post_id, e.target.checked)
     );
@@ -145,16 +147,56 @@
     }
   }
 
-  async function restart(post_id) {
+  // Transient bottom-center notice — the board had no feedback channel, so a
+  // one-off toast confirms actions (currently: restart) that otherwise leave no
+  // visible trace. Reuses one #toast node; each call resets its 2.6s timer.
+  let toastTimer = null;
+  function toast(msg, isError) {
+    let el = document.getElementById("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = "show" + (isError ? " err" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      el.className = "";
+    }, 2600);
+  }
+
+  async function restart(post_id, btn, topic) {
     // Force-restart (always allowed — no busy/viewer gate). The reused token
     // means anyone already in the room reconnects on their own; here we just
     // refresh the board so the status reflects the respawn.
-    const r = await fetch(`/api/posts/${post_id}/restart`, { method: "POST" });
-    if (!r.ok) {
-      alert("재실행 실패: " + r.status);
-      return;
+    //
+    // The button POST alone gave NO feedback — a fast respawn leaves the status
+    // already "running", so the user couldn't tell the click even registered.
+    // Spin+disable the button for the duration (the backend awaits stop+respawn
+    // before returning, so this covers the real work), then a toast confirms it
+    // actually restarted.
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("spinning");
     }
-    load();
+    try {
+      const r = await fetch(`/api/posts/${post_id}/restart`, { method: "POST" });
+      if (!r.ok) {
+        toast("재실행 실패: " + r.status, true);
+        return;
+      }
+      toast("🔄 재실행되었습니다" + (topic ? " — " + topic : ""));
+      load(); // re-render: the row's status reflects the fresh process
+    } catch (e) {
+      toast("재실행 실패: 네트워크 오류", true);
+    } finally {
+      // load() may already have replaced this button node — harmless no-op then.
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("spinning");
+      }
+    }
   }
 
   async function forceActive(post_id, enabled) {
