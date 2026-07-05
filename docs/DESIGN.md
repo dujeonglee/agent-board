@@ -36,6 +36,7 @@ agent_board/
   router.py       게이트웨이 연동 (Router 인터페이스 + CaddyRouter / BoardProxyRouter)
   keepalive.py    force-active = 인스턴스에 SSE 연결 유지 (asyncio task)
   sessions.py     agent-cli 세션 파일 읽기 (last_query, status)  ← on-disk 통합 계약
+  live_events.py  라이브 push — mtime 스캐너 + /api/events SSE (프론트 폴링 제거, §7 Phase 2)
   static/         보드 UI (index.html · app.js · style.css)
 ```
 
@@ -141,8 +142,15 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
   레코드(`role=user, kind=query`)의 text. (세션 없으면 None.)
 - ⚠️ agent-cli on-disk(`status.json`/`web.json`/history) + /api/health 폴백 포맷에 의존
   → "통합 계약"(버전 호환 주의).
-- ⏳ **Phase 2(예정)**: 보드가 `status.json` 을 FS watch(무의존 mtime 스캔) → 보드 SSE 로
-  프론트에 push → 프론트 폴링 제거(즉시 반영).
+- ✅ **Phase 2 (라이브 push, `live_events.py`)**: 프론트의 5초 `/api/posts` 폴링을 제거하고
+  **보드 SSE push** 로 대체. 백그라운드 스캐너(`LiveEvents.run`)가 1초마다 각 글의 **on-disk
+  시그니처**(`status.json` mtime + `history.jsonl` mtime + pid 생존)를 표집하고, 시그니처가
+  바뀐 **그 행만** 재계산해 `/api/events` 구독자에게 `post_update`/`post_removed` 로 broadcast
+  한다. pid-생존 항은 `status.json` 정리 없이 죽은(SIGKILL) 인스턴스도 `off` 로 뒤집는다.
+  주기 full-list 폴링 없음 — SSE 스트림이 **15초 heartbeat(`ping`)** 를 실어보내고, 프론트
+  워치독이 30초 무수신 시 half-open(sleep/wake·불안정 망)으로 보고 강제 재연결한다. 매
+  (재)연결마다 프론트가 한 번 full `load()` 하므로 공백 구간 이벤트도 유실 없음. 스캔은
+  executor(별 스레드)에서 돌려 이벤트 루프를 막지 않고, 스캔 예외는 삼켜 루프를 유지한다.
 
 ## 8. force-active (`keepalive.py`)
 - 토글 ON: 그 인스턴스가 없으면 먼저 open(spawn) 후, **컨트롤 플레인이 그 인스턴스의
@@ -242,4 +250,4 @@ PORT_RANGE       = (50000, 60000)                  # 인스턴스 포트 할당
   매 실행 시 `--model` 로 해석). 맥락 유지 + 모델만 교체.
 - **동시성**: 클릭~서버처리 사이 상태가 바뀔 수 있어 **apply 직전 게이트 재확인**(락 안에서
   live_state 재조회). 거부되면 409 → 프론트가 드롭다운 되돌리고 사유 표시.
-- **접속자 수**: 위 `viewers` 를 목록에 `👁 N` 으로 표시(5초 폴링). agent-cli ≥ 4.17.11 필요.
+- **접속자 수**: 위 `viewers` 를 목록에 `👁 N` 으로 표시(SSE 라이브 push, §7 Phase 2). agent-cli ≥ 4.17.11 필요.

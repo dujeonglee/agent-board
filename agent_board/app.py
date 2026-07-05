@@ -8,17 +8,19 @@ without spawning agent-cli.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agent_board import instances, models_registry, sessions
 from agent_board.config import Config
+from agent_board.live_events import LiveEvents
 from agent_board.keepalive import (
     KeepAliveManager,
     default_port_for,
@@ -190,10 +192,19 @@ def create_app(
     if hasattr(router, "set_reopen"):
         router.set_reopen(orchestrator.open)
 
+    # Live push: an mtime scanner broadcasts changed rows to EventSource clients
+    # so the browser doesn't poll /api/posts (Phase 2). view_fn injected to keep
+    # live_events out of the app layer.
+    live = LiveEvents(config, store, lambda p: _post_view(config, store, p))
+
     @asynccontextmanager
     async def lifespan(_app):
         await restore_state(config, store, router, keepalive)
-        yield
+        scanner = asyncio.create_task(live.run())
+        try:
+            yield
+        finally:
+            scanner.cancel()
 
     app = FastAPI(title="agent-board", lifespan=lifespan)
     router.mount(app)  # /s/<post_id>/* reverse proxy
@@ -215,6 +226,29 @@ def create_app(
         loop = asyncio.get_event_loop()
         posts = await loop.run_in_executor(None, store.list_posts)
         return [_post_view(config, store, p) for p in posts]
+
+    @app.get("/api/events")
+    async def events():
+        """SSE stream of live row changes (``post_update`` / ``post_removed``).
+        A ``ping`` every 15s (idle) is a real message event so the frontend's
+        watchdog can detect a half-open connection and reconnect. The browser
+        does a full ``load()`` on (re)connect, so nothing missed during a gap."""
+
+        async def gen():
+            q = live.subscribe()
+            try:
+                yield ": connected\n\n"
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(q.get(), timeout=15)
+                    except asyncio.TimeoutError:
+                        yield 'data: {"type": "ping"}\n\n'  # heartbeat
+                        continue
+                    yield f"data: {json.dumps(msg)}\n\n"
+            finally:
+                live.unsubscribe(q)
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
 
     @app.post("/api/posts")
     async def create_post(body: NewPost):

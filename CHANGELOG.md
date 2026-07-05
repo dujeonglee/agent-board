@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0] - 2026-07-05
+
+### Changed
+
+- **목록을 5초 폴링 대신 SSE 라이브 push 로 갱신** (`live_events.py`) — 프론트가 매 5초
+  `/api/posts` 를 통째로 다시 불러오던 것을 걷어내고, 보드가 변화를 감지해 바뀐 행만
+  밀어주는 방식으로 바꿨다. 백그라운드 스캐너(`LiveEvents`)가 1초마다 각 글의 **on-disk
+  시그니처**(`status.json` mtime + `history.jsonl` mtime + pid 생존)를 표집해, 바뀐 글만
+  `_post_view` 로 재계산 → `/api/events`(SSE) 구독자에게 `post_update`/`post_removed` 로
+  broadcast 한다. 프론트는 `EventSource` 로 받아 해당 카드만 in-place 교체/삭제.
+  - **pid-생존 항**: `status.json` 정리 없이 죽은(SIGKILL) 인스턴스도 `off` 로 확실히 뒤집음.
+  - **heartbeat 워치독**: 주기 full-list 폴링을 없앤 대신 SSE 가 15초마다 `ping` 을 실어보내고,
+    프론트 워치독이 30초 무수신 시 half-open(sleep/wake·불안정 망)으로 보고 강제 재연결한다.
+    매 (재)연결마다 프론트가 한 번 full `load()` 하므로 공백 구간 이벤트도 유실 없음.
+  - **비침습**: agent-cli 무수정. 스캔은 executor(별 스레드)에서 돌려 이벤트 루프를 안 막고,
+    스캔 예외는 삼켜 루프를 유지한다. (보드 폴링 제거 로드맵 Phase 2 — 1단계는 v1.7.0.)
+
 ## [1.7.0] - 2026-07-05
 
 ### Changed

@@ -78,6 +78,7 @@
 
   function card(p) {
     const el = document.createElement("div");
+    el.dataset.id = p.post_id; // for in-place live updates over SSE
     el.className = "post" + (p.awaiting_input ? " needs-input" : "");
     // awaiting an ask/confirm reply takes precedence over the busy/idle label
     const st = p.awaiting_input
@@ -255,7 +256,66 @@
     if (e.key === "Enter") create();
   });
 
+  // ── Live push over SSE (replaces the old 5s /api/posts poll) ──────────
+  // The board scans each post's on-disk signature and pushes changed rows.
+  // A ``ping`` every 15s feeds a watchdog: if nothing arrives for 30s the
+  // connection is treated as half-open (sleep/wake, flaky net) and force-
+  // reconnected. On every (re)connect we full-reload, so a gap loses nothing.
+  let evtSource = null;
+  let watchdog = null;
+
+  function upsertCard(p) {
+    const existing = $posts.querySelector(`[data-id="${p.post_id}"]`);
+    const fresh = card(p);
+    if (existing) {
+      existing.replaceWith(fresh);
+    } else {
+      const empty = $posts.querySelector(".empty");
+      if (empty) empty.remove();
+      $posts.appendChild(fresh);
+    }
+  }
+
+  function removeCard(postId) {
+    const el = $posts.querySelector(`[data-id="${postId}"]`);
+    if (el) el.remove();
+    if (!$posts.querySelector(".post")) {
+      $posts.innerHTML =
+        '<div class="empty">아직 글이 없습니다. 새 글을 만들어 보세요.</div>';
+    }
+  }
+
+  function petWatchdog() {
+    if (watchdog) clearTimeout(watchdog);
+    // no message (not even a ping) for 30s → connection is dead-but-silent
+    watchdog = setTimeout(() => {
+      if (evtSource) evtSource.close();
+      connectEvents(); // reconnect → onopen reloads the full list
+    }, 30000);
+  }
+
+  function connectEvents() {
+    evtSource = new EventSource("/api/events");
+    evtSource.onopen = () => {
+      petWatchdog();
+      load(); // catch up on anything missed before/while (re)connecting
+    };
+    evtSource.onmessage = (e) => {
+      petWatchdog();
+      let msg;
+      try {
+        msg = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (msg.type === "post_update") upsertCard(msg.post);
+      else if (msg.type === "post_removed") removeCard(msg.post_id);
+      // type === "ping" → watchdog already fed above
+    };
+    // onerror: EventSource auto-reconnects; the watchdog covers half-open.
+  }
+
   loadModels();
   load();
-  setInterval(load, 5000); // refresh status periodically
+  connectEvents();
 })();

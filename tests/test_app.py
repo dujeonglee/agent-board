@@ -296,3 +296,27 @@ class TestChangeModelApi:
         assert p["viewers"] == 0
         # never opened → idle (down) → model is changeable
         assert p["model_changeable"] is True
+
+
+class TestEventsStream:
+    def test_events_route_registered_as_stream(self, tmp_path):
+        # The SSE stream is infinite, so we don't consume it via TestClient
+        # (that blocks) — the push/scan behaviour is covered in test_live_events.
+        # Here we only assert the route exists and is wired to the app.
+        from agent_board.app import create_app
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        app = create_app(
+            cfg,
+            store=Store(cfg.db_path),
+            orchestrator=FakeOrch(),
+            keepalive=FakeKeepalive(),
+        )
+        paths = {r.path for r in app.routes}
+        assert "/api/events" in paths
+
+    def test_html_wires_sse_not_polling(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        assert 'new EventSource("/api/events")' in js
+        assert "setInterval(load" not in js  # the 5s poll is gone
