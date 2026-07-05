@@ -61,6 +61,17 @@ def pick_board_port(host: str, preferred: int) -> int:
     return preferred  # let uvicorn surface the error
 
 
+def gateway_banner(config: Config) -> str:
+    """One-line description of the active routing data plane, for the startup
+    log — so an operator can see AT A GLANCE whether the board itself is
+    proxying (default) or Caddy is (and where its admin API is). The gateway
+    was previously silent, which made it easy to assume Caddy while actually
+    running the in-process proxy."""
+    if config.gateway == "caddy":
+        return f"caddy (admin {config.caddy_admin})"
+    return "board-proxy (in-process reverse proxy — default)"
+
+
 def acquire_singleton_lock(data_dir: Path) -> int | None:
     """Single-instance guard: hold an exclusive ``flock`` on
     ``<data_dir>/board.lock`` for the process lifetime. Returns the open fd on
@@ -388,6 +399,7 @@ def main() -> None:  # pragma: no cover
     print(
         f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"
     )
+    print(f"  gateway    → {gateway_banner(config)}")
     print(f"  access log → {config.log_file}")
     uvicorn.run(
         create_app(config),

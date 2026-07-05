@@ -11,7 +11,7 @@ import os
 
 from fastapi.testclient import TestClient
 
-from agent_board.app import acquire_singleton_lock, create_app
+from agent_board.app import acquire_singleton_lock, create_app, gateway_banner
 from agent_board.config import Config
 from agent_board.store import Store
 
@@ -322,6 +322,23 @@ class TestEventsStream:
         js = c.get("/static/app.js").text
         assert 'new EventSource("/api/events")' in js
         assert "setInterval(load" not in js  # the 5s poll is gone
+
+
+class TestGatewayBanner:
+    def test_board_proxy_default(self, tmp_path):
+        cfg = Config(data_dir=tmp_path / "d", workspaces_root=tmp_path / "w")
+        assert "board-proxy" in gateway_banner(cfg)
+        assert "caddy" not in gateway_banner(cfg).lower()
+
+    def test_caddy_shows_admin(self, tmp_path):
+        cfg = Config(
+            data_dir=tmp_path / "d",
+            workspaces_root=tmp_path / "w",
+            gateway="caddy",
+            caddy_admin="http://127.0.0.1:2019",
+        )
+        b = gateway_banner(cfg)
+        assert b.startswith("caddy") and "127.0.0.1:2019" in b
 
 
 class TestSingletonLock:

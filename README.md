@@ -38,11 +38,20 @@ agent-board
 |---|---|---|
 | `AGENT_BOARD_HOST` | `0.0.0.0` | 바인드 호스트 |
 | `AGENT_BOARD_PORT` | `51966` (0xCAFE) | 보드 포트 (생략 시 fallback 다이나믹·인스턴스 50000~60000·omlx 8000·cli 0xC0DE 회피) |
-| `AGENT_BOARD_HOME` | `./data` | 데이터 루트 (board.db + workspaces 의 기본 base) |
-| `AGENT_BOARD_DATA` | `$HOME` | `board.db` 위치 |
-| `AGENT_BOARD_WORKSPACES` | `$HOME/workspaces` | 글별 워크스페이스 루트 |
+| `AGENT_BOARD_HOME` | `./data` | 데이터 루트 base (아래 DATA·WORKSPACES 의 기본값 base) |
+| `AGENT_BOARD_DATA` | `= HOME`(`./data`) | `board.db`·`board.log`·`board.lock` 위치 (data_dir) |
+| `AGENT_BOARD_WORKSPACES` | `<base>/workspaces` | 글별 워크스페이스 루트 (`<root>/<post_id>`) |
+| `AGENT_BOARD_MODELS_JSON` | `~/.agent-cli/models.json` | 모델 드롭다운 목록 소스(agent-cli 레지스트리) |
 | `AGENT_BOARD_CLI` | `agent-cli` | spawn 바이너리 |
 | `AGENT_BOARD_IDLE_TIMEOUT` | `300` | 인스턴스 `--idle-timeout` (초). viewer 0 이 이만큼 지속되면 자가종료 |
+| `AGENT_BOARD_GATEWAY` | `board-proxy` | 라우팅 데이터 플레인: `board-proxy`(보드 in-process 프록시) 또는 `caddy`(외부 Caddy). ⚠️ 아래 주의 |
+| `AGENT_BOARD_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API (`gateway=caddy` 일 때만) |
+| `AGENT_BOARD_CADDY_BASIC_AUTH` | `""` | Caddy 라우트 basic-auth `user:bcrypt` (`gateway=caddy` 일 때만) |
+
+> **게이트웨이 두 모드는 전송만 같고 동작이 완전 동등하지 않다.** `board-proxy`(기본)는
+> idle-reap 된 방을 **직접 URL 재접속만으로 자동 재기동**하지만 TLS·인증이 없다. `caddy` 는
+> TLS·단일포트·라우트 basic-auth 를 주지만 idle-reap 뒤 직접 재접속은 **502**(보드에서 "열기"
+> 재요청 필요). 기동 로그에 활성 게이트웨이가 표시된다. 자세히는 `docs/DESIGN.md` §9.
 
 > 로그는 콘솔이 아니라 파일로 빠집니다 — 콘솔엔 startup·에러만:
 > access 로그 → **`<DATA_DIR>/board.log`**(회전 5MB×3),

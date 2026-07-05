@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.9.1] - 2026-07-05
+
+### Added
+
+- **기동 로그에 활성 게이트웨이 표시** (`gateway_banner`) — `board-proxy`(기본, in-process
+  프록시) 인지 `caddy`(admin 주소 포함) 인지 한 줄로 출력. 예전엔 무표시라 실제로는 board-proxy
+  로 돌면서 Caddy 로 착각하기 쉬웠음.
+
+### Docs
+
+- `docs/DESIGN.md` §9 에 **두 게이트웨이의 기능 동등성 표** 추가 — 전송(SSE 무버퍼·업로드·
+  라우트 등록)은 같지만, board-proxy 만 **idle-reap 방을 접속 시 자동 재기동**하고 caddy 만
+  **TLS·`/s/<id>` basic-auth** 를 제공(전환 시 UX/보안 차이 유의).
+- `README.md` 설정 표 정정 — `AGENT_BOARD_DATA` 기본값 오기(`$HOME`→`base`/`./data`) 수정 +
+  누락 변수(`GATEWAY`·`CADDY_ADMIN`·`CADDY_BASIC_AUTH`·`MODELS_JSON`) 추가.
+
 ## [1.9.0] - 2026-07-05
 
 ### Added

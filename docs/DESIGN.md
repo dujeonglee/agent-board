@@ -172,8 +172,24 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
   rewrite strip, reverse_proxy]. **★ 인증을 각 동적 라우트에 직접 임베드** → 삽입 순서와
   무관하게 인증 우회 불가(`AGENT_BOARD_CADDY_BASIC_AUTH="user:bcrypt"`). `mount()` no-op.
   단위테스트는 admin 호출만 검증 → 실제 Caddy 인증은 배포 후 curl 로 실측(deploy/Caddyfile).
-  `AGENT_BOARD_GATEWAY=caddy|board-proxy` 로 선택.
+  `AGENT_BOARD_GATEWAY=caddy|board-proxy` 로 선택. **기동 시 활성 게이트웨이를 로그로 출력**
+  (`gateway_banner`) — 예전엔 무표시라 Caddy 로 착각하기 쉬웠음.
 - 라우트 등록: open 성공 직후. 해제: 인스턴스 idle 종료 감지 시(또는 lazy — 다음 open 에 갱신).
+
+### ⚠️ 두 게이트웨이는 전송만 같고 동작이 완전 동등하지 않음 (전환 시 유의)
+| 기능 | board-proxy (기본) | caddy |
+|---|---|---|
+| `/s/<id>/*` 프록시 · SSE 무버퍼 · 업로드 | ✅ | ✅ (Caddy 네이티브) |
+| 라우트 등록/해제(`ensure_route`/`remove_route`) | ✅ | ✅ |
+| **idle-reap 인스턴스 접속 시 자동 재기동** | ✅ (`set_reopen`→orchestrator.open, GET/HEAD 재시도) | ❌ **502** — 보드 UI 에서 "열기" 재요청 필요 |
+| **TLS 종단 · 단일 포트** | ❌ (평문 HTTP, 보드 포트) | ✅ |
+| **`/s/<id>` basic-auth** | ❌ (보드 앞단 네트워크 격리에 의존) | ✅ (라우트에 임베드) |
+| 보드가 data-path 안에 있나 | 예(중계) | 아니오(Caddy 직결) |
+
+→ board-proxy = **개발/무의존 단일박스에 유리**(리로드만으로 죽은 방 부활), caddy = **프로덕션
+하드닝**(TLS·인증·견고). "동일 기능"이 아니라 **역할이 다른 두 데이터 플레인**. 특히 Caddy 로
+가면 idle-reap 뒤 직접 URL 재접속이 502 가 되므로, 프로덕션에서 그 UX 가 필요하면 idle-timeout
+정책이나 Caddy 레벨 revive 훅을 별도로 검토해야 함.
 
 **SSE 무버퍼 — 클라 disconnect 시 upstream 닫기**: `body()` generator 의 `finally` 에서
 `aclose()` 하면 disconnect 로 generator 가 취소될 때 그 await 가 미완료될 수 있어 upstream
