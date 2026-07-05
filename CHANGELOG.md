@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.0] - 2026-07-05
+
+### Added
+
+- **싱글 인스턴스 가드 (`board.lock` flock)** — 같은 `data_dir` 에서 agent-board 를 두 번째로
+  띄우면 즉시 거부한다(보유 pid 안내 후 종료). `main()` 시작 시 `<data_dir>/board.lock` 에
+  배타 `flock`(`acquire_singleton_lock`)을 걸어 프로세스 수명 동안 보유.
+  - **왜**: per-post spawn 락이 프로세스-로컬 `asyncio.Lock` 이라 두 보드 사이엔 조율이 안 됨
+    → 같은 `board.db` 를 경쟁하고, 같은 글을 동시에 open 하면 한 워크스페이스에 agent-cli
+    인스턴스가 **이중 spawn**(세션 파일 경합)될 수 있었다. 가드가 그 근원(두 프로세스 공존)을 차단.
+  - flock 은 보유자 사망 시 커널이 자동 해제 → **stale 락 수동정리 불필요**(pidfile 단독의 약점 회피).
+  - 여러 보드가 필요하면 `AGENT_BOARD_DATA`/`AGENT_BOARD_WORKSPACES` 를 분리.
+
 ## [1.8.0] - 2026-07-05
 
 ### Changed

@@ -27,7 +27,7 @@
 ## 1. 모듈 구조
 ```
 agent_board/
-  app.py          FastAPI 앱 · 라우트 · static 서빙
+  app.py          FastAPI 앱 · 라우트 · static 서빙 · main()(포트 선택 + 싱글턴 flock)
   config.py       설정(WORKSPACES_ROOT, AGENT_CLI_BIN, IDLE_TIMEOUT, GATEWAY_*)
   models.py       Post 데이터클래스
   store.py        SQLite 글 레지스트리 (CRUD, 단일 board.db)
@@ -198,6 +198,12 @@ PORT_RANGE       = (50000, 60000)                  # 인스턴스 포트 할당
 ```
 
 ## 12. 동시성 · 엣지 (구현 시 가드)
+- **싱글 인스턴스 (프로세스 간)**: `main()` 시작 시 `<data_dir>/board.lock` 에 배타
+  `flock`(`acquire_singleton_lock`). 같은 data_dir 에 보드 둘째가 뜨면 즉시 거부(pid 안내
+  후 exit 1). **왜**: per-post spawn lock 은 프로세스-로컬 `asyncio.Lock` 이라 크로스-프로세스
+  조율이 안 됨 → 둘이 같은 `board.db` 를 경쟁하고, 같은 글을 동시에 open 하면 한 워크스페이스에
+  agent-cli 인스턴스가 이중 spawn(세션 파일 경합)될 수 있음. flock 은 보유자 사망 시 커널이
+  자동 해제 → stale 락 수동정리 불필요(pidfile 단독의 약점 회피). fd 는 프로세스 수명 동안 보유.
 - **per-post spawn lock**: 동시 open → spawn 1회.
 - **stale web.json**: pid 죽었는데 파일 남음 → alive() 가 걸러 재spawn.
 - **포트 충돌**: pick_free_port + 재시도.

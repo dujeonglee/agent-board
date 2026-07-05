@@ -61,6 +61,32 @@ def pick_board_port(host: str, preferred: int) -> int:
     return preferred  # let uvicorn surface the error
 
 
+def acquire_singleton_lock(data_dir: Path) -> int | None:
+    """Single-instance guard: hold an exclusive ``flock`` on
+    ``<data_dir>/board.lock`` for the process lifetime. Returns the open fd on
+    success (the caller MUST keep it — closing releases the lock), or ``None``
+    if another board already holds it.
+
+    Two boards on the same ``data_dir`` would race on the shared ``board.db``
+    and, lacking cross-process spawn coordination (the per-post lock is a
+    process-local ``asyncio.Lock``), could double-spawn the same post's instance
+    into one workspace. The kernel drops the lock automatically when the holder
+    dies, so a crash leaves no stale lock to clean up (unlike a bare pidfile)."""
+    import fcntl
+    import os
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(data_dir / "board.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode())  # pidfile content: who holds it
+    return fd
+
+
 def build_log_config(log_file: str | Path) -> dict:
     """uvicorn logging config: access logs (the /api/posts polling) → a rotating
     file so the console stays clean; startup + errors still print to stderr."""
@@ -333,10 +359,26 @@ def create_app(
 
 def main() -> None:  # pragma: no cover
     import os
+    import sys
 
     import uvicorn
 
     config = Config.from_env()
+    # Single-instance guard: refuse to start a second board on the same data_dir
+    # (would race on board.db + double-spawn instances). Held for the process
+    # lifetime — assigned so the fd isn't dropped.
+    lock_fd = acquire_singleton_lock(config.data_dir)
+    if lock_fd is None:
+        try:
+            holder = (config.data_dir / "board.lock").read_text().strip()
+        except OSError:
+            holder = ""
+        print(
+            f"이미 이 data_dir 에서 agent-board 가 실행 중입니다: {config.data_dir}"
+            + (f" (pid {holder})" if holder else ""),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     host = os.environ.get("AGENT_BOARD_HOST", "0.0.0.0")
     # AGENT_BOARD_PORT set → bind it exactly (fail loudly on conflict). Omitted →
     # prefer 0xCAFE but dynamically fall back to a free port if it's taken.

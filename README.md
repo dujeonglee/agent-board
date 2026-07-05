@@ -29,6 +29,10 @@ python -m agent_board.app          # → http://localhost:51966
 agent-board
 ```
 
+> **한 `data_dir` = 보드 1개.** 같은 data_dir 에서 보드를 두 번 띄우면 둘째는
+> `board.lock`(flock) 에 걸려 즉시 거부된다(공유 `board.db` 경쟁 + 인스턴스 이중 spawn
+> 방지). 여러 보드가 필요하면 `AGENT_BOARD_DATA`/`AGENT_BOARD_WORKSPACES` 를 분리할 것.
+
 ### 설정 (환경변수)
 | 변수 | 기본값 | 설명 |
 |---|---|---|

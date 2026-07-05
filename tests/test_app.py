@@ -7,9 +7,11 @@ agent-cli instances.
 
 from __future__ import annotations
 
+import os
+
 from fastapi.testclient import TestClient
 
-from agent_board.app import create_app
+from agent_board.app import acquire_singleton_lock, create_app
 from agent_board.config import Config
 from agent_board.store import Store
 
@@ -320,3 +322,45 @@ class TestEventsStream:
         js = c.get("/static/app.js").text
         assert 'new EventSource("/api/events")' in js
         assert "setInterval(load" not in js  # the 5s poll is gone
+
+
+class TestSingletonLock:
+    def test_first_acquires_second_refused(self, tmp_path):
+        data = tmp_path / "data"
+        fd = acquire_singleton_lock(data)
+        try:
+            assert isinstance(fd, int)
+            # a second board on the same data_dir is refused (None)
+            assert acquire_singleton_lock(data) is None
+        finally:
+            os.close(fd)
+
+    def test_pidfile_records_holder(self, tmp_path):
+        data = tmp_path / "data"
+        fd = acquire_singleton_lock(data)
+        try:
+            assert (data / "board.lock").read_text().strip() == str(os.getpid())
+        finally:
+            os.close(fd)
+
+    def test_release_allows_reacquire(self, tmp_path):
+        # closing the fd drops the flock → a fresh board can take it (e.g. the
+        # previous process exited; the kernel released the lock on its behalf)
+        data = tmp_path / "data"
+        fd = acquire_singleton_lock(data)
+        os.close(fd)
+        fd2 = acquire_singleton_lock(data)
+        try:
+            assert isinstance(fd2, int)
+        finally:
+            os.close(fd2)
+
+    def test_separate_data_dirs_dont_conflict(self, tmp_path):
+        # the guard is per-data_dir — two boards on DIFFERENT dirs both start
+        fd_a = acquire_singleton_lock(tmp_path / "a")
+        fd_b = acquire_singleton_lock(tmp_path / "b")
+        try:
+            assert isinstance(fd_a, int) and isinstance(fd_b, int)
+        finally:
+            os.close(fd_a)
+            os.close(fd_b)
