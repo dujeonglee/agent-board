@@ -270,9 +270,16 @@ class CaddyRouter(Router):
             ) from None
         # route now registered in Caddy → bounce back; the retry hits the live
         # route (the __revive marker guards against a loop if it didn't).
-        return RedirectResponse(
-            request.url.include_query_params(__revive="1"), status_code=302
-        )
+        #
+        # RELATIVE Location (path+query only), never the absolute request.url:
+        # behind Caddy the board sees its OWN bind host (e.g. 0.0.0.0:51966) in
+        # request.url, so an absolute redirect would bounce the browser OFF the
+        # Caddy origin and straight onto the board — bypassing Caddy, landing
+        # back in this handler, and looping to the __revive 503. A relative ref
+        # keeps the browser on its current origin (the Caddy gateway).
+        target = request.url.include_query_params(__revive="1")
+        location = target.path + (f"?{target.query}" if target.query else "")
+        return RedirectResponse(location, status_code=302)
 
     def _route_id(self, post_id: str) -> str:
         return f"agentboard-{post_id}"

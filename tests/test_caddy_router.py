@@ -113,12 +113,17 @@ class TestCaddyRevive:
             return f"/s/{post_id}/"
 
         client, _ = _revive_client(reopen)
-        r = client.get("/s/p1/api/health")
+        r = client.get("/s/p1/api/health?token=T", follow_redirects=False)
         assert r.status_code == 302
         assert seen == ["p1"]  # reopen called exactly once
         # redirect back to the same path, marked so a re-fall-through won't loop
         loc = r.headers["location"]
         assert "/s/p1/api/health" in loc and "__revive=1" in loc
+        # MUST be RELATIVE (path+query, no scheme/host) — an absolute URL would
+        # carry the board's bind host and bounce the browser off the Caddy
+        # origin, bypassing Caddy and looping back to the __revive 503.
+        assert loc.startswith("/s/p1/") and "://" not in loc
+        assert "token=T" in loc  # existing query preserved
 
     def test_revive_marker_breaks_the_loop(self):
         # Already redirected once but STILL fell through (route not applied yet /

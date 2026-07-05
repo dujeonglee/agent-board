@@ -192,6 +192,11 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
   Caddy 라우트를 지우고(≤1s), 그러면 Caddyfile 의 `everything→board` catch-all 이 보드로 흘려
   보드 revive 핸들러가 `reopen`(=orchestrator.open, Caddy 라우트 재등록) 후 302. `?__revive=1`
   sentinel 로 재-fall-through 무한루프 차단(→503 Retry-After).
+  - **302 Location 은 상대경로**(path+query)여야 함 — 절대 `request.url` 을 쓰면 안 됨. Caddy 뒤에서
+    보드는 `request.url` 로 자기 바인드 호스트(예 `0.0.0.0:51966`)를 보므로, 절대 리다이렉트는
+    브라우저를 Caddy origin 밖 보드 포트로 직접 튕겨 Caddy 를 우회 → 같은 핸들러로 돌아와 `__revive`
+    503 루프가 된다. 상대 ref 는 브라우저를 현재 origin(Caddy)에 머물게 한다. **따라서 caddy 모드는
+    보드를 loopback(127.0.0.1)에 바인드**해야 안전(비-loopback 바인드 시 기동 로그가 경고).
 - **잔여 차이는 전송 특성뿐**: TLS·단일포트·인증. board-proxy = 개발/무의존 단일박스,
   caddy = 프로덕션 하드닝.
 

@@ -411,6 +411,18 @@ def main() -> None:  # pragma: no cover
     )
     print(f"  gateway    → {gateway_banner(config)}")
     print(f"  access log → {config.log_file}")
+    # caddy mode + non-loopback bind = footgun: Caddy is meant to front the
+    # board, but 0.0.0.0/external also exposes the board's own port directly.
+    # Hitting THAT bypasses Caddy — /s/<id> lands on the revive fall-through,
+    # which redirects to the same origin and loops to a 503. Behind Caddy the
+    # board should bind loopback (deploy/agent-board.service uses 127.0.0.1).
+    if config.gateway == "caddy" and host not in ("127.0.0.1", "::1", "localhost"):
+        print(
+            f"  ⚠️  gateway=caddy 인데 {host} 로 바인드됨 — 보드 포트({port})에 직접 접속하면 "
+            "Caddy 를 우회해 /s/<id> 가 503 루프가 됩니다. 브라우저는 Caddy 주소로 접속하고, "
+            "보드는 AGENT_BOARD_HOST=127.0.0.1 로 바인드하세요.",
+            file=sys.stderr,
+        )
     uvicorn.run(
         create_app(config),
         host=host,

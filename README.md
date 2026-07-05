@@ -98,12 +98,17 @@ agent-board
 caddy hash-password --plaintext 'secret'      # → $2a$14$...
 
 # 2) deploy/Caddyfile 의 도메인·해시 수정 후 Caddy 기동 (admin 127.0.0.1:2019)
-# 3) 보드를 caddy 모드로
+# 3) 보드를 caddy 모드로 (★ loopback 바인드 필수 — 아래 주의)
 AGENT_BOARD_GATEWAY=caddy \
+AGENT_BOARD_HOST=127.0.0.1 \
 AGENT_BOARD_CADDY_BASIC_AUTH='alice:$2a$14$...' \
 agent-board
 ```
-- 동봉: `deploy/Caddyfile`, `deploy/agent-board.service`(systemd).
+- 동봉: `deploy/Caddyfile`, `deploy/agent-board.service`(systemd, 이미 `127.0.0.1` 바인드).
+- **★ caddy 모드는 보드를 `AGENT_BOARD_HOST=127.0.0.1` 로 바인드**하라. Caddy 가 앞단에서
+  `/s/<id>` 를 인스턴스로 직결하는데, 보드 포트를 `0.0.0.0`/외부로도 열어두고 **그 포트에 직접
+  접속하면 Caddy 를 우회**해 revive fall-through 가 같은 origin 으로 리다이렉트→503 루프가 된다.
+  비-loopback 바인드 시 기동 로그가 경고한다(브라우저는 항상 Caddy 주소로 접속).
 - **보안**: 각 `/s/<id>` 동적 라우트에 **basic_auth 핸들러가 직접 포함**되어(보드가 삽입)
   삽입 순서와 무관하게 **인증 우회 불가**. 단 단위테스트는 admin API 호출만 검증하므로,
   배포 후 **반드시** `curl` 로 인증을 실측하라(Caddyfile 하단 체크리스트 — 토큰 없이
