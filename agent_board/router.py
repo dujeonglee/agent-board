@@ -10,10 +10,50 @@ that registers routes in a separate gateway; the rest of the board is identical.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
+
+
+class Router(ABC):
+    """The routing data-plane contract: how the board publishes and revives an
+    instance's ``/s/<post_id>`` route. Two implementations that must stay at
+    parity — ``BoardProxyRouter`` (in-process reverse proxy) and ``CaddyRouter``
+    (external Caddy via admin API). They share NO mechanism, so this is a PURE
+    interface (no shared implementation → no coupling); the emergent BEHAVIOUR
+    that an interface can't express (e.g. revive-on-stale-hit, which silently
+    diverged once) is pinned by ``tests/test_router_parity.py``.
+
+    ★ When either side gains a routing capability, add it here as an
+    ``@abstractmethod`` — the other router then fails to instantiate until it
+    implements it (structural parity). For any observable *behaviour*, add a
+    matching case to the parity test (structure can't enforce behaviour)."""
+
+    @abstractmethod
+    def ensure_route(self, post_id: str, port: int) -> None:
+        """Publish ``/s/<post_id>/*`` → ``127.0.0.1:<port>`` (idempotent replace)."""
+
+    @abstractmethod
+    def remove_route(self, post_id: str) -> None:
+        """Withdraw the route (idempotent — no error if absent)."""
+
+    @abstractmethod
+    def set_reopen(self, reopen) -> None:
+        """Wire the ``async reopen(post_id)`` spawn-or-attach hook used to revive
+        a self-reaped instance when its stale ``/s/<id>`` URL is hit."""
+
+    @abstractmethod
+    def mount(self, app: FastAPI) -> None:
+        """Install the board-side handlers (full proxy / revive fall-through)."""
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        """Release the router's resources on board shutdown (e.g. its httpx
+        client). Idempotent — safe to call more than once."""
+
 
 # response headers the proxy must NOT copy verbatim — they describe the upstream
 # framing, which StreamingResponse re-derives for the chunked relay.
@@ -45,7 +85,7 @@ async def _relay_body(upstream: httpx.Response):
         return  # upstream vanished mid-stream — end the relay cleanly
 
 
-class BoardProxyRouter:
+class BoardProxyRouter(Router):
     def __init__(self):
         self._routes: dict[str, int] = {}  # post_id → upstream port
         # one shared client (connection pooling); no timeout so SSE can hang
@@ -158,7 +198,7 @@ class BoardProxyRouter:
         )
 
 
-class CaddyRouter:
+class CaddyRouter(Router):
     """Production router (DESIGN §9): registers ``/s/<post_id>/*`` routes in a
     Caddy gateway via its admin API, so the board stays OUT of the data path
     (TLS, single port, restart-resilient streaming all handled by Caddy).
@@ -182,10 +222,57 @@ class CaddyRouter:
         self._basic_auth = basic_auth  # "username:bcrypt-hash" or ""
         # trust_env=False: Caddy admin API is on loopback — bypass corporate proxy.
         self._client = client or httpx.Client(timeout=5.0, trust_env=False)
+        # async reopen(post_id) — spawn-or-attach a self-reaped instance and
+        # re-register its Caddy route. Wired to the orchestrator's open (below).
+        self._reopen = None
+
+    def set_reopen(self, reopen) -> None:
+        self._reopen = reopen
 
     def mount(self, app: FastAPI) -> None:
-        # Caddy serves /s/<id>; the board does not. Nothing to mount.
-        pass
+        # Caddy proxies /s/<id> straight to a LIVE instance, so normally the
+        # board is OUT of the data path. But when an instance self-reaps
+        # (--idle-timeout), the board removes its dynamic route on the death edge
+        # → Caddy's catch-all (Caddyfile: everything → board) now falls through
+        # to THESE handlers. We spawn-or-attach (which re-registers the Caddy
+        # route) and 302 back, so the retry lands on the revived instance —
+        # parity with board-proxy's lazy revive. GET/HEAD only: a POST body
+        # can't be replayed, so it 503s (reload from the board first).
+        @app.api_route(
+            "/s/{post_id}/{path:path}",
+            methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"],
+        )
+        async def _revive(post_id: str, path: str, request: Request):
+            return await self._revive_and_redirect(post_id, request)
+
+        @app.api_route("/s/{post_id}", methods=["GET", "HEAD"])
+        async def _revive_root(post_id: str, request: Request):
+            return await self._revive_and_redirect(post_id, request)
+
+    async def _revive_and_redirect(self, post_id: str, request: Request):
+        if request.method not in ("GET", "HEAD"):
+            # can't replay a body on the redirect retry — reload from the board.
+            raise HTTPException(503, "instance stopped — reopen from the board")
+        # Already redirected once but STILL fell through → the spawn failed or
+        # the Caddy route hasn't applied yet. Don't loop: ask the browser to
+        # retry shortly instead of reviving again.
+        if "__revive" in request.query_params:
+            raise HTTPException(
+                503, "instance is starting — retry", headers={"Retry-After": "2"}
+            )
+        if self._reopen is None:
+            raise HTTPException(503, "instance stopped — reopen from the board")
+        try:
+            await self._reopen(post_id)  # spawn-or-attach + ensure_route (Caddy PUT)
+        except Exception:
+            raise HTTPException(
+                502, "instance stopped — reopen from the board"
+            ) from None
+        # route now registered in Caddy → bounce back; the retry hits the live
+        # route (the __revive marker guards against a loop if it didn't).
+        return RedirectResponse(
+            request.url.include_query_params(__revive="1"), status_code=302
+        )
 
     def _route_id(self, post_id: str) -> str:
         return f"agentboard-{post_id}"
@@ -228,3 +315,7 @@ class CaddyRouter:
 
     def remove_route(self, post_id: str) -> None:
         self._client.delete(f"{self._admin}/id/{self._route_id(post_id)}")
+
+    async def aclose(self) -> None:
+        # sync admin client — close() is idempotent (httpx no-ops if already shut)
+        self._client.close()

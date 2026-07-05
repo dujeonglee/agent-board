@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.10.0] - 2026-07-05
+
+### Added
+
+- **Caddy 게이트웨이도 idle-reap 인스턴스를 자동 재기동(revive)** — board-proxy 와 파리티.
+  `LiveEvents` 스캐너가 pid alive→dead 엣지를 감지하면 `on_death`→`router.remove_route` 로
+  Caddy 동적 라우트를 삭제(≤1s), 그러면 Caddyfile 의 `everything→board` catch-all 이 보드로
+  흘려 새 `/s/{id}` revive 핸들러가 `orchestrator.open`(spawn-or-attach + 라우트 재등록) 후
+  302 redirect → 재시도가 살아난 라우트에 안착. GET/HEAD 한정(POST body 재생 불가 → 503),
+  `?__revive=1` sentinel 로 무한루프 차단. 예전엔 Caddy 에서 죽은 방 직접 재접속이 **502** 였음.
+- **`Router` ABC + 교차 파리티 테스트** — 두 라우터(board-proxy·caddy)는 메커니즘이 완전히
+  달라 동작이 조용히 갈릴 수 있다(위 revive 가 그 사례였음). `Router(ABC)` 를 **순수 인터페이스**
+  (공유 구현 0)로 두고 `ensure_route`/`remove_route`/`set_reopen`/`mount` 를 `@abstractmethod`
+  로 선언 → 메서드 누락 구현은 **인스턴스화 시 `TypeError`**(구조적 강제). 인터페이스로 표현
+  못 하는 창발 동작은 `tests/test_router_parity.py` 가 두 라우터를 parametrize 해 고정
+  (down→GET→reopen 호출). "새 기능은 abstractmethod, 새 동작은 parity 테스트" 규율.
+
+### Fixed
+
+- **라우터 httpx 클라이언트가 종료 시 안 닫히던 gap** — `BoardProxyRouter.aclose()`(공유
+  AsyncClient 정리)가 정의만 있고 **어디서도 호출되지 않았다**(보드 재시작마다 클라이언트 누수).
+  `aclose` 를 `Router` 계약(abstractmethod)으로 올리고 `CaddyRouter` 에도 구현(sync 클라이언트
+  close), lifespan finally 에서 `await router.aclose()` 로 배선. 파리티 작업 중 표면 비대칭으로
+  드러난 건.
+
 ## [1.9.1] - 2026-07-05
 
 ### Added

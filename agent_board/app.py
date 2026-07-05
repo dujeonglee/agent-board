@@ -27,7 +27,7 @@ from agent_board.keepalive import (
     make_sse_connect,
 )
 from agent_board.orchestrator import Orchestrator, RealBackend
-from agent_board.router import BoardProxyRouter, CaddyRouter
+from agent_board.router import BoardProxyRouter, CaddyRouter, Router
 from agent_board.store import Store
 
 _STATIC = Path(__file__).parent / "static"
@@ -206,7 +206,7 @@ def create_app(
     config: Config,
     *,
     store: Store | None = None,
-    router: BoardProxyRouter | None = None,
+    router: Router | None = None,
     orchestrator=None,
     keepalive=None,
 ) -> FastAPI:
@@ -224,15 +224,23 @@ def create_app(
         keepalive = KeepAliveManager(
             connect=make_sse_connect(default_port_for(config, store))
         )
-    # let the board-proxy revive a stopped instance when its old /s/<id> URL is
-    # hit (idle-reaped → reopen on access). Caddy mode returns 502 instead.
+    # revive a self-reaped instance when its old /s/<id> URL is hit: board-proxy
+    # catches the dead-port ConnectError; Caddy falls through to the board's
+    # revive handler (its route was dropped on the death edge). Both reopen.
     if hasattr(router, "set_reopen"):
         router.set_reopen(orchestrator.open)
 
     # Live push: an mtime scanner broadcasts changed rows to EventSource clients
     # so the browser doesn't poll /api/posts (Phase 2). view_fn injected to keep
-    # live_events out of the app layer.
-    live = LiveEvents(config, store, lambda p: _post_view(config, store, p))
+    # live_events out of the app layer. on_death → drop the dead instance's
+    # gateway route so a stale /s/<id> hit revives (Caddy falls through to the
+    # board revive handler; board-proxy re-revives on next access).
+    live = LiveEvents(
+        config,
+        store,
+        lambda p: _post_view(config, store, p),
+        on_death=router.remove_route,
+    )
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -242,6 +250,8 @@ def create_app(
             yield
         finally:
             scanner.cancel()
+            if hasattr(router, "aclose"):
+                await router.aclose()  # release the router's httpx client
 
     app = FastAPI(title="agent-board", lifespan=lifespan)
     router.mount(app)  # /s/<post_id>/* reverse proxy

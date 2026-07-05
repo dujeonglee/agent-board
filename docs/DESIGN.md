@@ -176,20 +176,36 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
   (`gateway_banner`) — 예전엔 무표시라 Caddy 로 착각하기 쉬웠음.
 - 라우트 등록: open 성공 직후. 해제: 인스턴스 idle 종료 감지 시(또는 lazy — 다음 open 에 갱신).
 
-### ⚠️ 두 게이트웨이는 전송만 같고 동작이 완전 동등하지 않음 (전환 시 유의)
+### 두 게이트웨이 동작 파리티 (전환 시 특성 차이)
 | 기능 | board-proxy (기본) | caddy |
 |---|---|---|
 | `/s/<id>/*` 프록시 · SSE 무버퍼 · 업로드 | ✅ | ✅ (Caddy 네이티브) |
 | 라우트 등록/해제(`ensure_route`/`remove_route`) | ✅ | ✅ |
-| **idle-reap 인스턴스 접속 시 자동 재기동** | ✅ (`set_reopen`→orchestrator.open, GET/HEAD 재시도) | ❌ **502** — 보드 UI 에서 "열기" 재요청 필요 |
+| **idle-reap 인스턴스 접속 시 자동 재기동** | ✅ dead-port ConnectError→revive | ✅ **death 엣지에 라우트 삭제→Caddyfile catch-all fall-through→보드 revive 핸들러→reopen+302** |
 | **TLS 종단 · 단일 포트** | ❌ (평문 HTTP, 보드 포트) | ✅ |
 | **`/s/<id>` basic-auth** | ❌ (보드 앞단 네트워크 격리에 의존) | ✅ (라우트에 임베드) |
-| 보드가 data-path 안에 있나 | 예(중계) | 아니오(Caddy 직결) |
+| 보드가 data-path 안에 있나 | 예(중계) | 아니오(Caddy 직결; revive 시에만 잠깐) |
 
-→ board-proxy = **개발/무의존 단일박스에 유리**(리로드만으로 죽은 방 부활), caddy = **프로덕션
-하드닝**(TLS·인증·견고). "동일 기능"이 아니라 **역할이 다른 두 데이터 플레인**. 특히 Caddy 로
-가면 idle-reap 뒤 직접 URL 재접속이 502 가 되므로, 프로덕션에서 그 UX 가 필요하면 idle-timeout
-정책이나 Caddy 레벨 revive 훅을 별도로 검토해야 함.
+- **revive 파리티 (양쪽 동일 의미론)**: 죽은 인스턴스의 `/s/<id>` GET/HEAD 재접속 시 자동
+  spawn-or-attach 후 원래 URL 로 이어짐(POST 는 body 재생 불가라 양쪽 다 503/재열기). Caddy 는
+  경로 밖이라, `LiveEvents` 스캐너가 pid alive→dead 엣지에서 `on_death`→`remove_route` 로
+  Caddy 라우트를 지우고(≤1s), 그러면 Caddyfile 의 `everything→board` catch-all 이 보드로 흘려
+  보드 revive 핸들러가 `reopen`(=orchestrator.open, Caddy 라우트 재등록) 후 302. `?__revive=1`
+  sentinel 로 재-fall-through 무한루프 차단(→503 Retry-After).
+- **잔여 차이는 전송 특성뿐**: TLS·단일포트·인증. board-proxy = 개발/무의존 단일박스,
+  caddy = 프로덕션 하드닝.
+
+### Router 계약 — 구조적 + 동작 파리티 (divergence 방지)
+두 라우터는 **메커니즘이 완전히 달라**(in-process 프록시 vs 외부 admin API) 공유 구현이 없다.
+그래서 `Router(ABC)` 는 **순수 인터페이스**(공유 코드 0 → 결합 없음)로 메서드 계약만 고정:
+`ensure_route`/`remove_route`/`set_reopen`/`mount`/`aclose` 를 `@abstractmethod` 로 선언 → 한쪽에
+capability 를 abstractmethod 로 추가하면 다른 라우터는 **인스턴스화 시 `TypeError`**(구조적 강제).
+(`aclose` = 종료 시 httpx 클라이언트 정리 — lifespan finally 에서 호출. board-proxy 에만 있고
+아무 데서도 안 불리던 gap 을 계약으로 끌어올려 배선.)
+단 인터페이스로 표현 못 하는 **창발 동작**(revive-on-stale-hit 처럼 — 실제로 한 번 조용히 갈렸음)
+은 `tests/test_router_parity.py` 가 두 라우터를 parametrize 해 핀으로 고정(down→GET→reopen 호출).
+"새 기능은 abstractmethod, 새 동작은 parity 테스트" 가 규율. (교훈: wire-format self-contained
+와 동형 — 공유 베이스로 묶지 말고 계약+파리티 테스트로 invariant 고정.)
 
 **SSE 무버퍼 — 클라 disconnect 시 upstream 닫기**: `body()` generator 의 `finally` 에서
 `aclose()` 하면 disconnect 로 generator 가 취소될 때 그 await 가 미완료될 수 있어 upstream

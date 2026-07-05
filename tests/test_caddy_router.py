@@ -30,15 +30,18 @@ def _router_with_recorder(**kw):
 
 
 class TestCaddyRouter:
-    def test_mount_is_noop(self):
-        # Caddy routes /s/<id>, not the board — mount must add nothing.
+    def test_mount_registers_revive_routes(self):
+        # Caddy proxies /s/<id> to a live instance, but the board mounts a
+        # GET/HEAD revive handler for the fall-through case (route dropped on the
+        # instance's death edge → Caddyfile catch-all lands here → reopen).
         from fastapi import FastAPI
 
         app = FastAPI()
-        before = len(app.routes)
         router, _ = _router_with_recorder()
         router.mount(app)
-        assert len(app.routes) == before
+        paths = {getattr(r, "path", "") for r in app.routes}
+        assert "/s/{post_id}/{path:path}" in paths
+        assert "/s/{post_id}" in paths
 
     def test_ensure_route_puts_reverse_proxy(self):
         router, calls = _router_with_recorder()
@@ -82,3 +85,88 @@ class TestCaddyRouter:
         router.remove_route("p1")
         assert calls[-1]["method"] == "DELETE"
         assert calls[-1]["url"].endswith("/id/agentboard-p1")
+
+
+def _revive_client(reopen=None):
+    """A minimal FastAPI app with ONLY the CaddyRouter revive handlers mounted,
+    plus an optional async ``reopen`` hook. redirects are NOT auto-followed so
+    the 302 is inspectable."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    router, calls = _router_with_recorder()
+    if reopen is not None:
+        router.set_reopen(reopen)
+    app = FastAPI()
+    router.mount(app)
+    return TestClient(app, follow_redirects=False), calls
+
+
+class TestCaddyRevive:
+    def test_get_fallthrough_reopens_then_redirects(self):
+        # Caddy fell through (route dropped after self-reap) → the board revives
+        # and 302s back so the retry hits the freshly-registered live route.
+        seen = []
+
+        async def reopen(post_id):
+            seen.append(post_id)
+            return f"/s/{post_id}/"
+
+        client, _ = _revive_client(reopen)
+        r = client.get("/s/p1/api/health")
+        assert r.status_code == 302
+        assert seen == ["p1"]  # reopen called exactly once
+        # redirect back to the same path, marked so a re-fall-through won't loop
+        loc = r.headers["location"]
+        assert "/s/p1/api/health" in loc and "__revive=1" in loc
+
+    def test_revive_marker_breaks_the_loop(self):
+        # Already redirected once but STILL fell through (route not applied yet /
+        # spawn failed) → 503 Retry-After, and reopen is NOT called again.
+        seen = []
+
+        async def reopen(post_id):
+            seen.append(post_id)
+
+        client, _ = _revive_client(reopen)
+        r = client.get("/s/p1/api/health?__revive=1")
+        assert r.status_code == 503
+        assert r.headers.get("retry-after") == "2"
+        assert seen == []  # no re-revive → no infinite loop
+
+    def test_root_path_revives(self):
+        seen = []
+
+        async def reopen(post_id):
+            seen.append(post_id)
+
+        client, _ = _revive_client(reopen)
+        r = client.get("/s/p1")
+        assert r.status_code == 302
+        assert seen == ["p1"]
+
+    def test_non_get_does_not_revive(self):
+        # a POST body can't be replayed on the redirect retry → 503, no reopen.
+        seen = []
+
+        async def reopen(post_id):
+            seen.append(post_id)
+
+        client, _ = _revive_client(reopen)
+        r = client.post("/s/p1/api/query", json={"q": "hi"})
+        assert r.status_code == 503
+        assert seen == []
+
+    def test_reopen_failure_is_502(self):
+        async def reopen(post_id):
+            raise RuntimeError("spawn failed")
+
+        client, _ = _revive_client(reopen)
+        r = client.get("/s/p1/api/health")
+        assert r.status_code == 502
+
+    def test_no_reopen_hook_is_503(self):
+        # mount without set_reopen (defensive) → 503, never crashes.
+        client, _ = _revive_client(reopen=None)
+        r = client.get("/s/p1/api/health")
+        assert r.status_code == 503

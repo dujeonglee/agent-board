@@ -48,10 +48,12 @@ agent-board
 | `AGENT_BOARD_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API (`gateway=caddy` 일 때만) |
 | `AGENT_BOARD_CADDY_BASIC_AUTH` | `""` | Caddy 라우트 basic-auth `user:bcrypt` (`gateway=caddy` 일 때만) |
 
-> **게이트웨이 두 모드는 전송만 같고 동작이 완전 동등하지 않다.** `board-proxy`(기본)는
-> idle-reap 된 방을 **직접 URL 재접속만으로 자동 재기동**하지만 TLS·인증이 없다. `caddy` 는
-> TLS·단일포트·라우트 basic-auth 를 주지만 idle-reap 뒤 직접 재접속은 **502**(보드에서 "열기"
-> 재요청 필요). 기동 로그에 활성 게이트웨이가 표시된다. 자세히는 `docs/DESIGN.md` §9.
+> **두 게이트웨이는 동작 파리티가 맞춰져 있다** — idle-reap 된 방을 직접 URL 재접속만으로
+> 자동 재기동(revive)하는 것은 이제 **양쪽 다** 된다(board-proxy 는 in-process,
+> caddy 는 death 엣지에 라우트 삭제→보드 revive 핸들러로 fall-through). 남는 차이는 전송 특성:
+> `caddy` 만 **TLS·단일포트·`/s/<id>` basic-auth** 를 준다. 기동 로그에 활성 게이트웨이가
+> 표시되고, `Router` ABC + `tests/test_router_parity.py` 가 두 구현의 파리티를 강제한다.
+> 자세히는 `docs/DESIGN.md` §9.
 
 > 로그는 콘솔이 아니라 파일로 빠집니다 — 콘솔엔 startup·에러만:
 > access 로그 → **`<DATA_DIR>/board.log`**(회전 5MB×3),

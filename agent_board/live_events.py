@@ -24,10 +24,15 @@ class LiveEvents:
     post to its API row dict (``_post_view``), injected to avoid importing the
     app layer here."""
 
-    def __init__(self, config, store, view_fn, *, interval: float = 1.0):
+    def __init__(self, config, store, view_fn, *, on_death=None, interval: float = 1.0):
         self._config = config
         self._store = store
         self._view_fn = view_fn
+        # on_death(post_id): called once when a post's instance transitions
+        # alive→dead (self-reap / crash). Injected so LiveEvents stays free of
+        # routing — the app wires it to the gateway's route removal, which lets
+        # Caddy fall through to the board's revive handler on the next hit.
+        self._on_death = on_death
         self._interval = interval
         self._subscribers: set[asyncio.Queue] = set()
         self._sigs: dict[str, tuple] = {}
@@ -80,7 +85,13 @@ class LiveEvents:
         for post in posts:
             seen.add(post.post_id)
             sig = self._sig(post)
-            if self._sigs.get(post.post_id) != sig:
+            prev = self._sigs.get(post.post_id)
+            if prev != sig:
+                # alive→dead edge (prev[2] was True, now False): the instance
+                # self-reaped → drop its gateway route. Only on a real edge, and
+                # never on a post's first observation (prev is None).
+                if self._on_death and prev is not None and prev[2] and not sig[2]:
+                    self._on_death(post.post_id)
                 self._sigs[post.post_id] = sig
                 events.append({"type": "post_update", "post": self._view_fn(post)})
         for gone in set(self._sigs) - seen:

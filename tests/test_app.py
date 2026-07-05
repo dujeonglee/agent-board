@@ -196,9 +196,11 @@ class TestGatewaySelection:
             p for r in app.routes if (p := getattr(r, "path", "")).startswith("/s/")
         ]
 
-    def test_caddy_gateway_does_not_mount_proxy_catchall(self, tmp_path):
-        # Caddy owns /s/<id> routing → the board must not mount the proxy.
-        assert self._proxy_paths(tmp_path, "caddy") == []
+    def test_caddy_gateway_mounts_revive_fallback(self, tmp_path):
+        # Caddy proxies live /s/<id> itself, but the board mounts a GET/HEAD
+        # revive handler for the fall-through (route dropped on death → reopen).
+        # Behaviour (302/503) is covered in test_caddy_router.TestCaddyRevive.
+        assert self._proxy_paths(tmp_path, "caddy")  # non-empty (revive routes)
 
     def test_board_proxy_gateway_mounts_catchall(self, tmp_path):
         assert self._proxy_paths(tmp_path, "board-proxy")  # non-empty
@@ -322,6 +324,36 @@ class TestEventsStream:
         js = c.get("/static/app.js").text
         assert 'new EventSource("/api/events")' in js
         assert "setInterval(load" not in js  # the 5s poll is gone
+
+    def test_lifespan_closes_router(self, tmp_path):
+        # board shutdown must release the router's httpx client (aclose) — else
+        # a persistent client leaks on every board restart.
+        closed = []
+
+        class SpyRouter:
+            def mount(self, app):
+                pass
+
+            def ensure_route(self, post_id, port):
+                pass
+
+            def remove_route(self, post_id):
+                pass
+
+            async def aclose(self):
+                closed.append(True)
+
+        cfg = Config(data_dir=tmp_path / "d", workspaces_root=tmp_path / "w")
+        app = create_app(
+            cfg,
+            store=Store(cfg.db_path),
+            router=SpyRouter(),
+            orchestrator=FakeOrch(),
+            keepalive=FakeKeepalive(),
+        )
+        with TestClient(app):  # enter + exit lifespan (startup/shutdown)
+            pass
+        assert closed == [True]
 
 
 class TestGatewayBanner:

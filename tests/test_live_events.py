@@ -34,10 +34,15 @@ def _write(d: Path, name: str, body: dict, *, mtime: float) -> None:
     os.utime(p, (mtime, mtime))
 
 
-def _live(tmp_path, view_fn=None):
+def _live(tmp_path, view_fn=None, on_death=None):
     cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
     store = Store(cfg.db_path)
-    live = LiveEvents(cfg, store, view_fn or (lambda p: {"post_id": p.post_id}))
+    live = LiveEvents(
+        cfg,
+        store,
+        view_fn or (lambda p: {"post_id": p.post_id}),
+        on_death=on_death,
+    )
     return cfg, store, live
 
 
@@ -152,6 +157,56 @@ class TestScan:
         d = cfg.workspace_for(post.post_id) / ".agent-cli" / "sessions" / "S1"
         _write(d, "status.json", {"busy": True}, mtime=5000.0)
         assert live._scan()[0]["post"]["topic"] == "t"
+
+
+class TestOnDeath:
+    """alive→dead edge → on_death(post_id) so the app drops the gateway route."""
+
+    def test_fires_once_on_alive_to_dead_edge(self, tmp_path, monkeypatch):
+        deaths = []
+        cfg, store, live = _live(tmp_path, on_death=deaths.append)
+        _seed_session(cfg, store)
+        alive = {"v": True}
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: alive["v"])
+        live._prime()  # baseline: alive
+        alive["v"] = False  # instance self-reaped
+        post = store.list_posts()[0]
+        live._scan()
+        assert deaths == [post.post_id]
+        live._scan()  # still dead, sig unchanged → no repeat
+        assert deaths == [post.post_id]
+
+    def test_not_fired_on_revive_dead_to_alive(self, tmp_path, monkeypatch):
+        deaths = []
+        cfg, store, live = _live(tmp_path, on_death=deaths.append)
+        _seed_session(cfg, store)
+        alive = {"v": False}
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: alive["v"])
+        live._prime()  # baseline: dead
+        alive["v"] = True  # revived
+        live._scan()
+        assert deaths == []  # dead→alive is not a death
+
+    def test_not_fired_on_first_observation_of_dead_post(self, tmp_path, monkeypatch):
+        # a post whose FIRST scan is already dead (prev is None) must not fire —
+        # only a genuine alive→dead transition counts.
+        deaths = []
+        cfg, store, live = _live(tmp_path, on_death=deaths.append)
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: False)
+        live._prime()  # empty baseline
+        _seed_session(cfg, store, pid=0)  # new post, pid 0 → dead
+        live._scan()
+        assert deaths == []
+
+    def test_none_callback_does_not_crash(self, tmp_path, monkeypatch):
+        cfg, store, live = _live(tmp_path, on_death=None)
+        _seed_session(cfg, store)
+        alive = {"v": True}
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: alive["v"])
+        live._prime()
+        alive["v"] = False
+        live._scan()  # no on_death wired → must not raise
+        assert live._scan() == []
 
 
 class TestSubscription:
