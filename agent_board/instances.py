@@ -119,6 +119,19 @@ def read_web_json(workspace: Path, session_id: str) -> dict | None:
         return None
 
 
+def read_status_json(workspace: Path, session_id: str) -> dict | None:
+    """The instance's live status sidecar (``{busy, awaiting_input, viewers}``),
+    or None if absent/corrupt. agent-cli >= 4.27.0 writes it on every
+    viewer/busy/awaiting change, so the board reads a local file instead of
+    polling ``GET /api/health`` (older instances have no file → caller falls
+    back to health)."""
+    p = _session_dir(workspace, session_id) / "status.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
 def discover_session_id_by_pid(workspace: Path, pid: int) -> str | None:
     """After a fresh spawn (new session), find the session_id by matching the
     web.json whose ``pid`` equals the spawned child pid — robust against stale

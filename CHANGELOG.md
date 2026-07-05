@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0] - 2026-07-05
+
+### Changed
+
+- **인스턴스 라이브 상태를 `/api/health` 폴링 대신 `status.json` 파일로 읽음** — 목록의
+  status/busy/awaiting/viewers 를 매 새로고침마다 인스턴스별 HTTP `GET /api/health` 로
+  폴링하던 것을, agent-cli(≥ 4.27.0)가 기록하는 `<session_dir>/status.json` **로컬 파일 read**
+  로 대체했다. `instances.read_status_json` 추가, `sessions.live_state` 가 파일을 우선 읽고
+  **없으면(옛 인스턴스) 기존 `/api/health` 로 폴백**(같은 `{busy, awaiting_input, viewers}`
+  형태) → N개 인스턴스 × 새로고침마다의 HTTP 팬아웃 소멸. (보드 폴링 제거 로드맵 1단계.
+  Phase 2 예정: FS watch + 보드 SSE 로 프론트까지 push.)
+
 ## [1.6.0] - 2026-07-05
 
 ### Removed

@@ -5,7 +5,8 @@ is the INTEGRATION CONTRACT (couples to agent-cli's on-disk format; bump
 carefully across agent-cli versions):
 
 - ``last_query``  ← ``history.jsonl`` last ``{role:user, kind:query}`` record.
-- ``status``      ← ``web.json`` presence + pid alive + /api/health.
+- ``status``      ← ``web.json`` presence + pid alive + ``status.json`` sidecar
+                    (agent-cli >= 4.27.0), falling back to ``/api/health``.
 """
 
 from __future__ import annotations
@@ -52,14 +53,17 @@ _IDLE = {"status": "idle", "awaiting_input": False, "viewers": 0}
 
 
 def live_state(workspace: Path, session_id: str | None) -> dict:
-    """``{"status", "awaiting_input", "viewers"}`` from ONE /api/health call:
+    """``{"status", "awaiting_input", "viewers"}`` — read from the instance's
+    ``status.json`` sidecar (a local file), falling back to ``GET /api/health``:
 
     - status: ``working`` (LLM responding) / ``running`` (up, idle) / ``idle`` (down),
     - awaiting_input: an ask/confirm prompt is waiting for a reply,
     - viewers: live browser subscribers on the instance (0 when down).
 
-    agent-cli >= 4.17.2 supplies ``busy``; >= 4.17.5 ``awaiting_input``;
-    >= 4.17.11 ``viewers`` (missing fields degrade gracefully)."""
+    agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
+    path is a file read (no HTTP). Older instances have no file → fall back to
+    ``/api/health`` (same ``{busy, awaiting_input, viewers}`` shape). Missing
+    fields degrade gracefully."""
     if not session_id:
         return dict(_IDLE)
     info = instances.read_web_json(workspace, session_id)
@@ -68,13 +72,17 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     pid, port = info.get("pid"), info.get("port")
     if not (pid and instances.pid_alive(pid) and port):
         return dict(_IDLE)
-    health = instances.health_info(port)
-    if health is None:
+    # Prefer the local status.json sidecar; fall back to an HTTP health poll for
+    # pre-4.27.0 instances that don't write it.
+    live = instances.read_status_json(workspace, session_id)
+    if live is None:
+        live = instances.health_info(port)
+    if live is None:
         return dict(_IDLE)
     return {
-        "status": "working" if health.get("busy") else "running",
-        "awaiting_input": bool(health.get("awaiting_input")),
-        "viewers": int(health.get("viewers") or 0),
+        "status": "working" if live.get("busy") else "running",
+        "awaiting_input": bool(live.get("awaiting_input")),
+        "viewers": int(live.get("viewers") or 0),
     }
 
 

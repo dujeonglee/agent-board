@@ -168,3 +168,47 @@ class TestStatus:
             lambda port: {"busy": False, "awaiting_input": False, "viewers": 3},
         )
         assert sessions.live_state(ws, "S1")["viewers"] == 3
+
+    def _status_json(self, ws, **fields):
+        d = ws / ".agent-cli" / "sessions" / "S1"
+        d.mkdir(parents=True, exist_ok=True)
+        info = {"busy": False, "awaiting_input": False, "viewers": 0}
+        info.update(fields)
+        (d / "status.json").write_text(json.dumps(info))
+
+    def test_live_state_prefers_status_file_over_health(self, tmp_path, monkeypatch):
+        # status.json present (agent-cli >= 4.27.0) → read the file, NEVER HTTP
+        ws = self._web_json(tmp_path)
+        self._status_json(ws, busy=True, awaiting_input=True, viewers=2)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+
+        def _boom(port):
+            raise AssertionError("health_info must not be called when file exists")
+
+        monkeypatch.setattr(sessions.instances, "health_info", _boom)
+        assert sessions.live_state(ws, "S1") == {
+            "status": "working",
+            "awaiting_input": True,
+            "viewers": 2,
+        }
+
+    def test_live_state_falls_back_to_health_without_status_file(
+        self, tmp_path, monkeypatch
+    ):
+        # older instance (no status.json) → fall back to the HTTP health poll
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            sessions.instances, "health_info", lambda port: {"busy": True, "viewers": 1}
+        )
+        state = sessions.live_state(ws, "S1")
+        assert state["status"] == "working" and state["viewers"] == 1
+
+    def test_live_state_corrupt_status_file_falls_back(self, tmp_path, monkeypatch):
+        ws = self._web_json(tmp_path)
+        (ws / ".agent-cli" / "sessions" / "S1" / "status.json").write_text("{bad")
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            sessions.instances, "health_info", lambda port: {"busy": False}
+        )
+        assert sessions.live_state(ws, "S1")["status"] == "running"

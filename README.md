@@ -14,6 +14,8 @@
 - **`agent-cli` 가 PATH 에 있어야 함** (보드가 `agent-cli web ...` 를 spawn).
   상태 표시(busy)·뒤로가기 정리까지 쓰려면 **agent-cli ≥ 4.17.3**, **접속자 수 표시 +
   게시물별 모델 변경**까지 쓰려면 **agent-cli ≥ 4.17.11**(`/api/health` 의 `viewers`) 권장.
+  **≥ 4.27.0** 이면 라이브 상태를 `status.json` 파일에서 읽어 **`/api/health` 폴링을 안 함**
+  (그 미만은 자동으로 health 폴백).
 - 모델 백엔드(omlx-server 등)는 agent-cli 설정을 그대로 사용.
 
 ## 설치 · 실행

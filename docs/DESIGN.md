@@ -32,7 +32,7 @@ agent_board/
   models.py       Post 데이터클래스
   store.py        SQLite 글 레지스트리 (CRUD, 단일 board.db)
   orchestrator.py 글 open = spawn-or-attach 조율 (per-post lock)
-  instances.py    agent-cli spawn · free-port · web.json 읽기 · health · pid 생존
+  instances.py    agent-cli spawn · free-port · web.json/status.json 읽기 · health(폴백) · pid 생존
   router.py       게이트웨이 연동 (Router 인터페이스 + CaddyRouter / BoardProxyRouter)
   keepalive.py    force-active = 인스턴스에 SSE 연결 유지 (asyncio task)
   sessions.py     agent-cli 세션 파일 읽기 (last_query, status)  ← on-disk 통합 계약
@@ -131,13 +131,18 @@ return {"url": f"/s/{id}/?token={token}"}      # 프론트가 location 이동
   `stop_instance`(web.json 의 pid 로 SIGTERM)로, 삭제 시 rmtree 전에 호출(고아 방지).
 
 ## 7. status · last_query 유도 (`sessions.py`) — on-disk 통합 계약
-agent-cli 를 수정 안 하므로 **세션 파일 + /api/health 를 직접 읽음**(통합 지점):
-- **status (3단계)**: `web.json` 없음/pid 죽음/health 실패 → `idle`(꺼짐). 살아있으면
-  `/api/health` 의 `busy` 로 → `working`(LLM 응답 중) / `running`(대기). health 한 번
-  호출로 liveness+busy 동시 판정. `busy` 필드 없는 옛 agent-cli 는 `running` 으로 degrade.
+agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지점):
+- **status (3단계)**: `web.json` 없음/pid 죽음 → `idle`(꺼짐). 살아있으면 라이브 상태를
+  **`status.json` 사이드카**(`{busy, awaiting_input, viewers}`, agent-cli ≥ 4.27.0 가 변화마다
+  기록)에서 읽어 `busy` → `working`(LLM 응답 중) / `running`(대기). **파일 read 라 HTTP 폴링 없음.**
+  `status.json` 없는 옛 인스턴스(< 4.27.0)는 `GET /api/health` 로 **폴백**(같은 `{busy,…}` 형태).
+  둘 다 실패 → `idle`. (`instances.read_status_json` → 없으면 `health_info`.)
 - **last_query**: `<workspace>/.agent-cli/sessions/<sid>/history.jsonl` 마지막 user query
   레코드(`role=user, kind=query`)의 text. (세션 없으면 None.)
-- ⚠️ agent-cli on-disk + /api/health 포맷에 의존 → "통합 계약"(버전 호환 주의).
+- ⚠️ agent-cli on-disk(`status.json`/`web.json`/history) + /api/health 폴백 포맷에 의존
+  → "통합 계약"(버전 호환 주의).
+- ⏳ **Phase 2(예정)**: 보드가 `status.json` 을 FS watch(무의존 mtime 스캔) → 보드 SSE 로
+  프론트에 push → 프론트 폴링 제거(즉시 반영).
 
 ## 8. force-active (`keepalive.py`)
 - 토글 ON: 그 인스턴스가 없으면 먼저 open(spawn) 후, **컨트롤 플레인이 그 인스턴스의
