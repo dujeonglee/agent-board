@@ -28,7 +28,10 @@ agent-board = "agent_board.app:main"
 include = ["agent_board*"]
 
 [tool.setuptools.package-data]
-agent_board = ["static/*"]
+# 최상위("static/*") + 재귀("static/**/*") 둘 다 — 재귀 글롭만으로는
+# 최상위 파일이 fnmatch 가드에서 빠지고, 비재귀만으로는 하위 디렉토리
+# (fonts/ 등)를 놓친다 (agent-cli woff2 누락 사고와 동일 클래스).
+agent_board = ["static/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
