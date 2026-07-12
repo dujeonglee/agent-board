@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.11.0] - 2026-07-12
+
+### Added
+
+- **⚙ admin 페이지 (`/admin`)** — agent-cli `config.json`/`models.json` 편집 표면
+  (기존 "board 는 registry 를 읽기만" 경계를 의도적으로 반전 — 사용자 결정).
+  - `config.json`: 알려진 4필드(provider/base_url/api_key/default_model) 폼 편집 —
+    api_key 는 GET 마스킹(`***`)·PUT keep-sentinel 로 평문 키가 브라우저에 안 나감,
+    폼 밖 키 보존.
+  - `models.json`: endpoint `GET /models` 프로브와 병합해 served/missing/NEW 분류.
+    missing 은 개별/일괄 삭제(항상 confirm — 자동 삭제 없음), NEW 는 **agent-cli 의
+    capability 탐지기 재사용**(`_detect_runtime_capabilities` lazy import, executor
+    오프로드)으로 entry 초안 생성 → 검토 후 저장, 실패 시 수동 입력 폴백.
+  - 도메인 로직은 `agent_board/admin.py` (FastAPI 무의존), 라우트
+    `GET/PUT /api/admin/config`·`GET /api/admin/models`·`POST …/models/detect`·
+    `PUT/DELETE /api/admin/models/{id}`. 쓰기는 원자적(mkstemp+replace — agent-cli
+    인스턴스의 auto-detect 동시 저장과 안전). `Config.agent_cli_config_json` knob 추가.
+  - 프로브 실패는 degrade(상태 `unknown`·registry 편집은 계속 가능), Anthropic 은
+    `/v1/models`+`x-api-key` 로 프로브.
+
 ## [1.10.0] - 2026-07-05
 
 ### Added

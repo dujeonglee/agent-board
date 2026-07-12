@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-board"
-version = "1.10.1"
+version = "1.11.0"
 description = "Forum-style board over agent-cli — each post is an agent-cli session + workspace"
 requires-python = ">=3.10"
 dependencies = [

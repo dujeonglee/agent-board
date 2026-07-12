@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agent-board admin</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* admin 전용 소품 — 본체 style.css 토큰 위에 얹는 최소 레이어 */
+    .adm-section { margin: 1.2rem 0; }
+    .adm-section h2 { font-size: 1.05rem; margin-bottom: .5rem; }
+    .adm-form { display: grid; grid-template-columns: 10rem 1fr; gap: .45rem .8rem; max-width: 44rem; align-items: center; }
+    .adm-form input, .adm-form select { padding: .35rem .5rem; }
+    .adm-actions { margin-top: .7rem; display: flex; gap: .6rem; align-items: center; }
+    .adm-note { color: var(--muted, #888); font-size: .85rem; }
+    table.adm-models { border-collapse: collapse; width: 100%; max-width: 72rem; }
+    table.adm-models th, table.adm-models td { border-bottom: 1px solid var(--border, #ddd3); padding: .4rem .55rem; text-align: left; font-size: .9rem; }
+    .badge { display: inline-block; padding: .05rem .45rem; border-radius: .6rem; font-size: .78rem; }
+    .badge.served  { background: #2e7d3222; color: #43a047; }
+    .badge.missing { background: #c6282822; color: #e53935; }
+    .badge.new     { background: #1565c022; color: #1e88e5; }
+    .badge.unknown { background: #8882;     color: #999; }
+    .adm-status { min-height: 1.2rem; }
+    .adm-status.err { color: #e53935; }
+    .adm-status.ok  { color: #43a047; }
+    dialog#entry-dlg { max-width: 34rem; width: 90%; border: 1px solid var(--border, #888); border-radius: .5rem; background: var(--bg, #fff); color: inherit; }
+    dialog#entry-dlg::backdrop { background: #0008; }
+    #entry-form { display: grid; grid-template-columns: 14rem 1fr; gap: .4rem .7rem; align-items: center; margin: .8rem 0; }
+    button[disabled] { opacity: .5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><a href="/" style="text-decoration:none;color:inherit">agent-board</a> · ⚙ admin</h1>
+  </header>
+
+  <section class="adm-section" id="cfg">
+    <h2>config.json <span class="adm-note" id="cfg-path"></span></h2>
+    <div class="adm-form">
+      <label for="cfg-provider">provider</label>
+      <select id="cfg-provider">
+        <option value="openai">openai</option>
+        <option value="anthropic">anthropic</option>
+      </select>
+      <label for="cfg-base-url">base_url</label>
+      <input id="cfg-base-url" type="text" placeholder="http://127.0.0.1:8000/v1">
+      <label for="cfg-api-key">api_key</label>
+      <input id="cfg-api-key" type="text" placeholder="(설정됨: *** — 바꿀 때만 입력)" autocomplete="off">
+      <label for="cfg-default-model">default_model</label>
+      <input id="cfg-default-model" type="text" placeholder="모델 id">
+    </div>
+    <div class="adm-actions">
+      <button id="cfg-save" type="button">💾 저장</button>
+      <span class="adm-note">api_key 를 비우거나 *** 로 두면 기존 키가 유지됩니다. 그 외 키는 손대지 않습니다.</span>
+    </div>
+    <div class="adm-status" id="cfg-status"></div>
+  </section>
+
+  <section class="adm-section" id="models">
+    <h2>models.json
+      <button id="models-refresh" type="button" title="endpoint 재프로브">↻</button>
+    </h2>
+    <div class="adm-status" id="models-status"></div>
+    <table class="adm-models">
+      <thead><tr>
+        <th>모델</th><th>상태</th><th>ctx</th><th>max out</th><th>structured</th><th>thinking</th><th></th>
+      </tr></thead>
+      <tbody id="models-body"></tbody>
+    </table>
+    <p class="adm-note">
+      <span class="badge served">served</span> endpoint 에서 서빙 중 ·
+      <span class="badge missing">missing</span> registry 에만 있음(서버에서 사라짐 — 삭제 후보) ·
+      <span class="badge new">NEW</span> 서버에만 있음(탐지/등록 후보)
+    </p>
+    <div class="adm-actions">
+      <button id="models-clean" type="button">🗑 missing 전체 정리</button>
+    </div>
+  </section>
+
+  <dialog id="entry-dlg">
+    <h3 id="entry-title">모델 편집</h3>
+    <form id="entry-form" method="dialog">
+      <label>context_window</label><input id="ef-ctx" type="number" min="1">
+      <label>max_output_tokens</label><input id="ef-maxout" type="number" min="1">
+      <label>supports_structured_output</label><input id="ef-structured" type="checkbox">
+      <label>supports_strict_schema</label><input id="ef-strict" type="checkbox">
+      <label>supports_thinking</label><input id="ef-thinking" type="checkbox">
+      <label>thinking_budget</label><input id="ef-budget" type="number" min="0">
+      <label>thinking_format</label><input id="ef-format" type="text" placeholder="(빈값 가능)">
+    </form>
+    <div class="adm-actions">
+      <button id="entry-save" type="button">💾 저장</button>
+      <button id="entry-cancel" type="button">취소</button>
+      <span class="adm-status" id="entry-status"></span>
+    </div>
+  </dialog>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

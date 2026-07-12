@@ -83,6 +83,17 @@ agent-board
    이미 새로 spawn 하므로).
 5. **유지(force-active)**: 접속자 0 이어도 인스턴스를 살려둠(idle 종료 방지).
 6. **🗑 삭제**: 글 + 인스턴스 종료 + 워크스페이스 삭제.
+7. **⚙ admin** (`/admin`, 헤더 우측): agent-cli 의 `config.json`/`models.json` 편집 페이지.
+   - **config.json**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
+     화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 외 키는 보존.
+     변경은 **새로 여는 인스턴스부터** 적용(떠 있는 방은 🔄 재실행).
+   - **models.json**: config 의 endpoint 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
+     `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 "missing 전체 정리") /
+     `NEW`(서버에만 있음 — **🔍 탐지** 버튼이 agent-cli 의 capability 자동 탐지를 돌려
+     entry 초안을 채우고, 검토·수정 후 저장; 탐지 실패 시 수동 입력). 편집은 ✎ 다이얼로그
+     (context_window/max_output_tokens/structured/strict/thinking/budget/format).
+   - 자동 삭제는 없음 — 모든 파괴적 동작은 confirm 클릭으로. 쓰기는 원자적(temp+replace)이라
+     agent-cli 인스턴스의 auto-detect 저장과 겹쳐도 안전.
 
 ## 아키텍처 · 게이트웨이
 `AGENT_BOARD_GATEWAY` 로 라우팅 데이터 평면을 고른다:

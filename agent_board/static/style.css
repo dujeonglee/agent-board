@@ -135,3 +135,7 @@ header h1 { margin: 0; font-size: 18px; }
   .post-side { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
   .post-last { white-space: normal; }
 }
+
+/* admin link (⚙) — header 우측 */
+#admin-link { margin-left: auto; text-decoration: none; font-size: 1.1rem; opacity: .7; }
+#admin-link:hover { opacity: 1; }

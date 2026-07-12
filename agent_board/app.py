@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agent_board import instances, models_registry, sessions
+from agent_board import admin
 from agent_board.config import Config
 from agent_board.live_events import LiveEvents
 from agent_board.keepalive import (
@@ -267,6 +268,77 @@ def create_app(
     async def list_models():
         # selectable models from agent-cli's registry (admin-managed)
         return models_registry.list_models(config.models_json)
+
+    # ── Admin (⚙): agent-cli config.json / models.json 편집 ──────────
+    # 도메인 로직은 admin.py (전송 계층 분리). 블로킹 I/O·프로브·탐지는
+    # 전부 executor 오프로드 — SSE 이벤트루프 보호 (agent-cli C3 교훈).
+
+    @app.get("/admin")
+    async def admin_page():
+        return FileResponse(_STATIC / "admin.html")
+
+    def _admin_call(fn, *args):
+        loop = asyncio.get_event_loop()
+        return loop.run_in_executor(None, fn, *args)
+
+    @app.get("/api/admin/config")
+    async def admin_get_config():
+        try:
+            return await _admin_call(admin.get_config, config.agent_cli_config_json)
+        except admin.AdminError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.put("/api/admin/config")
+    async def admin_put_config(body: dict):
+        try:
+            return await _admin_call(
+                admin.update_config, body, config.agent_cli_config_json
+            )
+        except admin.AdminError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.get("/api/admin/models")
+    async def admin_list_models():
+        try:
+            return await _admin_call(
+                admin.list_models_with_status,
+                config.models_json,
+                config.agent_cli_config_json,
+            )
+        except admin.AdminError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post("/api/admin/models/detect")
+    async def admin_detect_model(body: dict):
+        model_id = (body or {}).get("model", "")
+        if not model_id:
+            raise HTTPException(status_code=400, detail="model 필드가 필요합니다")
+        try:
+            entry = await _admin_call(
+                admin.detect_model_entry, model_id, config.agent_cli_config_json
+            )
+        except admin.AdminError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        return {"model": model_id, "entry": entry}
+
+    @app.put("/api/admin/models/{model_id}")
+    async def admin_put_model(model_id: str, body: dict):
+        try:
+            await _admin_call(
+                admin.save_model_entry, model_id, body, config.models_json
+            )
+        except admin.AdminError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"ok": True}
+
+    @app.delete("/api/admin/models/{model_id}")
+    async def admin_delete_model(model_id: str):
+        removed = await _admin_call(
+            admin.delete_model_entry, model_id, config.models_json
+        )
+        if not removed:
+            raise HTTPException(status_code=404, detail="registry 에 없는 모델")
+        return {"ok": True}
 
     @app.get("/api/posts")
     async def list_posts():

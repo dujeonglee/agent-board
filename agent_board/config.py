@@ -25,7 +25,9 @@ class Config:
     # route so a proxied instance can never be reached unauthenticated.
     caddy_basic_auth: str = ""
     # agent-cli model registry the board reads to list selectable models.
+    # (admin 페이지는 이 파일과 agent_cli_config_json 을 편집한다.)
     models_json: Path = Path.home() / ".agent-cli" / "models.json"
+    agent_cli_config_json: Path = Path.home() / ".agent-cli" / "config.json"
     port_min: int = 50000
     port_max: int = 60000
 
@@ -33,6 +35,7 @@ class Config:
         self.data_dir = Path(self.data_dir).resolve()
         self.workspaces_root = Path(self.workspaces_root).resolve()
         self.models_json = Path(self.models_json)
+        self.agent_cli_config_json = Path(self.agent_cli_config_json)
 
     @property
     def db_path(self) -> Path:
@@ -67,6 +70,12 @@ class Config:
                 os.environ.get(
                     "AGENT_BOARD_MODELS_JSON",
                     Path.home() / ".agent-cli" / "models.json",
+                )
+            ),
+            agent_cli_config_json=Path(
+                os.environ.get(
+                    "AGENT_BOARD_AGENT_CLI_CONFIG",
+                    Path.home() / ".agent-cli" / "config.json",
                 )
             ),
         )
