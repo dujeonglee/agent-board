@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.11.1] - 2026-07-12
+
+### Fixed
+
+- **정적/페이지 응답 no-cache** — plain `StaticFiles`/`FileResponse` 는 `Cache-Control`
+  미설정이라 브라우저가 HTML/JS 를 휴리스틱 캐시 → 코드를 교체 재기동해도 열려 있던
+  탭엔 옛 UI 가 남음 (v1.11.0 의 ⚙ admin 링크가 안 보이던 실사례). `/`·`/admin`·
+  `/static/*` 전부 `no-cache, must-revalidate` 스탬프 (`_NoCacheStaticFiles`,
+  agent-cli 동형 — 304 fast path 유지). **이번 한 번만 브라우저 새로고침 필요**,
+  이후는 서버 재기동만으로 반영.
+
 ## [1.11.0] - 2026-07-12
 
 ### Added

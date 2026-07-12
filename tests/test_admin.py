@@ -288,3 +288,20 @@ class TestAdminApi:
     def test_index_has_admin_link(self, tmp_path):
         _, _, c = _admin_client(tmp_path)
         assert 'href="/admin"' in c.get("/").text
+
+
+class TestNoCacheHeaders:
+    """정적/페이지 응답의 no-cache — 코드 교체 후 옛 UI 가 캐시로 남아
+    admin 링크가 안 보이던 실사례(v1.11.1) 회귀 가드."""
+
+    def test_index_and_admin_no_cache(self, tmp_path):
+        _, _, c = _admin_client(tmp_path)
+        for path in ("/", "/admin"):
+            r = c.get(path)
+            assert r.headers.get("cache-control") == "no-cache, must-revalidate", path
+
+    def test_static_no_cache(self, tmp_path):
+        _, _, c = _admin_client(tmp_path)
+        r = c.get("/static/app.js")
+        assert r.status_code == 200
+        assert r.headers.get("cache-control") == "no-cache, must-revalidate"

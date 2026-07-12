@@ -16,9 +16,12 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+
 from pydantic import BaseModel
 
 from agent_board import instances, models_registry, sessions
+
 from agent_board import admin
 from agent_board.config import Config
 from agent_board.live_events import LiveEvents
@@ -30,6 +33,16 @@ from agent_board.keepalive import (
 from agent_board.orchestrator import Orchestrator, RealBackend
 from agent_board.router import BoardProxyRouter, CaddyRouter, Router
 from agent_board.store import Store
+
+
+class _NoCacheStaticFiles(StaticFiles):
+    """모든 정적 응답에 no-cache 스탬프 (agent-cli 동형 — 재기동만으로 UI 반영)."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -257,12 +270,20 @@ def create_app(
     app = FastAPI(title="agent-board", lifespan=lifespan)
     router.mount(app)  # /s/<post_id>/* reverse proxy
 
+    # no-cache — plain StaticFiles 는 Cache-Control 미설정이라 브라우저가
+    # HTML/JS 를 휴리스틱 캐시 → 코드 교체 후에도 옛 UI 가 보임 (v1.11.0
+    # admin 링크가 안 보이던 실사례; agent-cli _NoCacheStaticFiles 교훈).
+    # no-store 가 아닌 no-cache 라 미변경 파일은 304 fast path 유지.
+    _NO_CACHE = "no-cache, must-revalidate"
+
     @app.get("/")
     async def index():
-        return FileResponse(_STATIC / "index.html")
+        return FileResponse(
+            _STATIC / "index.html", headers={"Cache-Control": _NO_CACHE}
+        )
 
     if _STATIC.is_dir():
-        app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+        app.mount("/static", _NoCacheStaticFiles(directory=_STATIC), name="static")
 
     @app.get("/api/models")
     async def list_models():
@@ -275,7 +296,9 @@ def create_app(
 
     @app.get("/admin")
     async def admin_page():
-        return FileResponse(_STATIC / "admin.html")
+        return FileResponse(
+            _STATIC / "admin.html", headers={"Cache-Control": _NO_CACHE}
+        )
 
     def _admin_call(fn, *args):
         loop = asyncio.get_event_loop()
