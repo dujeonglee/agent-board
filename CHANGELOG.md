@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.12.0] - 2026-07-12
+
+### Added
+
+- **🎨 테마 피커 + agent-cli 공유 디자인 시스템** — agent-cli 웹 UI(v5.5.0)와 동일한
+  5개 테마(Amber 기본/Slate/Midnight/Terminal/Light) 토큰과 버튼 체계(변형 4종:
+  primary/ghost/danger/icon + UA-기본 차단 베이스)를 이식. localStorage 키
+  `agentcli_theme` 를 공유하므로 board 프록시로 여는 방들과 테마가 함께 움직인다.
+  admin 페이지도 동일 테마 적용(하드코딩 색 → 토큰). 기존 하드코딩 팔레트
+  전면 토큰화 — 게시글 카드·상태 점·토스트·모델 셀렉트 등 전부 테마 추종.
+
 ## [1.11.1] - 2026-07-12
 
 ### Fixed

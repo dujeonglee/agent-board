@@ -104,10 +104,10 @@
       // spawns fresh, so restart is the ONLY way to force-replace a running
       // process (e.g. to pick up an agent-cli update).
       (up
-        ? `<button class="restart" type="button" title="재실행 — 프로세스를 재시작(새로 설치한 agent-cli 반영). 세션은 이어집니다.">🔄</button>`
+        ? `<button class="restart btn-ghost" type="button" title="재실행 — 프로세스를 재시작(새로 설치한 agent-cli 반영). 세션은 이어집니다.">🔄</button>`
         : "") +
-      `<button class="open" type="button">열기</button>` +
-      `<button class="del" type="button" title="삭제(영구)">🗑</button>` +
+      `<button class="open btn-primary" type="button">열기</button>` +
+      `<button class="del btn-danger" type="button" title="삭제(영구)">🗑</button>` +
       `</div>`;
 
     el.querySelector(".open").addEventListener("click", () => open(p.post_id));
@@ -318,4 +318,64 @@
   loadModels();
   load();
   connectEvents();
+})();
+
+// ── 테마 피커 (🎨) — agent-cli 와 동일 5테마·localStorage 'agentcli_theme'
+// 공유 (board 프록시로 여는 방들과 같은 origin 이라 테마가 함께 움직인다).
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  var THEMES = [
+    { id: "amber", name: "Amber", bg: "#18140f", accent: "#e0a458" },
+    { id: "slate", name: "Slate", bg: "#15171c", accent: "#7e8db0" },
+    { id: "midnight", name: "Midnight", bg: "#111725", accent: "#4d8eff" },
+    { id: "terminal", name: "Terminal", bg: "#101413", accent: "#2dd4bf" },
+    { id: "light", name: "Light", bg: "#ffffff", accent: "#6366f1" },
+  ];
+  var $btn = document.getElementById("theme-btn");
+  var $menu = document.getElementById("theme-menu");
+  if (!$btn || !$menu) return;
+  function current() {
+    var t = root.getAttribute("data-theme");
+    return THEMES.some(function (x) { return x.id === t; }) ? t : "amber";
+  }
+  function render() {
+    var cur = current();
+    $menu.innerHTML = "";
+    THEMES.forEach(function (t) {
+      var item = document.createElement("button");
+      item.type = "button";
+      item.className = "theme-item" + (t.id === cur ? " active" : "");
+      item.setAttribute("role", "menuitem");
+      var sw = document.createElement("span");
+      sw.className = "theme-swatch";
+      sw.style.background = "linear-gradient(135deg, " + t.bg + " 55%, " + t.accent + " 55%)";
+      item.appendChild(sw);
+      item.appendChild(document.createTextNode(t.name));
+      if (t.id === cur) {
+        var chk = document.createElement("span");
+        chk.className = "theme-check";
+        chk.textContent = "✓";
+        item.appendChild(chk);
+      }
+      item.addEventListener("click", function () {
+        root.setAttribute("data-theme", t.id);
+        try { localStorage.setItem("agentcli_theme", t.id); } catch (e) { /* private mode */ }
+        close();
+      });
+      $menu.appendChild(item);
+    });
+  }
+  function open() { render(); $menu.hidden = false; $btn.setAttribute("aria-expanded", "true"); }
+  function close() { $menu.hidden = true; $btn.setAttribute("aria-expanded", "false"); }
+  $btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if ($menu.hidden) open(); else close();
+  });
+  document.addEventListener("click", function (e) {
+    if (!$menu.hidden && !$menu.contains(e.target)) close();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !$menu.hidden) close();
+  });
 })();

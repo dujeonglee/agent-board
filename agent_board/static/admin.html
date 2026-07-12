@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>agent-board admin</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    (function () {
+      var THEMES = ["amber", "slate", "midnight", "terminal", "light"];
+      try {
+        var t = localStorage.getItem("agentcli_theme");
+        if (THEMES.indexOf(t) === -1) {
+          t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "amber";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "amber");
+      }
+    })();
+  </script>
   <style>
     /* admin 전용 소품 — 본체 style.css 토큰 위에 얹는 최소 레이어 */
     .adm-section { margin: 1.2rem 0; }
@@ -12,21 +26,21 @@
     .adm-form { display: grid; grid-template-columns: 10rem 1fr; gap: .45rem .8rem; max-width: 44rem; align-items: center; }
     .adm-form input, .adm-form select { padding: .35rem .5rem; }
     .adm-actions { margin-top: .7rem; display: flex; gap: .6rem; align-items: center; }
-    .adm-note { color: var(--muted, #888); font-size: .85rem; }
+    .adm-note { color: var(--muted); font-size: .85rem; }
     table.adm-models { border-collapse: collapse; width: 100%; max-width: 72rem; }
-    table.adm-models th, table.adm-models td { border-bottom: 1px solid var(--border, #ddd3); padding: .4rem .55rem; text-align: left; font-size: .9rem; }
+    table.adm-models th, table.adm-models td { border-bottom: 1px solid var(--border); padding: .4rem .55rem; text-align: left; font-size: .9rem; }
     .badge { display: inline-block; padding: .05rem .45rem; border-radius: .6rem; font-size: .78rem; }
-    .badge.served  { background: #2e7d3222; color: #43a047; }
-    .badge.missing { background: #c6282822; color: #e53935; }
-    .badge.new     { background: #1565c022; color: #1e88e5; }
-    .badge.unknown { background: #8882;     color: #999; }
+    .badge.served  { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+    .badge.missing { background: var(--fail-soft-bg); color: var(--fail); }
+    .badge.new     { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+    .badge.unknown { background: var(--surface-2); color: var(--muted); }
     .adm-status { min-height: 1.2rem; }
-    .adm-status.err { color: #e53935; }
-    .adm-status.ok  { color: #43a047; }
-    dialog#entry-dlg { max-width: 34rem; width: 90%; border: 1px solid var(--border, #888); border-radius: .5rem; background: var(--bg, #fff); color: inherit; }
+    .adm-status.err { color: var(--fail); }
+    .adm-status.ok  { color: var(--ok); }
+    dialog#entry-dlg { max-width: 34rem; width: 90%; border: 1px solid var(--border-2); border-radius: .5rem; background: var(--surface); color: inherit; }
     dialog#entry-dlg::backdrop { background: #0008; }
     #entry-form { display: grid; grid-template-columns: 14rem 1fr; gap: .4rem .7rem; align-items: center; margin: .8rem 0; }
-    button[disabled] { opacity: .5; cursor: not-allowed; }
+    
   </style>
 </head>
 <body>
@@ -50,7 +64,7 @@
       <input id="cfg-default-model" type="text" placeholder="모델 id">
     </div>
     <div class="adm-actions">
-      <button id="cfg-save" type="button">💾 저장</button>
+      <button id="cfg-save" type="button" class="btn-primary">💾 저장</button>
       <span class="adm-note">api_key 를 비우거나 *** 로 두면 기존 키가 유지됩니다. 그 외 키는 손대지 않습니다.</span>
     </div>
     <div class="adm-status" id="cfg-status"></div>
@@ -58,7 +72,7 @@
 
   <section class="adm-section" id="models">
     <h2>models.json
-      <button id="models-refresh" type="button" title="endpoint 재프로브">↻</button>
+      <button id="models-refresh" type="button" class="btn-icon" title="endpoint 재프로브">↻</button>
     </h2>
     <div class="adm-status" id="models-status"></div>
     <table class="adm-models">
@@ -73,7 +87,7 @@
       <span class="badge new">NEW</span> 서버에만 있음(탐지/등록 후보)
     </p>
     <div class="adm-actions">
-      <button id="models-clean" type="button">🗑 missing 전체 정리</button>
+      <button id="models-clean" type="button" class="btn-danger">🗑 missing 전체 정리</button>
     </div>
   </section>
 
@@ -89,8 +103,8 @@
       <label>thinking_format</label><input id="ef-format" type="text" placeholder="(빈값 가능)">
     </form>
     <div class="adm-actions">
-      <button id="entry-save" type="button">💾 저장</button>
-      <button id="entry-cancel" type="button">취소</button>
+      <button id="entry-save" type="button" class="btn-primary">💾 저장</button>
+      <button id="entry-cancel" type="button" class="btn-ghost">취소</button>
       <span class="adm-status" id="entry-status"></span>
     </div>
   </dialog>

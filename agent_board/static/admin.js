@@ -78,11 +78,13 @@
       tr.cells[0].textContent = row.id; // textContent — id 는 이스케이프
       const actions = tr.cells[tr.cells.length - 1];
       const edit = document.createElement("button");
+      edit.className = "btn-icon";
       edit.textContent = "✎";
       edit.title = "편집";
       edit.addEventListener("click", () => openEntryDialog(row.id, row.entry));
       actions.appendChild(edit);
       const del = document.createElement("button");
+      del.className = "btn-danger";
       del.textContent = "🗑";
       del.title = "registry 에서 삭제";
       del.addEventListener("click", async () => {
@@ -105,6 +107,7 @@
       tr.cells[0].textContent = mid;
       const actions = tr.cells[tr.cells.length - 1];
       const detect = document.createElement("button");
+      detect.className = "btn-primary";
       detect.textContent = "🔍 탐지";
       detect.title = "capability 자동 탐지 (수십 초 걸릴 수 있음)";
       detect.addEventListener("click", async () => {
@@ -125,6 +128,7 @@
       });
       actions.appendChild(detect);
       const manual = document.createElement("button");
+      manual.className = "btn-ghost";
       manual.textContent = "✎ 수동";
       manual.title = "탐지 없이 직접 입력";
       manual.addEventListener("click", () => openEntryDialog(mid, {}));

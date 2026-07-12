@@ -1,106 +1,162 @@
+/* agent-board — 게시판 UI.
+   디자인 토큰·테마·버튼 체계는 agent-cli 웹 UI(v5.5.0)와 동일 계약:
+   5개 테마([data-theme]), 버튼 변형 4종(primary/ghost/danger/icon),
+   전역 버튼 베이스가 UA 기본을 차단. localStorage 키 'agentcli_theme' 를
+   공유하므로 board 프록시로 여는 agent-cli 방들과 테마가 함께 움직인다. */
+
+/* ── Design tokens — agent-cli style.css 와 동일 팔레트 ── */
+:root {
+  --bg: #0d0e11; --surface: #15171c; --surface-2: #1b1e25;
+  --text: #dfe1e6; --text-2: #9aa1ad; --muted: #6b7280;
+  --border: rgba(255,255,255,.07); --border-2: rgba(255,255,255,.12);
+  --ghost-border: rgba(255,255,255,.14);
+  --accent: #7e8db0; --accent-hover: #93a0bf; --on-accent: #ffffff;
+  --accent-soft: rgba(126,141,176,.30); --focus-ring: #7e8db0;
+  --ok: #3fb950; --fail: #f85149; --warn: #d29922;
+  --fail-soft-bg: rgba(248,81,73,.10); --fail-soft-fg: #f3b0ac; --fail-soft-border: rgba(248,81,73,.40);
+  --warn-soft-bg: rgba(210,153,34,.10); --warn-soft-border: rgba(210,153,34,.40);
+  --shadow: rgba(0,0,0,.40);
+}
+:root[data-theme="midnight"] {
+  --bg: #0a0e17; --surface: #111725; --surface-2: #182032;
+  --accent: #4d8eff; --accent-hover: #6ba0ff; --accent-soft: rgba(77,142,255,.32);
+  --focus-ring: #4d8eff;
+}
+:root[data-theme="terminal"] {
+  --bg: #0a0c0b; --surface: #101413; --surface-2: #161c1a;
+  --accent: #2dd4bf; --accent-hover: #45e0cc; --on-accent: #04211d;
+  --accent-soft: rgba(45,212,191,.30); --focus-ring: #2dd4bf;
+}
+:root[data-theme="amber"] {
+  --bg: #100d0a; --surface: #18140f; --surface-2: #201a13;
+  --text: #e8e2d8; --text-2: #a89f90; --muted: #7a7264;
+  --border: rgba(255,248,235,.07); --border-2: rgba(255,248,235,.12);
+  --ghost-border: rgba(255,248,235,.14);
+  --accent: #e0a458; --accent-hover: #ecb56c; --on-accent: #1c1610;
+  --accent-soft: rgba(224,164,88,.32); --focus-ring: #e0a458;
+}
+:root[data-theme="light"] {
+  --bg: #f8fafc; --surface: #ffffff; --surface-2: #f3f4f6;
+  --text: #1f2937; --text-2: #6b7280; --muted: #9ca3af;
+  --border: #e5e7eb; --border-2: #d1d5db; --ghost-border: rgba(15,23,42,.14);
+  --accent: #6366f1; --accent-hover: #4f46e5; --on-accent: #ffffff;
+  --accent-soft: #c7d2fe; --focus-ring: #93c5fd;
+  --ok: #16a34a; --fail: #dc2626; --warn: #b45309;
+  --fail-soft-bg: #fef2f2; --fail-soft-fg: #7f1d1d; --fail-soft-border: #fca5a5;
+  --warn-soft-bg: #fef3c7; --warn-soft-border: #fed7aa;
+  --shadow: rgba(15,23,42,.18);
+}
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: #0e0f13;
-  color: #dfe1e6;
+  background: var(--bg);
+  color: var(--text);
   font-size: 14px;
 }
+
+/* ── 버튼 체계 — agent-cli 와 동일 4변형 + 안전망 베이스 ── */
+button {
+  font-family: inherit; font-size: 12px; line-height: 1.2;
+  padding: 6px 12px; border-radius: 7px; cursor: pointer;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text-2);
+  transition: color .12s, background .12s, border-color .12s, opacity .12s;
+}
+button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+button:disabled { opacity: .45; cursor: default; }
+
+.btn-primary {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--on-accent); font-weight: 600;
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-ghost { border-color: var(--ghost-border); color: var(--text-2); }
+.btn-ghost:hover { border-color: var(--border-2); color: var(--text); background: var(--surface-2); }
+.btn-danger { border-color: var(--fail-soft-border); color: var(--fail-soft-fg); }
+.btn-danger:hover { background: var(--fail-soft-bg); color: var(--fail); border-color: var(--fail); }
+.btn-icon { padding: 4px 7px; border: 0; font-size: 14px; color: var(--text-2); opacity: .75; }
+.btn-icon:hover { opacity: 1; color: var(--text); background: var(--surface-2); border-radius: 7px; }
+
 header {
   display: flex; align-items: baseline; gap: 12px;
-  padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,.07);
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
 }
 header h1 { margin: 0; font-size: 18px; }
 .open-mode {
-  margin-left: auto; color: #9aa1ad; font-size: 12px;
+  margin-left: auto; color: var(--text-2); font-size: 12px;
   display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
   user-select: none;
 }
 
 #new {
   display: flex; gap: 8px; align-items: flex-start;
-  padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.07);
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
 }
 #new-topic { flex: 0 1 320px; }
 #new input {
   padding: 8px 10px; border-radius: 8px; font-size: 13px;
-  border: 1px solid rgba(255,255,255,.12); background: #16181f; color: #dfe1e6;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
   font-family: inherit;
 }
 #new-model {
   padding: 8px 10px; border-radius: 8px; font-size: 13px; max-width: 220px;
-  border: 1px solid rgba(255,255,255,.12); background: #16181f; color: #dfe1e6;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
 }
-#new-create {
-  padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
-  background: #4d8eff; color: #fff; font-weight: 600;
-}
+#new-create { padding: 8px 14px; font-size: 13px; }
 .model-sel {
-  font-size: 11px; color: #c8cdd6; background: #1b2029;
-  border: 1px solid rgba(255,255,255,.12); border-radius: 5px; padding: 2px 4px;
+  font-size: 11px; color: var(--text-2); background: var(--surface-2);
+  border: 1px solid var(--border-2); border-radius: 5px; padding: 2px 4px;
   max-width: 140px;
 }
 .model-sel:disabled { opacity: .5; cursor: not-allowed; }
-.viewers { font-size: 11px; color: #9aa1ad; }
+.viewers { font-size: 11px; color: var(--text-2); }
 
 #posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 880px; }
-.empty { color: #7d8595; padding: 24px 0; }
+.empty { color: var(--muted); padding: 24px 0; }
 
 .post {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 14px; border-radius: 10px;
-  background: #16181f; border: 1px solid rgba(255,255,255,.07);
+  background: var(--surface); border: 1px solid var(--border);
 }
 .post-main { flex: 1; min-width: 0; }
 .post-topic { font-weight: 600; }
-.post-last { color: #9aa1ad; font-size: 12.5px; margin-top: 2px;
+.post-last { color: var(--text-2); font-size: 12.5px; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.post-meta { color: #6b7280; font-size: 11px; margin-top: 3px; }
-.muted { color: #6b7280; }
-
+.post-meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.muted { color: var(--muted); }
 .post-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
-  color: #9aa1ad; min-width: 56px; }
+  color: var(--text-2); min-width: 56px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.dot.on { background: #3fb950; box-shadow: 0 0 6px #3fb95066; }
-.dot.off { background: #3a4150; }
-.dot.busy { background: #4d8eff; box-shadow: 0 0 0 0 #4d8eff80;
-  animation: pulse 1s ease-out infinite; }
-.dot.await { background: #f0a020; }
+.dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.dot.off { background: var(--muted); }
+.dot.busy { background: var(--accent); animation: pulse 1s ease-out infinite; }
+.dot.await { background: var(--warn); }
 @keyframes pulse {
-  0%   { box-shadow: 0 0 0 0 #4d8effaa; }
-  100% { box-shadow: 0 0 0 7px #4d8eff00; }
+  0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
+  100% { box-shadow: 0 0 0 7px transparent; }
 }
 /* a post waiting for the user's ask/confirm reply — make it stand out */
-.st.await { color: #f0a020; font-weight: 600; }
-.post.needs-input { border-color: #f0a02066; background: #1d1a14; }
-.fa { font-size: 12px; color: #9aa1ad; cursor: pointer; user-select: none; }
-.post-side .open {
-  padding: 6px 12px; border-radius: 8px; border: none; cursor: pointer;
-  background: #4d8eff; color: #fff; font-weight: 600;
-}
-.post-side .del {
-  padding: 6px 9px; border-radius: 8px; cursor: pointer;
-  background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
-}
-.post-side .del:hover { color: #f85149; border-color: #f85149; }
-.post-side .restart {
-  padding: 6px 9px; border-radius: 8px; cursor: pointer;
-  background: none; border: 1px solid rgba(255,255,255,.12); color: #9aa1ad;
-}
-.post-side .restart:hover { color: #4d8eff; border-color: #4d8eff; }
+.st.await { color: var(--warn); font-weight: 600; }
+.post.needs-input { border-color: var(--warn-soft-border); background: var(--warn-soft-bg); }
+.fa { font-size: 12px; color: var(--text-2); cursor: pointer; user-select: none; }
+.post-side .open { padding: 6px 12px; font-size: 13px; }
+.post-side .del { padding: 6px 9px; }
+.post-side .restart { padding: 6px 9px; }
 .post-side .restart:disabled { cursor: default; opacity: .7; }
 /* while restarting: hide the 🔄 glyph and show a clean rotating ring spinner in
    its place. `visibility:hidden` hides the emoji AND border but PRESERVES the
-   button's box (no layout jump — `color`/`font-size` tricks either fail on a
-   color emoji or collapse the box); the ::after re-shows itself with
+   button's box (no layout jump); the ::after re-shows itself with
    `visibility:visible`. Only a thin ring turns — the box stays put. */
 .post-side .restart.spinning { position: relative; visibility: hidden; opacity: 1; }
 .post-side .restart.spinning::after {
   content: ""; visibility: visible;
   position: absolute; inset: 0; margin: auto;
   width: 13px; height: 13px; border-radius: 50%;
-  border: 2px solid rgba(77,142,255,.3); border-top-color: #4d8eff;
+  border: 2px solid var(--accent-soft); border-top-color: var(--accent);
   animation: spin .7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -109,15 +165,40 @@ header h1 { margin: 0; font-size: 18px; }
 #toast {
   position: fixed; left: 50%; bottom: 24px;
   transform: translateX(-50%) translateY(16px);
-  background: #1f2530; color: #e6e9ef;
-  border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border-2); border-radius: 10px;
   padding: 10px 16px; font-size: 14px; font-weight: 600;
-  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  box-shadow: 0 8px 24px var(--shadow);
   opacity: 0; pointer-events: none; z-index: 100;
   transition: opacity .2s ease, transform .2s ease;
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-#toast.err { border-color: #f8514966; color: #ffb4ad; }
+#toast.err { border-color: var(--fail-soft-border); color: var(--fail-soft-fg); }
+
+/* ── theme picker (🎨) — agent-cli 와 동일 패턴 ── */
+#theme-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+#theme-btn { font-size: 16px; }
+#theme-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: 10px; padding: 5px; min-width: 150px;
+  box-shadow: 0 8px 24px var(--shadow);
+  display: flex; flex-direction: column; gap: 1px;
+}
+#theme-menu[hidden] { display: none; }
+.theme-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 9px; border: none; background: none; border-radius: 8px;
+  cursor: pointer; font-size: 13px; color: var(--text);
+  text-align: left; width: 100%;
+}
+.theme-item:hover { background: var(--surface-2); }
+.theme-item.active { color: var(--accent); }
+.theme-swatch {
+  width: 16px; height: 16px; border-radius: 5px; flex-shrink: 0;
+  border: 1px solid var(--border-2);
+}
+.theme-item .theme-check { margin-left: auto; opacity: .9; font-size: 12px; }
 
 /* ── mobile / narrow screens ── */
 @media (max-width: 640px) {
@@ -136,6 +217,6 @@ header h1 { margin: 0; font-size: 18px; }
   .post-last { white-space: normal; }
 }
 
-/* admin link (⚙) — header 우측 */
-#admin-link { margin-left: auto; text-decoration: none; font-size: 1.1rem; opacity: .7; }
+/* admin link (⚙) — header 우측 (open-mode 가 auto 마진 소유) */
+#admin-link { text-decoration: none; font-size: 1.1rem; opacity: .7; color: var(--text); }
 #admin-link:hover { opacity: 1; }

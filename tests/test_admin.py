@@ -305,3 +305,33 @@ class TestNoCacheHeaders:
         r = c.get("/static/app.js")
         assert r.status_code == 200
         assert r.headers.get("cache-control") == "no-cache, must-revalidate"
+
+
+class TestThemeAndButtonSystem:
+    """agent-cli 와 공유하는 디자인 계약 (v1.12.0) — 5테마 토큰·버튼 4변형·
+    UA-기본 차단 베이스·localStorage 키 공유."""
+
+    def test_css_has_five_themes_and_variants(self, tmp_path):
+        _, _, c = _admin_client(tmp_path)
+        css = c.get("/static/style.css").text
+        for theme in ("midnight", "terminal", "amber", "light"):
+            assert f':root[data-theme="{theme}"]' in css, theme
+        for cls in (".btn-primary", ".btn-ghost", ".btn-danger", ".btn-icon"):
+            assert cls in css, cls
+        import re
+
+        m = re.search(r"\nbutton \{[^}]*\}", css)
+        assert m and "background: transparent" in m.group(0)
+
+    def test_pages_share_theme_storage_key(self, tmp_path):
+        _, _, c = _admin_client(tmp_path)
+        for path in ("/", "/admin"):
+            html = c.get(path).text
+            assert "agentcli_theme" in html, path  # FOUC 방지 초기화 스크립트
+
+    def test_index_has_theme_picker(self, tmp_path):
+        _, _, c = _admin_client(tmp_path)
+        html = c.get("/").text
+        assert 'id="theme-btn"' in html and 'id="theme-menu"' in html
+        js = c.get("/static/app.js").text
+        assert "agentcli_theme" in js and "theme-item" in js
