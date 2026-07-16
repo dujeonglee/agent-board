@@ -91,7 +91,10 @@ agent-board
      `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 "missing 전체 정리") /
      `NEW`(서버에만 있음 — **🔍 탐지** 버튼이 agent-cli 의 capability 자동 탐지를 돌려
      entry 초안을 채우고, 검토·수정 후 저장; 탐지 실패 시 수동 입력). 편집은 ✎ 다이얼로그
-     (context_window/max_output_tokens/structured/strict/thinking/budget/format).
+     (context_window/max_output_tokens/structured/strict/thinking/budget/format +
+     **wire_format 바인딩 드롭다운** — 이 모델의 응답 wire format(agent-cli v5.19.0
+     모델별 바인딩); `auto` 는 필드 미기록 = 해석 체인 위임(기본 md_array). 옵션은
+     agent-cli 등록 포맷명만(자유입력 금지 — 오타는 agent-cli 부트 fail-fast 대상).
    - 자동 삭제는 없음 — 모든 파괴적 동작은 confirm 클릭으로. 쓰기는 원자적(temp+replace)이라
      agent-cli 인스턴스의 auto-detect 저장과 겹쳐도 안전.
 

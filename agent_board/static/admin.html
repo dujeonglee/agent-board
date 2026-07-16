@@ -77,7 +77,7 @@
     <div class="adm-status" id="models-status"></div>
     <table class="adm-models">
       <thead><tr>
-        <th>모델</th><th>상태</th><th>ctx</th><th>max out</th><th>structured</th><th>thinking</th><th></th>
+        <th>모델</th><th>상태</th><th>ctx</th><th>max out</th><th>structured</th><th>thinking</th><th>wire</th><th></th>
       </tr></thead>
       <tbody id="models-body"></tbody>
     </table>
@@ -101,6 +101,7 @@
       <label>supports_thinking</label><input id="ef-thinking" type="checkbox">
       <label>thinking_budget</label><input id="ef-budget" type="number" min="0">
       <label>thinking_format</label><input id="ef-format" type="text" placeholder="(빈값 가능)">
+      <label>wire_format</label><select id="ef-wire" title="이 모델의 응답 wire format 바인딩 — auto 는 agent-cli 해석 체인(기본 md_array)에 위임"></select>
     </form>
     <div class="adm-actions">
       <button id="entry-save" type="button" class="btn-primary">💾 저장</button>

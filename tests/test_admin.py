@@ -335,3 +335,53 @@ class TestThemeAndButtonSystem:
         assert 'id="theme-btn"' in html and 'id="theme-menu"' in html
         js = c.get("/static/app.js").text
         assert "agentcli_theme" in js and "theme-item" in js
+
+
+class TestWireFormatBinding:
+    """바인딩 UX ① (agent-cli multi-wire-format): 모델 entry 의 wire_format
+    바인딩을 admin 에서 드롭다운으로 편집. auto=필드 미기록(keep-sentinel
+    동형), 목록은 agent-cli lazy import — 자유입력 금지 (agent-cli 부트가
+    unknown 이름 fail-fast)."""
+
+    def test_list_wire_format_names_from_agent_cli(self):
+        # dev/배포 환경은 agent-cli co-install 전제 (detect 동형)
+        names = admin.list_wire_format_names()
+        assert "md_array" in names
+        assert "react" in names
+        assert "xml_fc" in names
+
+    def test_list_wire_format_names_missing_agent_cli(self, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, "agent_cli.wire_formats", None)
+        assert admin.list_wire_format_names() == []
+
+    def test_models_view_includes_wire_formats(self, tmp_path, monkeypatch):
+        _, _, c = _admin_client(tmp_path)
+        r = c.get("/api/admin/models")
+        assert r.status_code == 200
+        body = r.json()
+        assert "wire_formats" in body
+        assert "xml_fc" in body["wire_formats"]
+
+    def test_put_entry_with_binding_round_trips(self, tmp_path):
+        _, models_json, c = _admin_client(tmp_path)
+        entry = {"context_window": 8192, "wire_format": "xml_fc"}
+        r = c.put("/api/admin/models/qwen-x", json=entry)
+        assert r.status_code == 200
+        import json as _json
+
+        saved = _json.loads(models_json.read_text())
+        assert saved["models"]["qwen-x"]["wire_format"] == "xml_fc"
+
+    def test_static_wiring_dropdown(self, tmp_path):
+        # 정적 배선 계약 (agent-cli test_web_server 동형): 셀렉트 id·옵션
+        # 채움·auto=미기록 저장 로직이 프론트에 실재하는지 고정.
+        _, _, c = _admin_client(tmp_path)
+        html = c.get("/admin").text
+        assert 'id="ef-wire"' in html
+        assert "<th>wire</th>" in html
+        js = c.get("/static/admin.js").text
+        assert "wire_formats" in js  # 옵션 소스
+        assert "entry.wire_format = wf" in js  # 선택 시에만 필드 기록
+        assert 'entry.wire_format || "auto"' in js  # 행 셀 표시

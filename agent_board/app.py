@@ -323,13 +323,16 @@ def create_app(
     @app.get("/api/admin/models")
     async def admin_list_models():
         try:
-            return await _admin_call(
+            view = await _admin_call(
                 admin.list_models_with_status,
                 config.models_json,
                 config.agent_cli_config_json,
             )
         except admin.AdminError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        # wire format 바인딩 드롭다운 옵션 (예외 없음 — 미설치면 빈 목록)
+        view["wire_formats"] = await _admin_call(admin.list_wire_format_names)
+        return view
 
     @app.post("/api/admin/models/detect")
     async def admin_detect_model(body: dict):

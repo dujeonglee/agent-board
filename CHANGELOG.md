@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.13.0] - 2026-07-17
+
+### Added
+
+- **⚙ admin 모델 행 wire format 바인딩 드롭다운** — agent-cli v5.19.0 모델별
+  wire format 바인딩(models.json entry `wire_format`)을 admin 에서 편집.
+  테이블에 wire 컬럼, entry 다이얼로그에 드롭다운 (auto = 필드 미기록 —
+  해석 체인 위임). 옵션은 agent-cli `list_names()` lazy import — 자유입력
+  금지 (agent-cli 부트가 unknown 이름에 fail-fast 하므로 오타 원천 차단),
+  미설치 환경은 auto + 현재값 보존만.
+
+### Fixed
+
+- entry 다이얼로그 저장이 entry 를 재조립하며 손으로 넣은 `wire_format` 을
+  조용히 떨구던 클로버 — 명시 필드로 승격해 봉합.
+- `agent_board.__version__` 드리프트 동기 (1.10.1 → pyproject 추종).
+
+
 ## [1.12.0] - 2026-07-12
 
 ### Added

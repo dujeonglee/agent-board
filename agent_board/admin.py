@@ -202,6 +202,26 @@ def delete_model_entry(model_id: str, models_path: Path) -> bool:
     return True
 
 
+# ── wire format 바인딩 (agent-cli 재사용) ────────────────────────
+
+
+def list_wire_format_names() -> list[str]:
+    """agent-cli 의 등록 wire format 이름 목록 — 바인딩 드롭다운 옵션.
+
+    바인딩(models.json entry 의 선택 필드 ``wire_format``)은 agent-cli
+    v5.19.0 해석 체인의 소스: 그 모델(main·서브에이전트)이 어떤 응답
+    포맷으로 돌지 정한다. 드롭다운은 **등록명만** 제공 (자유입력 금지 —
+    agent-cli 부트가 unknown 이름에 fail-fast 하므로 오타를 UI 에서 원천
+    차단). lazy import 는 ``detect_model_entry`` 동형; 미설치면 빈 목록 —
+    UI 는 auto + 현재값 보존만 제공한다.
+    """
+    try:
+        from agent_cli.wire_formats import list_names
+    except ImportError:
+        return []
+    return list_names()
+
+
 # ── capability 자동 탐지 (agent-cli 재사용) ──────────────────────
 
 

@@ -63,7 +63,8 @@
       "<td>" + (entry.context_window ?? "—") + "</td>" +
       "<td>" + (entry.max_output_tokens ?? "—") + "</td>" +
       "<td>" + (entry.supports_structured_output ? "✓" : "✗") + "</td>" +
-      "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>"
+      "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>" +
+      "<td>" + (entry.wire_format || "auto") + "</td>"
     );
   }
 
@@ -185,6 +186,25 @@
     $("ef-thinking").checked = !!entry.supports_thinking;
     $("ef-budget").value = entry.thinking_budget ?? 0;
     $("ef-format").value = entry.thinking_format ?? "";
+    // wire_format 바인딩 — 등록명 드롭다운만 (자유입력 금지: agent-cli 가
+    // unknown 이름에 fail-fast). auto = 필드 미기록(해석 체인 위임).
+    // agent_cli 미설치로 목록이 비어도 현재값은 옵션으로 보존.
+    const sel = $("ef-wire");
+    const current = entry.wire_format || "";
+    const names = [...(modelsView.wire_formats || [])];
+    if (current && !names.includes(current)) names.push(current);
+    sel.innerHTML = "";
+    const auto = document.createElement("option");
+    auto.value = "";
+    auto.textContent = "auto (기본 체인)";
+    sel.appendChild(auto);
+    for (const n of names) {
+      const o = document.createElement("option");
+      o.value = n;
+      o.textContent = n;
+      sel.appendChild(o);
+    }
+    sel.value = current;
     status($("entry-status"), "", true);
     $("entry-dlg").showModal();
   }
@@ -201,6 +221,11 @@
       supports_strict_schema: $("ef-strict").checked,
       thinking_format: $("ef-format").value,
     };
+    // auto("") = 필드 미기록 — keep-sentinel 과 같은 "안 고르면 안 쓴다"
+    // 패턴. 종전엔 저장이 entry 를 재조립하며 손으로 넣은 wire_format 을
+    // 조용히 떨궜다(클로버) — 명시 필드로 승격해 봉합.
+    const wf = $("ef-wire").value;
+    if (wf) entry.wire_format = wf;
     try {
       await api("PUT", "/api/admin/models/" + encodeURIComponent(dlgModelId), entry);
       $("entry-dlg").close();
