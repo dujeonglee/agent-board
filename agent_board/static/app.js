@@ -40,21 +40,14 @@
     })
     .catch(() => {});
 
-  // ── 연결 슬롯 (v1.15.0, Web Locks — agent-cli v7.6.0 프로토콜) ──
-  // 슬롯 락 agentcli-conn-slot-0..4: 연결(SSE)을 잡는 탭은 슬롯 하나를
-  // 원자적으로 보유하고, 탭이 닫히면 브라우저가 즉시 해제한다. 카운트는
-  // locks.query() 정확값 — 종전 ping/pong 샘플링(150ms 창)의 과소/잔존
-  // 집계 레이스가 구조적으로 없다. 대시보드도 /api/events SSE 로 연결
-  // 1개를 점유하므로 슬롯을 잡는다(아래 connectEvents 게이트).
-  const LOCK_PREFIX = "agentcli-conn-slot-";
-  const SLOTS = 5; // = MAX_HELD_TABS (6연결 중 1개는 로드/클릭용 예약)
-  const hasLocks =
-    typeof navigator !== "undefined" &&
-    navigator.locks &&
-    typeof navigator.locks.request === "function";
-  let dashHeld = false; // 이 대시보드 탭이 슬롯을 잡았나
+  // ── 연결 카운트 (v1.16.0 — 샘플링 복귀) ──
+  // v1.15 의 Web Locks 는 secure context 전용이라 LAN http(주 운용)에서
+  // 락 API 자체가 노출되지 않아 무동작이었다. 열기 게이트는 사람 속도의
+  // 버튼 클릭이라 ping/pong 샘플링(창 300ms)으로 충분 — 대량 동시
+  // 오픈은 board 경유 운용 전제(agent-cli v7.7.0)에서 발생하지 않는다.
+  let dashHeld = false; // 이 대시보드 탭의 SSE 가 연결됐나
 
-  // 대시보드 탭 presence 비콘 — 재사용 path 판정·구버전 카운트 호환용.
+  // 대시보드 탭 presence 비콘 — 카운트·재사용 path 판정에 응답.
   if (typeof BroadcastChannel !== "undefined") {
     const presence = new BroadcastChannel(TAB_CHANNEL);
     presence.addEventListener("message", (e) => {
@@ -69,85 +62,32 @@
     });
   }
 
-  function countHeldSlots() {
-    if (!hasLocks) return Promise.resolve(0);
-    return navigator.locks.query().then(
-      (st) =>
-        (st.held || []).filter((l) => l.name && l.name.startsWith(LOCK_PREFIX))
-          .length,
-      () => 0
-    );
-  }
-
-  // 빈 슬롯 하나를 원자적으로 획득 (성공 시 탭 수명 동안 보유).
-  function acquireSlot() {
-    if (!hasLocks) return Promise.resolve(true); // 조정 불가 → 종전 동작
-    return new Promise((resolve) => {
-      let i = 0;
-      function tryNext() {
-        if (i >= SLOTS) {
-          resolve(false);
-          return;
-        }
-        const name = LOCK_PREFIX + i;
-        i += 1;
-        navigator.locks
-          .request(name, { ifAvailable: true }, (lock) => {
-            if (lock) {
-              resolve(true);
-              return new Promise(() => {}); // 탭 종료까지 보유
-            }
-            tryNext();
-          })
-          .catch(tryNext);
-      }
-      tryNext();
-    });
-  }
-
-  // 슬롯이 날 때까지 5개 전부에 대기 요청 — 첫 승격이 나머지를 abort.
-  function waitForSlot(onGrant) {
-    const ctrls = [];
-    let won = -1;
-    for (let i = 0; i < SLOTS; i++) {
-      const ac = new AbortController();
-      ctrls.push(ac);
-      navigator.locks
-        .request(LOCK_PREFIX + i, { signal: ac.signal }, (lock) => {
-          if (won !== -1) return; // 이미 다른 슬롯으로 승격 — 즉시 반납
-          won = i;
-          ctrls.forEach((c, j) => {
-            if (j !== i) c.abort();
-          });
-          onGrant();
-          return new Promise(() => {}); // 보유
-        })
-        .catch(() => {});
-    }
-  }
-
-  // 열기 게이트용 카운트 + 재사용 path 수집 (path 는 비콘으로 — 파킹
-  // 탭 포함: named window 는 파킹 탭도 재사용하므로).
+  // ping 을 쏘고 300ms 동안 pong 을 수집 — 살아 있는 탭만 답하므로
+  // 크래시/닫힘 탭이 세어지지 않는다. held:false pong(연결 미보유 탭)
+  // 은 카운트에서 제외, held 필드 없는 pong(구버전 agent-cli 탭)은
+  // 보유로 집계. paths 는 재사용 판정("이 글의 탭이 이미 있나")용.
   function countHeldTabs() {
     return new Promise((resolve) => {
-      const done = (paths) =>
-        countHeldSlots().then((count) => resolve({ count, paths }));
       if (typeof BroadcastChannel === "undefined") {
-        done([]);
+        resolve({ count: 0, paths: [] });
         return;
       }
       const ch = new BroadcastChannel(TAB_CHANNEL);
       const nonce = String(Date.now()) + Math.random();
       const paths = [];
+      let count = 0;
       ch.addEventListener("message", (e) => {
         const d = e.data || {};
-        if (d.type === "pong" && d.nonce === nonce) paths.push(d.path || "");
+        if (d.type === "pong" && d.nonce === nonce) {
+          paths.push(d.path || "");
+          if (d.held !== false) count++;
+        }
       });
       ch.postMessage({ type: "ping", nonce });
       setTimeout(() => {
         ch.close();
-        done(paths);
-      }, 150);
+        resolve({ count, paths });
+      }, 300);
     });
   }
 
@@ -479,39 +419,9 @@
   }
 
   loadModels();
-  load(); // 목록은 무조건 1회 로드 (예약 슬롯으로 fetch 는 항상 가능)
-
-  // 대시보드 SSE 도 연결 1개 — 슬롯을 잡아야 연다. 슬롯이 없으면(방
-  // 탭들이 전부 점유) 목록은 정적으로 두고 대기 힌트 표시, 슬롯이 나는
-  // 순간 자동 연결. 이게 없으면 방 5 + 대시보드 = 6 으로 포화 구멍.
-  function liveWaitHint(show) {
-    let el = document.getElementById("live-wait");
-    if (!show) {
-      if (el) el.remove();
-      return;
-    }
-    if (el) return;
-    el = document.createElement("div");
-    el.id = "live-wait";
-    el.textContent =
-      "⏸ 실시간 갱신 대기 — 연결 슬롯(5)이 모두 사용 중입니다. 방 탭을 " +
-      "하나 닫으면 즉시 자동 연결됩니다. (목록은 새로고침으로 갱신 가능)";
-    document.body.insertBefore(el, document.body.firstChild);
-  }
-
-  acquireSlot().then((got) => {
-    if (got) {
-      dashHeld = true;
-      connectEvents();
-    } else {
-      liveWaitHint(true);
-      waitForSlot(() => {
-        dashHeld = true;
-        liveWaitHint(false);
-        connectEvents();
-      });
-    }
-  });
+  load();
+  dashHeld = true; // 대시보드 SSE 는 무조건 연결(카운트에 자기 포함)
+  connectEvents();
 })();
 
 // ── 테마 피커 (🎨) — agent-cli 와 동일 5테마·localStorage 'agentcli_theme'

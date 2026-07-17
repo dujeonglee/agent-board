@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.16.0] - 2026-07-17
+
+### Changed
+
+- **탭 가드 카운트를 ping/pong 샘플링(창 300ms)으로 복귀** — v1.15 의
+  Web Locks 는 secure context 전용이라 LAN http(주 운용)에서 락 API 가
+  노출되지 않아 무동작이었다. 열기는 사람 속도의 버튼 클릭이라 샘플링
+  으로 충분(agent-cli v7.7.0 board-경유 운용 전제와 세트). 대시보드
+  SSE 슬롯 게이트·`#live-wait` 힌트 제거 — 무조건 연결(v1.14 동작).
+
+
 ## [1.15.0] - 2026-07-17
 
 ### Changed
