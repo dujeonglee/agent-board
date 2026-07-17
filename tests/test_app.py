@@ -402,13 +402,14 @@ class TestTabGuard:
         _, _, c = _client(tmp_path)
         js = c.get("/static/app.js").text
         # 카운트 채널 + 임계 + 게이트웨이 조건 + named-window 재사용
-        assert "agentcli_tab_presence" in js
+        assert "agentcli_tab_presence" in js  # 재사용 path 판정용 비콘
         assert "MAX_HELD_TABS" in js
         assert "/api/gateway" in js
         assert '"agentcli-" + post_id' in js
-        # agent-cli ≥7.5.0 파킹 탭은 held:false pong — 연결을 안 잡은
-        # 탭이 열기 한도를 잡아먹으면 안 됨 (재사용 path 판정에는 포함).
-        assert "held !== false" in js
+        # v1.15.0: 카운트는 Web Locks 슬롯(agent-cli v7.6.0 프로토콜) —
+        # 원자적·잔존 pong 없음. 대시보드도 자기 SSE 용 슬롯을 잡는다.
+        assert "navigator.locks" in js
+        assert "agentcli-conn-slot-" in js
 
 
 class TestSingletonLock:
