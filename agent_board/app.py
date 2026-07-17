@@ -372,6 +372,14 @@ def create_app(
         posts = await loop.run_in_executor(None, store.list_posts)
         return [_post_view(config, store, p) for p in posts]
 
+    @app.get("/api/gateway")
+    async def gateway_info():
+        """프런트 탭 가드의 조건 스위치. 브라우저의 origin 당 6연결
+        (HTTP/1.1) 풀 고갈은 board-proxy(모든 방=이 origin, 방/대시보드
+        탭마다 SSE 1개 점유)에서만 위험 — caddy(h2, 연결 1개 멀티플렉스)
+        모드면 가드가 스스로 물러난다."""
+        return {"gateway": config.gateway}
+
     @app.get("/api/events")
     async def events():
         """SSE stream of live row changes (``post_update`` / ``post_removed``).

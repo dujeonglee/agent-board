@@ -373,6 +373,41 @@ class TestGatewayBanner:
         assert b.startswith("caddy") and "127.0.0.1:2019" in b
 
 
+class TestTabGuard:
+    """브라우저-로컬 탭 가드 (v1.14.0) — board-proxy 게이트웨이에서 방/대시
+    보드 탭들이 origin 당 6연결(HTTP/1.1) 풀을 소진해 승인 클릭까지
+    stall 하던 실사고(agent-cli v7.2.0 참조)의 예방. 프런트가 열기 전에
+    BroadcastChannel 로 보유 탭 수를 세고, caddy(h2) 모드에선 자동 해제."""
+
+    def test_gateway_endpoint_reports_mode(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        r = c.get("/api/gateway")
+        assert r.status_code == 200
+        assert r.json() == {"gateway": "board-proxy"}
+
+    def test_gateway_endpoint_reports_caddy(self, tmp_path):
+        cfg = Config(
+            data_dir=tmp_path / "data",
+            workspaces_root=tmp_path / "ws",
+            gateway="caddy",
+        )
+        store = Store(cfg.db_path)
+        app = create_app(
+            cfg, store=store, orchestrator=FakeOrch(), keepalive=FakeKeepalive()
+        )
+        r = TestClient(app).get("/api/gateway")
+        assert r.json() == {"gateway": "caddy"}
+
+    def test_frontend_guard_wired(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        # 카운트 채널 + 임계 + 게이트웨이 조건 + named-window 재사용
+        assert "agentcli_tab_presence" in js
+        assert "MAX_HELD_TABS" in js
+        assert "/api/gateway" in js
+        assert '"agentcli-" + post_id' in js
+
+
 class TestSingletonLock:
     def test_first_acquires_second_refused(self, tmp_path):
         data = tmp_path / "data"

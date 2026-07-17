@@ -16,6 +16,63 @@
 
   let MODELS = []; // registry, shared by the new-post form + per-post dropdowns
 
+  // ── 탭 가드 (v1.14.0) ─────────────────────
+  // board-proxy 게이트웨이에서는 모든 방이 이 origin 으로 프록시되고,
+  // 방 탭과 대시보드 탭이 각각 SSE 로 연결 1개를 계속 점유한다. 브라우저의
+  // HTTP/1.1 origin 당 동시 연결은 6개(프로필 전체 합산)뿐이라 6개가 차면
+  // 승인 클릭·채팅 전송까지 모든 요청이 조용히 멈춘다(실사고: agent-cli
+  // v7.2.0 confirm-starvation). 새 방을 열기 전에 BroadcastChannel 로
+  // "연결을 잡고 있는 탭"을 세어(방 탭은 agent-cli 의 비콘이, 대시보드
+  // 탭은 아래 응답기가 pong) 한도 앞에서 막는다. caddy(h2) 모드는 연결
+  // 1개에 스트림을 멀티플렉스하므로 가드가 스스로 물러난다(/api/gateway).
+  // 한계: board 를 거치지 않은 탭 진입(세션 복원·URL 직접·탭 복제)은
+  // 게이트를 안 지나므로, 그 케이스는 agent-cli 쪽 무응답 경고가 받친다.
+  const TAB_CHANNEL = "agentcli_tab_presence";
+  // 보유 SSE 가 6개가 되는 순간 풀이 포화되므로 5개에서 차단(=열면 6),
+  // 4개에서 경고(=열면 5, fetch 여유 1개).
+  const MAX_HELD_TABS = 5;
+  let gatewayMode = "board-proxy"; // /api/gateway 로 갱신 (모르면 보수적으로 가드)
+
+  fetch("/api/gateway")
+    .then((r) => r.json())
+    .then((d) => {
+      if (d && d.gateway) gatewayMode = d.gateway;
+    })
+    .catch(() => {});
+
+  // 대시보드 탭도 /api/events SSE 로 연결 1개를 점유 — 같은 채널에 pong.
+  if (typeof BroadcastChannel !== "undefined") {
+    const presence = new BroadcastChannel(TAB_CHANNEL);
+    presence.addEventListener("message", (e) => {
+      const d = e.data || {};
+      if (d.type === "ping")
+        presence.postMessage({ type: "pong", nonce: d.nonce, path: "/" });
+    });
+  }
+
+  // ping 을 쏘고 150ms 동안 pong 을 수집 — 살아 있는 탭만 답하므로
+  // 크래시/닫힘 탭이 세어지는 일이 없다. 반환: {count, paths}.
+  function countHeldTabs() {
+    return new Promise((resolve) => {
+      if (typeof BroadcastChannel === "undefined") {
+        resolve({ count: 0, paths: [] });
+        return;
+      }
+      const ch = new BroadcastChannel(TAB_CHANNEL);
+      const nonce = String(Date.now()) + Math.random();
+      const paths = [];
+      ch.addEventListener("message", (e) => {
+        const d = e.data || {};
+        if (d.type === "pong" && d.nonce === nonce) paths.push(d.path || "");
+      });
+      ch.postMessage({ type: "ping", nonce });
+      setTimeout(() => {
+        ch.close();
+        resolve({ count: paths.length, paths });
+      }, 150);
+    });
+  }
+
   async function loadModels() {
     MODELS = await fetch("/api/models").then((r) => r.json());
     MODELS.forEach((m) => {
@@ -132,7 +189,34 @@
     const sameTab = $sameTab.checked;
     // Open the new tab SYNCHRONOUSLY (inside the click gesture) so the popup
     // blocker allows it; the await below would otherwise break the gesture.
-    const win = sameTab ? null : window.open("", "_blank");
+    // Named target(post_id): 같은 글을 다시 열면 새 탭 대신 그 글의 기존
+    // 창을 재사용 — 실수로 연결 잡는 탭이 하나 더 생기는 걸 막고, 의도적
+    // 두 번째 창은 URL 복사로 여전히 가능(다중 뷰어는 설계 기능).
+    const win = sameTab ? null : window.open("", "agentcli-" + post_id);
+    if (gatewayMode !== "caddy") {
+      const held = await countHeldTabs();
+      // 이 글의 탭이 이미 있으면(named-window 재사용 or sameTab 전환)
+      // 연결이 늘지 않으므로 게이트 면제.
+      const reusing = held.paths.some((p) => p.startsWith(`/s/${post_id}/`));
+      if (!reusing) {
+        if (held.count >= MAX_HELD_TABS) {
+          if (win) win.close();
+          toast(
+            `연결 한도 — 이 브라우저에 연결을 잡은 탭이 ${held.count}개입니다. ` +
+              `HTTP/1.1 은 주소당 동시 연결 6개뿐이라 더 열면 모든 탭이 멈춥니다. ` +
+              `안 쓰는 방 탭을 닫고 다시 여세요.`,
+            true
+          );
+          return;
+        }
+        if (held.count === MAX_HELD_TABS - 1) {
+          toast(
+            `연결을 잡은 탭 ${held.count + 1}개 — 한도(6)에 근접했습니다. 안 쓰는 탭을 닫아주세요.`,
+            true
+          );
+        }
+      }
+    }
     const r = await fetch(`/api/posts/${post_id}/open`, { method: "POST" });
     if (!r.ok) {
       if (win) win.close();
@@ -144,6 +228,7 @@
       location.href = url;
     } else {
       win.location.href = url;
+      win.focus();
     }
   }
 

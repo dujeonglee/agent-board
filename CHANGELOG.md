@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.14.0] - 2026-07-17
+
+### Added
+
+- **탭 가드** — board-proxy 에서 브라우저 origin 당 6연결(HTTP/1.1) 고갈로
+  방 UI 전체가 조용히 멈추던 실사고(agent-cli v7.2.0 confirm-starvation)
+  예방. 열기 전 BroadcastChannel(`agentcli_tab_presence`) 로 연결 보유 탭
+  카운트(방 탭=agent-cli ≥7.3.0 비콘, 대시보드 탭=자체 pong) → 4개째 경고
+  토스트, 5개째 차단. 같은 글 재열기는 named window(`agentcli-<post_id>`)
+  로 기존 창 재사용(가드 면제 — pong 의 path 로 식별). `GET /api/gateway`
+  신설 — gateway=caddy(h2) 면 가드 자동 해제.
+
+### Fixed
+
+- admin: agent-cli v6/v7 잔여 정리 — structured 컬럼·supports_structured_
+  output/supports_strict_schema 체크박스 제거(v7.0.0 에서 필드 삭제),
+  wire 드롭다운 기본 체인 표기 md_array→json_fc.
+
+
 ## [1.13.0] - 2026-07-17
 
 ### Added
