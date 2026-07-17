@@ -62,7 +62,6 @@
     return (
       "<td>" + (entry.context_window ?? "—") + "</td>" +
       "<td>" + (entry.max_output_tokens ?? "—") + "</td>" +
-      "<td>" + (entry.supports_structured_output ? "✓" : "✗") + "</td>" +
       "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>" +
       "<td>" + (entry.wire_format || "auto") + "</td>"
     );
@@ -181,8 +180,6 @@
     $("entry-title").textContent = mid;
     $("ef-ctx").value = entry.context_window ?? 4096;
     $("ef-maxout").value = entry.max_output_tokens ?? 2048;
-    $("ef-structured").checked = !!entry.supports_structured_output;
-    $("ef-strict").checked = !!entry.supports_strict_schema;
     $("ef-thinking").checked = !!entry.supports_thinking;
     $("ef-budget").value = entry.thinking_budget ?? 0;
     $("ef-format").value = entry.thinking_format ?? "";
@@ -215,10 +212,8 @@
     const entry = {
       context_window: parseInt($("ef-ctx").value, 10) || 4096,
       max_output_tokens: parseInt($("ef-maxout").value, 10) || 2048,
-      supports_structured_output: $("ef-structured").checked,
       supports_thinking: $("ef-thinking").checked,
       thinking_budget: parseInt($("ef-budget").value, 10) || 0,
-      supports_strict_schema: $("ef-strict").checked,
       thinking_format: $("ef-format").value,
     };
     // auto("") = 필드 미기록 — keep-sentinel 과 같은 "안 고르면 안 쓴다"

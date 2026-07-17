@@ -193,10 +193,8 @@ class TestDetect:
         fake_caps = caps_mod.ModelCapabilities(
             context_window=32768,
             max_output_tokens=4096,
-            supports_structured_output=True,
             supports_thinking=False,
             thinking_budget=0,
-            supports_strict_schema=False,
         )
         seen = {}
 
@@ -346,9 +344,10 @@ class TestWireFormatBinding:
     def test_list_wire_format_names_from_agent_cli(self):
         # dev/배포 환경은 agent-cli co-install 전제 (detect 동형)
         names = admin.list_wire_format_names()
-        assert "md_array" in names
-        assert "react" in names
+        assert "json_fc" in names
         assert "xml_fc" in names
+        assert "md_array" not in names  # v6.0.0 리네임
+        assert "react" not in names  # v7.0.0 제거
 
     def test_list_wire_format_names_missing_agent_cli(self, monkeypatch):
         import sys
