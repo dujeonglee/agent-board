@@ -52,6 +52,11 @@
 
   // ping 을 쏘고 150ms 동안 pong 을 수집 — 살아 있는 탭만 답하므로
   // 크래시/닫힘 탭이 세어지는 일이 없다. 반환: {count, paths}.
+  // count 는 연결을 실제로 잡은 탭만: agent-cli ≥7.5.0 의 파킹 탭은
+  // held:false 로 답한다(SSE 미연결 — 한도와 무관). held 필드가 없는
+  // pong(구버전 탭·대시보드)은 항상 보유로 집계. paths 는 재사용 판정
+  // ("이 글의 탭이 이미 있나")용이라 파킹 탭 것도 포함 — named window
+  // 는 파킹 탭도 재사용하므로.
   function countHeldTabs() {
     return new Promise((resolve) => {
       if (typeof BroadcastChannel === "undefined") {
@@ -61,14 +66,18 @@
       const ch = new BroadcastChannel(TAB_CHANNEL);
       const nonce = String(Date.now()) + Math.random();
       const paths = [];
+      let count = 0;
       ch.addEventListener("message", (e) => {
         const d = e.data || {};
-        if (d.type === "pong" && d.nonce === nonce) paths.push(d.path || "");
+        if (d.type === "pong" && d.nonce === nonce) {
+          paths.push(d.path || "");
+          if (d.held !== false) count++;
+        }
       });
       ch.postMessage({ type: "ping", nonce });
       setTimeout(() => {
         ch.close();
-        resolve({ count: paths.length, paths });
+        resolve({ count, paths });
       }, 150);
     });
   }

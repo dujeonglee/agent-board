@@ -406,6 +406,9 @@ class TestTabGuard:
         assert "MAX_HELD_TABS" in js
         assert "/api/gateway" in js
         assert '"agentcli-" + post_id' in js
+        # agent-cli ≥7.5.0 파킹 탭은 held:false pong — 연결을 안 잡은
+        # 탭이 열기 한도를 잡아먹으면 안 됨 (재사용 path 판정에는 포함).
+        assert "held !== false" in js
 
 
 class TestSingletonLock:
