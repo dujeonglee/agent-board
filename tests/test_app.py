@@ -373,6 +373,71 @@ class TestGatewayBanner:
         assert b.startswith("caddy") and "127.0.0.1:2019" in b
 
 
+class TestAgentsInPostView:
+    """v1.17.0: 상주 에이전트 요약(status.json `agents`, agent-cli
+    ≥7.10.0)을 행에 노출 — 🤖 W/N 칩 + main 유휴·에이전트 작업 중이면
+    "에이전트 작업 중" 상태(동일 원형 dot, 색만 구분)."""
+
+    def test_post_view_passes_agents_through(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "running",
+                "awaiting_input": False,
+                "viewers": 0,
+                "agents": {
+                    "alive": 2,
+                    "working": 1,
+                    "list": [
+                        {
+                            "key": "agt-1",
+                            "profile": "coder",
+                            "name": "ui",
+                            "state": "working",
+                        },
+                        {
+                            "key": "agt-2",
+                            "profile": "reviewer",
+                            "name": "",
+                            "state": "idle",
+                        },
+                    ],
+                },
+            },
+        )
+        posts = c.get("/api/posts").json()
+        assert posts[0]["agents"]["alive"] == 2
+        assert posts[0]["agents"]["working"] == 1
+
+    def test_post_view_agents_absent_when_not_provided(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {"status": "idle", "awaiting_input": False, "viewers": 0},
+        )
+        posts = c.get("/api/posts").json()
+        assert posts[0].get("agents") is None
+
+    def test_frontend_agents_chip_wired(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        css = c.get("/static/style.css").text
+        assert "agents-chip" in js
+        assert "agents-busy" in js  # main 유휴 + 에이전트 작업 중 상태
+        assert "에이전트 작업" in js
+        assert ".dot.agents-busy" in css
+        assert "--agent-work" in css
+
+
 class TestTabGuard:
     """브라우저-로컬 탭 가드 (v1.14.0) — board-proxy 게이트웨이에서 방/대시
     보드 탭들이 origin 당 6연결(HTTP/1.1) 풀을 소진해 승인 클릭까지

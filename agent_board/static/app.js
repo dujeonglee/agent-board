@@ -150,15 +150,34 @@
     running: { cls: "on", label: "대기" },
     idle: { cls: "off", label: "꺼짐" },
   };
+  // main 유휴 + 상주 에이전트 작업 중 (v1.17.0) — 같은 원형 dot, 색만
+  // 구분(보라). "응답 중"과 합치지 않는 이유: main 은 비어 있어 지금
+  // 말 걸어도 되는 상태라는 정보가 사라짐.
+  const AGENTS_BUSY = { cls: "agents-busy", label: "에이전트 작업 중" };
+
+  function agentsChip(p) {
+    const a = p.agents;
+    if (!a || !a.alive) return "";
+    const detail = (a.list || [])
+      .map((x) => {
+        const who = x.name ? `${x.profile} · ${x.name}` : x.profile || x.key;
+        return `${who}: ${x.state}`;
+      })
+      .join("\n");
+    return `<span class="agents-chip" title="${esc(detail)}">🤖 ${a.working}/${a.alive}</span>`;
+  }
 
   function card(p) {
     const el = document.createElement("div");
     el.dataset.id = p.post_id; // for in-place live updates over SSE
     el.className = "post" + (p.awaiting_input ? " needs-input" : "");
     // awaiting an ask/confirm reply takes precedence over the busy/idle label
+    const agentsWorking = p.agents && p.agents.working > 0;
     const st = p.awaiting_input
       ? { cls: "await", label: "❗ 응답 필요" }
-      : STATUS[p.status] || STATUS.idle;
+      : p.status === "running" && agentsWorking
+        ? AGENTS_BUSY
+        : STATUS[p.status] || STATUS.idle;
     const up = p.status === "running" || p.status === "working";
     el.innerHTML =
       `<div class="post-main">` +
@@ -171,6 +190,7 @@
       `<div class="post-side">` +
       `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}` +
       (up ? ` <span class="viewers" title="접속자 수">👁 ${p.viewers}</span>` : "") +
+      (up ? agentsChip(p) : "") +
       `</span>` +
       modelSelect(p) +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +

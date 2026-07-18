@@ -79,11 +79,16 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
         live = instances.health_info(port)
     if live is None:
         return dict(_IDLE)
-    return {
+    out = {
         "status": "working" if live.get("busy") else "running",
         "awaiting_input": bool(live.get("awaiting_input")),
         "viewers": int(live.get("viewers") or 0),
     }
+    # v1.17.0: 상주 에이전트 요약 (agent-cli ≥7.10.0 additive 필드 —
+    # 구버전 인스턴스는 미기록 → 키 생략, 프런트가 칩 숨김).
+    if isinstance(live.get("agents"), dict):
+        out["agents"] = live["agents"]
+    return out
 
 
 def status(workspace: Path, session_id: str | None) -> str:

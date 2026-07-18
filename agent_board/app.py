@@ -194,6 +194,8 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "awaiting_input": state["awaiting_input"],
         "viewers": viewers,
         "model_changeable": model_changeable,
+        # 상주 에이전트 요약 (없으면 None — 프런트가 칩/상태 숨김)
+        "agents": state.get("agents"),
     }
 
 
