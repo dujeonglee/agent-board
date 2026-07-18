@@ -194,8 +194,7 @@ class TestStatus:
         }
         (sdir / "status.json").write_text(
             json.dumps(
-                {"busy": False, "awaiting_input": False, "viewers": 0,
-                 "agents": agents}
+                {"busy": False, "awaiting_input": False, "viewers": 0, "agents": agents}
             )
         )
         state = sessions.live_state(ws, "S1")
@@ -204,8 +203,12 @@ class TestStatus:
         # 비-dict agents(손상/구버전 이상치) → 키 자체를 안 만든다
         (sdir / "status.json").write_text(
             json.dumps(
-                {"busy": False, "awaiting_input": False, "viewers": 0,
-                 "agents": "garbage"}
+                {
+                    "busy": False,
+                    "awaiting_input": False,
+                    "viewers": 0,
+                    "agents": "garbage",
+                }
             )
         )
         assert "agents" not in sessions.live_state(ws, "S1")
