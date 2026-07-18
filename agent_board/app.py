@@ -270,6 +270,10 @@ def create_app(
                 await router.aclose()  # release the router's httpx client
 
     app = FastAPI(title="agent-board", lifespan=lifespan)
+    # 테스트 표면 (v1.18.1): death-edge→라우트 제거 배선(on_death=
+    # router.remove_route)을 합동 검증할 수 있게 노출 — 배선 누락은
+    # 양쪽 반쪽 유닛만으로는 안 잡힌다.
+    app.state.live_events = live
     router.mount(app)  # /s/<post_id>/* reverse proxy
 
     # no-cache — plain StaticFiles 는 Cache-Control 미설정이라 브라우저가

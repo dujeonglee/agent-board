@@ -438,6 +438,65 @@ class TestAgentsInPostView:
         assert "--agent-work" in css
 
 
+class TestDeathEdgeRouteWiring:
+    """★배선 합동 검증 (v1.18.1 감사): app 이 LiveEvents 에 on_death=
+    router.remove_route 를 실제로 넘기는지 — 양쪽 반쪽 유닛(TestOnDeath
+    는 mock 콜백, delete 테스트는 별개 경로)만으로는 이 한 줄 배선이
+    빠져도 전부 green 이라 caddy 502-고착이 재발할 수 있다."""
+
+    def test_death_edge_calls_router_remove_route(self, tmp_path, monkeypatch):
+        import json as _json
+
+        from agent_board import instances
+        from agent_board.router import Router
+
+        class SpyRouter(Router):
+            def __init__(self):
+                self.removed = []
+
+            def ensure_route(self, post_id, port):
+                pass
+
+            def remove_route(self, post_id):
+                self.removed.append(post_id)
+
+            def set_reopen(self, reopen):
+                pass
+
+            def mount(self, app):
+                pass
+
+            async def aclose(self):
+                pass
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+        spy = SpyRouter()
+        app = create_app(
+            cfg,
+            store=store,
+            router=spy,
+            orchestrator=FakeOrch(),
+            keepalive=FakeKeepalive(),
+        )
+        live = app.state.live_events
+
+        post = store.create_post(topic="t")
+        store.set_session_id(post.post_id, "S1")
+        sdir = cfg.workspace_for(post.post_id) / ".agent-cli" / "sessions" / "S1"
+        sdir.mkdir(parents=True)
+        (sdir / "web.json").write_text(
+            _json.dumps({"session_id": "S1", "pid": 4242, "port": 9000})
+        )
+
+        alive = {"v": True}
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: alive["v"])
+        live._prime()
+        alive["v"] = False  # 인스턴스 사망
+        live._scan()
+        assert spy.removed == [post.post_id]
+
+
 class TestTabGuard:
     """브라우저-로컬 탭 가드 (v1.14.0) — board-proxy 게이트웨이에서 방/대시
     보드 탭들이 origin 당 6연결(HTTP/1.1) 풀을 소진해 승인 클릭까지

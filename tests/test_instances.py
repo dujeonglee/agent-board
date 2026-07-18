@@ -219,3 +219,31 @@ class TestPidAliveZombie:
         import os
 
         assert instances.pid_alive(os.getpid()) is True
+
+
+class TestPidAlivePsBranches:
+    """pid_alive 의 ps 방어 브랜치 2개 (v1.18.1 — 감사 발견 무테스트):
+    ps 실패=보수적 生(뒤집히면 느린 호스트에서 가짜 death edge → 라우트
+    처닝), 빈 출력=死(뒤집히면 kill 직후 TOCTOU 창에서 caddy 502 고착
+    — v1.18.0 이 고친 바로 그 버그)."""
+
+    def test_ps_timeout_is_conservatively_alive(self, monkeypatch):
+        import os
+        import subprocess as sp
+
+        def boom(*a, **k):
+            raise sp.TimeoutExpired("ps", 1.0)
+
+        monkeypatch.setattr(instances.subprocess, "run", boom)
+        assert instances.pid_alive(os.getpid()) is True
+
+    def test_empty_ps_output_is_dead(self, monkeypatch):
+        import os
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            instances.subprocess,
+            "run",
+            lambda *a, **k: SimpleNamespace(stdout="\n"),
+        )
+        assert instances.pid_alive(os.getpid()) is False
