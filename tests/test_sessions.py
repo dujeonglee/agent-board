@@ -176,6 +176,46 @@ class TestStatus:
         info.update(fields)
         (d / "status.json").write_text(json.dumps(info))
 
+    def test_live_state_passes_agents_through_from_status_file(
+        self, tmp_path, monkeypatch
+    ):
+        """v1.17.0 agents 추출 자체 검증 (v1.17.1 보강 — 종전엔 live_state
+        를 몽키패치해 이 코드가 무검증이었다). status.json 의 agents dict
+        는 그대로 통과, 비-dict 는 무시, 부재 시 키 없음."""
+        import json
+
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        sdir = ws / ".agent-cli" / "sessions" / "S1"
+        agents = {
+            "alive": 2,
+            "working": 1,
+            "list": [{"key": "a", "profile": "coder", "name": "", "state": "busy"}],
+        }
+        (sdir / "status.json").write_text(
+            json.dumps(
+                {"busy": False, "awaiting_input": False, "viewers": 0,
+                 "agents": agents}
+            )
+        )
+        state = sessions.live_state(ws, "S1")
+        assert state["agents"] == agents
+
+        # 비-dict agents(손상/구버전 이상치) → 키 자체를 안 만든다
+        (sdir / "status.json").write_text(
+            json.dumps(
+                {"busy": False, "awaiting_input": False, "viewers": 0,
+                 "agents": "garbage"}
+            )
+        )
+        assert "agents" not in sessions.live_state(ws, "S1")
+
+        # 필드 부재(구버전 agent-cli) → 키 없음
+        (sdir / "status.json").write_text(
+            json.dumps({"busy": False, "awaiting_input": False, "viewers": 0})
+        )
+        assert "agents" not in sessions.live_state(ws, "S1")
+
     def test_live_state_prefers_status_file_over_health(self, tmp_path, monkeypatch):
         # status.json present (agent-cli >= 4.27.0) → read the file, NEVER HTTP
         ws = self._web_json(tmp_path)
