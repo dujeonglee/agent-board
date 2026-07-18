@@ -124,6 +124,10 @@ agent-board
 caddy hash-password --plaintext 'secret'      # → $2a$14$...
 
 # 2) deploy/Caddyfile 의 도메인·해시 수정 후 Caddy 기동 (admin 127.0.0.1:2019)
+#    도메인 없는 LAN 이면 deploy/Caddyfile.lan 사용:
+#      <LAN_IP> 치환 → caddy run --config deploy/Caddyfile.lan
+#      접속: https://<LAN_IP>:8443 (h2 — 연결 6개 제한 소멸, 탭 가드 자동 해제)
+#      기기당 1회 CA 신뢰: 이 맥 `caddy trust`, 타 기기는 root.crt 설치(또는 경고 클릭스루)
 # 3) 보드를 caddy 모드로 (★ loopback 바인드 필수 — 아래 주의)
 AGENT_BOARD_GATEWAY=caddy \
 AGENT_BOARD_HOST=127.0.0.1 \

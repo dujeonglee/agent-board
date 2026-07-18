@@ -77,14 +77,36 @@ def pick_free_port(low: int, high: int) -> int:
 
 
 def pid_alive(pid: int) -> bool:
-    """Whether a process with ``pid`` exists (signal 0 probe)."""
+    """Whether a process with ``pid`` is actually running.
+
+    signal-0 프로브 + **좀비 판정** (v1.18.0): 인스턴스가 크래시/외부
+    kill 로 죽으면 부모(board)가 wait 하지 않아 좀비로 잔존하는데,
+    ``os.kill(pid, 0)`` 은 좀비도 성공한다 — 그러면 death edge 가 영영
+    안 떠 caddy 모드의 죽은 라우트가 502 로 고착된다(board-proxy 는
+    lazy revive 라 무증상). 좀비면 죽은 것으로 판정하고, 우리 자식이면
+    reap 까지 해 프로세스 테이블에서 치운다."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True  # exists, owned by someone else
-    return True
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "stat="],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        ).stdout.strip()
+    except Exception:
+        return True  # ps 실패 — 보수적으로 살아있다고 본다
+    if out.startswith("Z"):
+        try:
+            os.waitpid(pid, os.WNOHANG)  # 우리 자식이면 reap (아니면 ECHILD)
+        except (ChildProcessError, OSError):
+            pass
+        return False
+    return bool(out)  # 빈 출력 = ps 가 못 찾음 (경계: kill 직후)
 
 
 def stop_instance(workspace: Path, session_id: str | None) -> bool:

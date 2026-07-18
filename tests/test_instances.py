@@ -193,3 +193,29 @@ class TestProxyBypass:
             assert info == {"status": "ok", "busy": False}
         finally:
             srv.shutdown()
+
+
+class TestPidAliveZombie:
+    """★caddy e2e 실측 (2026-07-18): 인스턴스가 크래시/외부 kill 로 죽으면
+    부모(board)가 wait 하지 않아 좀비로 잔존 — os.kill(pid,0) 은 좀비도
+    "살아있음"이라 death edge 가 영영 안 떠 caddy 라우트가 죽은 upstream
+    을 가리킨 채 502 고착(board-proxy 는 lazy revive 라 무증상). 좀비는
+    죽은 것으로 판정하고, 우리가 부모면 reap 까지 한다."""
+
+    def test_zombie_child_is_dead(self):
+        import subprocess
+        import time
+
+        proc = subprocess.Popen(["true"])  # 즉시 종료 → wait 전까지 좀비
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            if instances.pid_alive(proc.pid) is False:
+                break
+            time.sleep(0.05)
+        assert instances.pid_alive(proc.pid) is False
+        proc.wait(timeout=1)  # 이미 reap 됐어도 안전 (예외 없이 통과해야)
+
+    def test_live_process_still_alive(self):
+        import os
+
+        assert instances.pid_alive(os.getpid()) is True

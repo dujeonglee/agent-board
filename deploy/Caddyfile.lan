@@ -1,0 +1,51 @@
+# agent-board — LAN용 Caddy 게이트웨이 (gateway=caddy, 도메인 없음)
+#
+# deploy/Caddyfile 이 "도메인 + basic_auth" 프로덕션 전제라면, 이 변형은
+# 사설 LAN(https://<이 머신 IP>:8443) 운용 전제다. 존재 이유 두 가지:
+#
+#   1. h2 멀티플렉스 — 브라우저의 origin 당 HTTP/1.1 동시 연결 6개 제한
+#      (방/대시보드 탭마다 SSE 1개 점유 → 6개째부터 전체 멈춤)이 사라진다.
+#      연결 1개에 스트림 ~100개: 방을 몇 개 열든 탭 가드가 필요 없다
+#      (board 가 gateway=caddy 를 프런트에 알려 가드 자동 해제).
+#   2. secure context — https 라 클립보드 API 등 브라우저 제약도 풀린다.
+#
+# ── 사용법 ──
+#   1) 아래 <LAN_IP> 를 이 머신의 IP 로 바꾼다 (예: 192.168.0.44).
+#   2) caddy run --config deploy/Caddyfile.lan
+#   3) AGENT_BOARD_GATEWAY=caddy agent-board   (board 는 127.0.0.1 바인드 유지)
+#   4) 접속: https://<LAN_IP>:8443/
+#
+# ── 로컬 CA 신뢰 (기기당 1회, 코드로 못 없애는 마찰) ──
+#   tls internal 은 Caddy 내장 CA 로 인증서를 발급한다. 브라우저 경고를
+#   없애려면 접속하는 각 기기가 CA 루트를 1회 신뢰해야 한다:
+#   - 이 맥:      `caddy trust`  (관리자 암호 1회)
+#   - 다른 PC:    ~/Library/Application Support/Caddy/pki/authorities/local/root.crt
+#                 를 복사해 OS 인증서 저장소에 "신뢰"로 추가
+#   - iOS/Android: root.crt 를 전송해 프로파일/인증서 설치 → 신뢰 활성화
+#   신뢰 없이도 동작은 한다(브라우저 경고 1회 클릭스루) — h2 는 동일 적용.
+#
+# board-proxy 모드와의 관계: 두 게이트웨이 모두 공식 지원이다. 이 파일을
+# 안 쓰면 board 는 기본(board-proxy, http, 탭 가드 활성)으로 동작한다.
+
+{
+	# board(CaddyRouter)가 /s/<post_id> 라우트를 등록하는 admin API — 루프백 전용.
+	admin 127.0.0.1:2019
+}
+
+https://<LAN_IP>:8443, https://localhost:8443 {
+	tls internal
+
+	# (선택) LAN 이라도 외부인 우려가 있으면 basic_auth 를 켠다 —
+	# 해시는 `caddy hash-password --plaintext '비밀번호'` 로 생성.
+	# 켜면 AGENT_BOARD_CADDY_BASIC_AUTH="user:해시" 도 함께 설정해
+	# 동적 /s/<id> 라우트에도 같은 인증이 임베드되게 한다.
+	# basic_auth {
+	# 	alice $2a$14$REPLACE_WITH_BCRYPT_HASH
+	# }
+
+	# 기본: 전부 board 로. 라이브 방(/s/<id>/*)은 board 가 admin API 로
+	# 이 서버(srv0) 앞에 동적 라우트를 꽂아 인스턴스로 직결한다 — 방이
+	# self-reap 으로 죽으면 라우트가 빠져 이 catch-all 로 떨어지고, board
+	# 의 revive 핸들러가 재스폰 후 302 로 되돌린다.
+	reverse_proxy 127.0.0.1:51966
+}

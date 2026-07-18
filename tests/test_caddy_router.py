@@ -175,3 +175,20 @@ class TestCaddyRevive:
         client, _ = _revive_client(reopen=None)
         r = client.get("/s/p1/api/health")
         assert r.status_code == 503
+
+
+class TestLanCaddyfileTemplate:
+    """deploy/Caddyfile.lan — 도메인 없는 LAN(h2+tls internal) 템플릿.
+    양대 게이트웨이(board-proxy/caddy) 공식 지원의 caddy 쪽 온보딩 관문."""
+
+    def test_template_has_required_directives(self):
+        from pathlib import Path
+
+        text = (Path(__file__).parent.parent / "deploy" / "Caddyfile.lan").read_text(
+            encoding="utf-8"
+        )
+        assert "tls internal" in text
+        assert "admin 127.0.0.1:2019" in text
+        assert "reverse_proxy 127.0.0.1:51966" in text  # catch-all → board
+        assert "<LAN_IP>" in text  # 사용자 치환 플레이스홀더
+        assert "caddy trust" in text  # CA 신뢰 안내

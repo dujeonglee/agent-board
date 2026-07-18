@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.18.0] - 2026-07-18
+
+### Added
+
+- **LAN 용 Caddy 템플릿 `deploy/Caddyfile.lan`** — 도메인 없이
+  `https://<LAN_IP>:8443` + `tls internal`(로컬 CA)로 caddy 게이트웨이
+  운용. h2 멀티플렉스로 브라우저 origin 당 6연결 제한이 사라져 방을
+  몇 개 열든 고갈이 없고(탭 가드 자동 해제), secure context 확보.
+  **두 게이트웨이(board-proxy/caddy)는 모두 공식 지원** — 이 템플릿을
+  안 쓰면 기본(board-proxy)으로 동작. 실검증(playwright, LAN https):
+  h2 협상·방 스폰·8탭 동시 보유 무고갈·revive 전부 확인.
+
+### Fixed
+
+- **좀비 pid 로 caddy revive 고착** — 인스턴스가 크래시/외부 kill 로
+  죽으면 부모(board)가 wait 하지 않아 좀비 잔존, `os.kill(pid,0)` 이
+  좀비도 살아있다고 판정 → death edge 미발화 → 죽은 라우트가 502 로
+  영구 고착(board-proxy 는 lazy revive 라 무증상). `pid_alive` 가
+  좀비를 죽은 것으로 판정 + 자식이면 reap.
+
+
 ## [1.17.0] - 2026-07-18
 
 ### Added
