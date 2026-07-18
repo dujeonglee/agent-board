@@ -255,3 +255,70 @@ class TestStatus:
             sessions.instances, "health_info", lambda port: {"busy": False}
         )
         assert sessions.live_state(ws, "S1")["status"] == "running"
+
+
+class TestStatusFileCrossRepoContract:
+    """★크로스-레포 실계약 (2026-07-18 감사): board 테스트가 status.json
+    을 손으로 쓰면 agent-cli 쪽 writer/필드가 드리프트해도 양쪽 유닛이
+    다 통과한다("working" 어휘 버그와 같은 부류). dev/배포 환경은
+    agent-cli co-install 전제(admin 테스트 동형)이므로 **agent-cli 의
+    실제 writer 로 생산한 파일**을 board 가 읽는 계약을 고정한다."""
+
+    def _ws(self, tmp_path):
+        import json as _json
+
+        ws = tmp_path / "ws"
+        sdir = ws / ".agent-cli" / "sessions" / "S1"
+        sdir.mkdir(parents=True)
+        (sdir / "web.json").write_text(
+            _json.dumps(
+                {"session_id": "S1", "host": "h", "port": 1, "token": "t", "pid": 1}
+            )
+        )
+        return ws, sdir
+
+    def test_agent_cli_written_status_parses(self, tmp_path, monkeypatch):
+        from agent_cli.web.instance_file import write_status_file
+
+        ws, sdir = self._ws(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        agents = {
+            "alive": 2,
+            "working": 1,
+            "list": [
+                {"key": "agt-1", "profile": "coder", "name": "ui", "state": "busy"},
+                {"key": "agt-2", "profile": "rev", "name": "", "state": "idle"},
+            ],
+        }
+        write_status_file(
+            sdir, busy=False, awaiting_input=False, viewers=2, agents=agents
+        )
+        state = sessions.live_state(ws, "S1")
+        assert state["status"] == "running"
+        assert state["viewers"] == 2
+        assert state["agents"] == agents
+        # 프런트 계약 필드 — app.js agentsChip/AGENTS_BUSY 가 읽는 키들
+        assert {"alive", "working", "list"} <= set(state["agents"])
+        assert {"key", "profile", "name", "state"} <= set(state["agents"]["list"][0])
+
+    def test_agent_cli_summary_builder_end_to_end(self, tmp_path, monkeypatch):
+        """한 단계 더 실물로: agent-cli 렌더러의 요약 빌더 출력(실어휘
+        busy 포함)이 board 파서·프런트 계약을 그대로 만족."""
+        from agent_cli.render.web import WebRenderer
+        from agent_cli.web.instance_file import write_status_file
+
+        ws, sdir = self._ws(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        summary = WebRenderer._agents_summary_from(
+            [
+                {"key": "a", "profile": "coder", "name": "", "state": "busy"},
+                {"key": "b", "profile": "rev", "name": "", "state": "waiting_ask"},
+                {"key": "c", "profile": "x", "name": "", "state": "dead"},
+            ]
+        )
+        write_status_file(
+            sdir, busy=False, awaiting_input=False, viewers=0, agents=summary
+        )
+        agents = sessions.live_state(ws, "S1")["agents"]
+        assert agents["alive"] == 2
+        assert agents["working"] == 2  # busy + waiting_ask 둘 다 작업 중
