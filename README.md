@@ -35,6 +35,7 @@
 ## 설치 · 실행
 ```bash
 pip install -e ".[dev]"
+# 실브라우저 테스트(탭 가드·에이전트 칩): AGENT_BOARD_BROWSER_TESTS=1 pytest tests/browser/ (playwright+chromium)
 
 python -m agent_board.app          # → http://localhost:51966
 # 또는 콘솔 스크립트

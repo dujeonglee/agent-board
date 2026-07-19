@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.19.0] - 2026-07-19
+
+### Added
+
+- **실브라우저 테스트 (`tests/browser/`, playwright)** — 탭 가드(여러 실
+  탭의 BroadcastChannel 연결 카운트→열기 차단)와 에이전트 상태 칩(🤖
+  칩·보라 dot·hover 상세) 처럼 실 브라우저 없이는 검증 못 하는 프런트
+  계약을 고정. 옵트인 `AGENT_BOARD_BROWSER_TESTS=1`, 그 외엔 루트
+  conftest collect_ignore 로 미수집(pytest-asyncio 수집-단계 이벤트루프
+  누출 방지 — agent-cli 실측 교훈). 이 저장소는 아직 CI 없어 로컬 전용.
+
+
 ## [1.18.0] - 2026-07-18
 
 ### Added
