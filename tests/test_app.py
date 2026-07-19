@@ -464,6 +464,32 @@ class TestClonePost:
         assert header["_meta"]["session_id"] == "2222222222"
         assert header["_meta"]["workspace"] == str(cfg.workspace_for(new_id).resolve())
 
+    def test_clone_session_id_conflict_downgrades_to_fresh(self, tmp_path, monkeypatch):
+        """set_session_id 가 (sid 충돌 등) 실패하면 조용히 fresh 로 강등 —
+        파일은 복사되되 --resume 안 됨(200 유지, session_id None). v1.21.1
+        감사: 이 강등 경로가 무테스트였음."""
+        cfg, store, c = _client(tmp_path)
+        src = self._seed_source(cfg, store)
+        # store.set_session_id 를 실패시켜 강등 경로를 강제
+        monkeypatch.setattr(
+            store,
+            "set_session_id",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("sid clash")),
+        )
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "강등본",
+                "clone_from": src.post_id,
+                "clone_paths": [".agent-cli"],
+            },
+        )
+        assert r.status_code == 200  # 크래시 아님
+        new_id = r.json()["post_id"]
+        assert store.get(new_id).session_id is None  # fresh 강등
+        # 파일(.agent-cli)은 복사됨
+        assert (cfg.workspace_for(new_id) / ".agent-cli").is_dir()
+
     def test_clone_paths_without_source_400(self, tmp_path):
         _, _, c = _client(tmp_path)
         r = c.post("/api/posts", json={"topic": "x", "clone_paths": ["a"]})
@@ -515,6 +541,16 @@ class TestClonePost:
         assert "dialog#clone-dlg" in css and "::backdrop" in css
         # 카드에 복제 버튼 배선
         assert '"clone btn-ghost"' in js and ".clone" in js
+
+    def test_admin_no_removed_structured_strict_fields(self, tmp_path):
+        """v1.14.0 에서 제거된 structured/strict capability 필드가 admin
+        에 재유입되지 않게 (v6/v7 dead 필드). v1.21.1 감사 #5."""
+        _, _, c = _client(tmp_path)
+        html = c.get("/static/admin.html").text
+        js = c.get("/static/admin.js").text
+        assert "ef-structured" not in js and "ef-strict" not in js
+        assert "supports_structured_output" not in js
+        assert "structured" not in html  # <th>structured</th> 컬럼도 제거됨
 
 
 class TestAgentsInPostView:

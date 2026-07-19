@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.21.1] - 2026-07-19
+
+### Fixed
+
+- 문서 최신화: README admin 필드에서 제거된 structured/strict 잔재 삭제
+  + 해석 체인 기본 md_array→json_fc, DESIGN §3/§4 에 clone(/tree
+  엔드포인트·세션 remap) 반영, DESIGN gateway 예시 traefik 제거.
+
+### Tests
+
+- clone 엣지 유닛 보강(감사): corrupt _meta 첫 줄·session.jsonl 부재·
+  다중 세션 dir(첫 것만 remap)·set_session_id 충돌 강등(200/fresh).
+  탭 가드 held:false 필터를 열기 게이트 경유 브라우저 테스트로 결정적
+  고정(뮤테이션 캐치). admin structured/strict dead-필드 부재 가드.
+
+
 ## [1.21.0] - 2026-07-19
 
 ### Changed

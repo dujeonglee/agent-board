@@ -163,6 +163,53 @@ class TestClonePathsSessionRemap:
         assert header == {"other": 1}  # 손 안 댐
 
 
+class TestRemapSessionEdges:
+    """세션 remap 엣지 (v1.21.1 감사) — 크래시/조용한 데이터 경로."""
+
+    def test_corrupt_meta_first_line_survives(self, tmp_path):
+        """session.jsonl 첫 줄이 깨진 JSON(중단된 writer) 이어도 remap 은
+        rename 까지 하고 크래시하지 않는다 — 안 그러면 POST 500+롤백."""
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        d = src / ".agent-cli" / "sessions" / "1111111111"
+        d.mkdir(parents=True)
+        (d / "session.jsonl").write_text("{bad json\n")
+        sid = clone.clone_paths(src, dst, [".agent-cli"], new_session_id="6666666666")
+        assert sid == "6666666666"  # rename 은 됨
+        newmeta = (
+            dst / ".agent-cli" / "sessions" / "6666666666" / "session.jsonl"
+        ).read_text()
+        assert newmeta == "{bad json\n"  # 손 안 댐(파싱 실패=그대로)
+
+    def test_session_dir_without_session_jsonl(self, tmp_path):
+        """세션 dir 에 session.jsonl 이 없으면 rename 만 하고 재작성 스킵."""
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        d = src / ".agent-cli" / "sessions" / "1111111111"
+        d.mkdir(parents=True)
+        (d / "history.jsonl").write_text("{}\n")  # session.jsonl 없음
+        sid = clone.clone_paths(src, dst, [".agent-cli"], new_session_id="7777777777")
+        assert sid == "7777777777"
+        newdir = dst / ".agent-cli" / "sessions" / "7777777777"
+        assert newdir.is_dir() and (newdir / "history.jsonl").exists()
+
+    def test_multiple_session_dirs_only_first_remapped(self, tmp_path):
+        """한 post=한 세션 불변식: 여러 세션 dir 이면 정렬상 첫 것만 remap,
+        나머지는 그대로(docstring 계약 고정)."""
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        _mk_session(src, "1111111111", sidecars=False)
+        _mk_session(src, "2222222222", sidecars=False)
+        sid = clone.clone_paths(src, dst, [".agent-cli"], new_session_id="9999999999")
+        sessions = sorted(p.name for p in (dst / ".agent-cli" / "sessions").iterdir())
+        # 첫(정렬) 것만 새 sid 로, 나머지는 원래 이름 유지
+        assert sid == "9999999999"
+        assert sessions == ["2222222222", "9999999999"]
+
+
 class TestClonePathsSafety:
     def test_traversal_path_rejected(self, tmp_path):
         src, dst = tmp_path / "src", tmp_path / "dst"
