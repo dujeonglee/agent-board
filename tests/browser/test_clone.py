@@ -85,6 +85,29 @@ class TestCloneFlow:
         assert (newdir / "history.jsonl").exists()
         ctx.close()
 
+    def test_hint_and_empty_states(self, board, browser):
+        """UX (v1.20.1): 원본 미선택→안내, 빈 워크스페이스→명시 메시지,
+        파일 있으면→트리 (사용자 보고: 힌트만 뜨고 선택창 안 보임)."""
+        withfiles = board.seed_post(topic="파일방")
+        (board.cfg.workspace_for(withfiles) / "a.py").write_text("x")
+        empty = board.store.create_post(topic="빈방")
+        board.cfg.workspace_for(empty.post_id).mkdir(parents=True, exist_ok=True)
+
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.click("#clone-toggle")
+        page.wait_for_selector("#clone-panel:not([hidden])", timeout=4000)
+        # 원본 미선택 → 안내
+        assert "원본" in page.inner_text("#clone-hint")
+        # 빈 워크스페이스 → 명시 메시지
+        page.select_option("#clone-source", value=empty.post_id)
+        assert _wait(lambda: "복사할 파일이 없" in page.inner_text("#clone-tree"))
+        # 파일 있는 방 → 트리 렌더
+        page.select_option("#clone-source", value=withfiles)
+        assert _wait(lambda: page.locator(".clone-node").count() >= 1)
+        ctx.close()
+
 
 def _has_post(board, topic):
     return any(p.topic == topic for p in board.store.list_posts())

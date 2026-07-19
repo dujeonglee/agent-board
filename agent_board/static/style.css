@@ -241,3 +241,5 @@ header h1 { margin: 0; font-size: 18px; }
 .clone-node { padding: 2px 0; }
 .clone-node .clone-name { margin-left: 6px; }
 .clone-kids { margin-left: 20px; border-left: 1px solid var(--border); padding-left: 6px; }
+.clone-tree { border: 1px solid var(--border); border-radius: 6px; padding: 6px; min-height: 40px; }
+.clone-empty { color: var(--text-2); font-size: 12px; padding: 8px; }

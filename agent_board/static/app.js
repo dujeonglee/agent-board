@@ -410,7 +410,10 @@
 
   $cloneToggle.addEventListener("click", () => {
     $clonePanel.hidden = !$clonePanel.hidden;
-    if (!$clonePanel.hidden) populateCloneSources();
+    if (!$clonePanel.hidden) {
+      populateCloneSources();
+      setCloneHint();
+    }
   });
 
   async function populateCloneSources() {
@@ -426,16 +429,42 @@
     $cloneSource.value = cur;
   }
 
+  const $cloneHint = document.getElementById("clone-hint");
+
+  function setCloneHint() {
+    if (!$cloneSource.value) {
+      $cloneHint.textContent = "먼저 복제 원본 글을 선택하세요.";
+    } else {
+      $cloneHint.innerHTML =
+        "복사할 파일/폴더를 체크하세요. <code>.agent-cli</code> 를 포함하면 대화까지 이어집니다.";
+    }
+  }
+
   $cloneSource.addEventListener("change", async () => {
     cloneChecked.clear();
     $cloneTree.innerHTML = "";
-    if ($cloneSource.value) await renderCloneTree($cloneTree, "");
+    setCloneHint();
+    if (!$cloneSource.value) return;
+    $cloneTree.textContent = "불러오는 중…";
+    const nodes = await fetchTree("");
+    $cloneTree.textContent = "";
+    if (!nodes.length) {
+      $cloneTree.innerHTML =
+        '<div class="clone-empty">이 방에는 아직 복사할 파일이 없습니다 ' +
+        "(한 번도 열지 않았거나 빈 워크스페이스).</div>";
+      return;
+    }
+    nodes.forEach((n) => $cloneTree.appendChild(cloneNode(n)));
   });
 
-  async function renderCloneTree(container, rel) {
-    const nodes = await fetch(
+  function fetchTree(rel) {
+    return fetch(
       `/api/posts/${$cloneSource.value}/tree?path=${encodeURIComponent(rel)}`
-    ).then((r) => r.json());
+    ).then((r) => (r.ok ? r.json() : []));
+  }
+
+  async function renderCloneTree(container, rel) {
+    const nodes = await fetchTree(rel);
     nodes.forEach((n) => container.appendChild(cloneNode(n)));
   }
 

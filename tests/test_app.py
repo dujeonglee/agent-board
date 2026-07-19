@@ -508,6 +508,8 @@ class TestClonePost:
         assert "clone_from" in js and "clone_paths" in js
         assert "cloneSelection" in js  # 조상-dedupe 선택 수집
         assert "/tree?path=" in js  # 트리 lazy 로드
+        assert "setCloneHint" in js  # 상태별 안내(v1.20.1)
+        assert "복사할 파일이 없" in js  # 빈 워크스페이스 명시 메시지
         assert "#clone-panel" in css
 
 
