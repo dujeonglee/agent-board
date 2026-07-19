@@ -94,7 +94,10 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
    복사분에 `.agent-cli/sessions/<sid>/` 가 있으면 **세션 remap** — 새 sid 로
    rename + `session.jsonl` `_meta`(session_id·workspace) 재작성 + stale 사이드카
    (web/status/instance.log) 제외 → `set_session_id` 로 첫 open 시 `--resume`(대화
-   이어받기). 세션 미포함이면 파일만 fresh. 프런트는 각 글 카드 `📋 복제` 버튼이
+   이어받기). 세션 미포함이면 파일만 fresh. **경로 재작성(v1.22.0)**: 복사·remap
+   후 `.agent-cli` 하위 모든 텍스트 파일의 옛 workspace 절대경로를 새 것으로
+   치환 — history.jsonl·중첩 agents/*/history.jsonl 등에 박힌 이전 경로가 이어받은
+   대화를 혼란시키는 것 방지(워크스페이스 밖 절대경로는 무영향). 프런트는 각 글 카드 `📋 복제` 버튼이
    그 글을 원본으로 모달을 열어 주제·모델·트리 선택.
 - **사용자 경로 입력 없음** → 임의 경로/traversal 위험 0, 공유 충돌 0(post_id 파생).
 - **DIRECTIVE.md 는 보드가 기록하지 않음** — 세션별 지시는 agent-cli 세션 내 Directives

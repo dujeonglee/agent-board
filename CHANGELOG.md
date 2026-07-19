@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.22.0] - 2026-07-19
+
+### Fixed
+
+- clone 이 대화(.agent-cli)까지 복제할 때 history.jsonl·중첩 agents/*/
+  history.jsonl·session.jsonl _meta 에 박힌 **이전 workspace 절대경로**
+  가 그대로 남아 이어받은 대화에서 모델을 혼란시키던 것 — 복사·세션
+  remap 후 `.agent-cli` 하위 모든 텍스트 파일에서 옛 workspace 경로를
+  새 것으로 치환(워크스페이스 밖 절대경로·바이너리는 무영향). (사용자
+  보고: be49f2e… 같은 옛 post_id 경로 잔존)
+
+
 ## [1.21.1] - 2026-07-19
 
 ### Fixed

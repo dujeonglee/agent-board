@@ -163,6 +163,62 @@ class TestClonePathsSessionRemap:
         assert header == {"other": 1}  # 손 안 댐
 
 
+class TestWorkspacePathRewrite:
+    """clone 후 .agent-cli 내 이전 workspace 절대경로 → 새 것 치환
+    (v1.22.0) — 이어받은 대화에 옛 경로 누출 방지 (사용자 보고)."""
+
+    def test_old_workspace_path_rewritten_everywhere(self, tmp_path):
+        root = tmp_path / "wsroot"
+        src = root / "OLDPOSTID"
+        dst = root / "NEWPOSTID"
+        src.mkdir(parents=True)
+        dst.mkdir(parents=True)
+        sdir = src / ".agent-cli" / "sessions" / "1111111111"
+        adir = sdir / "agents" / "agt-abc"
+        adir.mkdir(parents=True)
+        old = str(src.resolve())
+        # session.jsonl _meta.workspace + history 도구 인자 + 중첩 agent history
+        (sdir / "session.jsonl").write_text(
+            '{"_meta": {"session_id": "1111111111", "workspace": "' + old + '"}}\n'
+            '{"role": "user", "content": "read ' + old + '/main.py"}\n'
+        )
+        (sdir / "history.jsonl").write_text(
+            '{"tool": "read_file", "path": "' + old + '/src/a.py"}\n'
+        )
+        (adir / "history.jsonl").write_text(
+            '{"observation": "wrote ' + old + '/b.py"}\n'
+        )
+        # 워크스페이스 밖 절대경로 — 안 건드려야
+        (sdir / "notes.md").write_text("system: /etc/hosts and " + old + "/x")
+
+        clone.clone_paths(src, dst, [".agent-cli"], new_session_id="2222222222")
+        new = str(dst.resolve())
+        newdir = dst / ".agent-cli" / "sessions" / "2222222222"
+
+        # 모든 파일에서 옛 경로 소멸 + 새 경로로
+        for rel in ["session.jsonl", "history.jsonl", "agents/agt-abc/history.jsonl"]:
+            body = (newdir / rel).read_text()
+            assert old not in body, rel
+            assert new in body, rel
+        notes = (newdir / "notes.md").read_text()
+        assert "/etc/hosts" in notes  # 워크스페이스 밖은 보존
+        assert old not in notes and new in notes
+
+    def test_binary_and_pathless_files_untouched(self, tmp_path):
+        root = tmp_path / "wsroot"
+        src, dst = root / "OLD", root / "NEW"
+        src.mkdir(parents=True)
+        dst.mkdir(parents=True)
+        ad = src / ".agent-cli"
+        ad.mkdir()
+        (ad / "bin.dat").write_bytes(b"\x00\x01\xff" + str(src).encode())
+        (ad / "plain.txt").write_text("no path here")
+        clone.clone_paths(src, dst, [".agent-cli"], new_session_id="9")
+        # 바이너리는 그대로(치환 안 함 — 크래시도 안 함), plain 도 무변경
+        assert (dst / ".agent-cli" / "bin.dat").read_bytes().startswith(b"\x00\x01\xff")
+        assert (dst / ".agent-cli" / "plain.txt").read_text() == "no path here"
+
+
 class TestRemapSessionEdges:
     """세션 remap 엣지 (v1.21.1 감사) — 크래시/조용한 데이터 경로."""
 

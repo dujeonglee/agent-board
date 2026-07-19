@@ -100,6 +100,12 @@ def clone_paths(
 
     한 post = 한 세션 불변식: 여러 세션 dir 이 복사되면 첫(정렬상) 것만
     remap 하고 나머지는 그대로 둔다(실사용상 원본이 하나뿐이라 미발생).
+
+    복사·remap 후 `.agent-cli` 하위 모든 텍스트 파일에서 **옛 workspace
+    절대경로**(`str(src_ws)`)를 새 것으로 치환한다 — history.jsonl·중첩
+    agents/*/history.jsonl·_meta 등에 박힌 이전 workspace 경로가 이어받은
+    대화에 새어들어 모델을 혼란시키는 것을 방지(경로 프리픽스 단위라
+    워크스페이스 밖 절대경로는 안 건드림).
     """
     src_ws = src_ws.resolve()
     dst_ws = dst_ws.resolve()
@@ -121,7 +127,31 @@ def clone_paths(
                 continue
             shutil.copy2(s, d)
 
-    return _remap_session(dst_ws, new_session_id)
+    new_sid = _remap_session(dst_ws, new_session_id)
+    _rewrite_workspace_paths(dst_ws, str(src_ws), str(dst_ws))
+    return new_sid
+
+
+def _rewrite_workspace_paths(dst_ws: Path, old_ws: str, new_ws: str) -> None:
+    """복사된 `.agent-cli` 하위 모든 텍스트 파일에서 ``old_ws`` 절대경로를
+    ``new_ws`` 로 치환. 바이너리(utf-8 미해독)·경로 미포함 파일은 스킵,
+    변경분만 재기록. 프리픽스가 아니라 리터럴 부분문자열 치환이지만
+    old_ws 는 완전한 절대 workspace 경로라 `/…/workspaces/<old>/sub/f` →
+    `/…/workspaces/<new>/sub/f` 로 정확히 이동한다(워크스페이스 밖 경로는
+    old_ws 를 포함하지 않으므로 무영향)."""
+    agent_dir = dst_ws / ".agent-cli"
+    if old_ws == new_ws or not agent_dir.is_dir():
+        return
+    for f in agent_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # 바이너리/읽기 실패 — 건드리지 않음
+        if old_ws not in text:
+            continue
+        f.write_text(text.replace(old_ws, new_ws), encoding="utf-8")
 
 
 def _remap_session(dst_ws: Path, new_sid: str) -> str | None:
