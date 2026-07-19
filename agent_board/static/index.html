@@ -39,7 +39,19 @@
     <select id="new-model" title="모델 (선택 안 하면 기본)">
       <option value="">기본 모델</option>
     </select>
+    <button id="clone-toggle" type="button" class="btn-ghost"
+            title="다른 글의 파일/대화를 복사해서 시작">📋 복제</button>
     <button id="new-create" type="button" class="btn-primary">+ 새 글</button>
+  </section>
+  <!-- 대화방 clone: 원본 글 선택 → 워크스페이스 파일 트리에서 복사할
+       항목 체크 (.agent-cli/sessions/… 를 고르면 대화까지 이어받음). -->
+  <section id="clone-panel" hidden>
+    <div class="clone-row">
+      <label>복제 원본</label>
+      <select id="clone-source"><option value="">(선택)</option></select>
+      <span id="clone-hint" class="clone-hint">파일/폴더를 체크하세요. <code>.agent-cli</code> 를 포함하면 대화까지 이어집니다.</span>
+    </div>
+    <div id="clone-tree" class="clone-tree"></div>
   </section>
 
   <main id="posts"></main>

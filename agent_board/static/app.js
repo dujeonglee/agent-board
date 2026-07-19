@@ -362,19 +362,121 @@
       $topic.focus();
       return;
     }
+    const clone = cloneSelection();
     await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: topic,
         model_id: $model.value || null,
+        clone_from: clone.from,
+        clone_paths: clone.paths,
       }),
     });
     $topic.value = "";
+    resetClone();
     load();
   }
 
   $create.addEventListener("click", create);
+
+  // ── 대화방 clone (v1.20.0) ─────────────────────────────
+  // 원본 글 선택 → 워크스페이스 파일 트리에서 복사 항목 체크. dir 체크 =
+  // 통째 복사(하위는 백엔드 copytree). 부모가 체크되면 자식 rel 은 보낼
+  // 필요 없음(dedupe). .agent-cli/sessions/… 포함 시 대화까지 이어받음.
+  const $cloneToggle = document.getElementById("clone-toggle");
+  const $clonePanel = document.getElementById("clone-panel");
+  const $cloneSource = document.getElementById("clone-source");
+  const $cloneTree = document.getElementById("clone-tree");
+  const cloneChecked = new Set(); // 체크된 rel 들
+
+  function resetClone() {
+    cloneChecked.clear();
+    $cloneSource.value = "";
+    $cloneTree.innerHTML = "";
+    $clonePanel.hidden = true;
+  }
+
+  function cloneSelection() {
+    const from = $cloneSource.value || null;
+    if (!from) return { from: null, paths: [] };
+    // 조상이 이미 체크된 rel 은 제거 (dir 통째 복사가 커버).
+    const all = [...cloneChecked];
+    const paths = all.filter(
+      (r) => !all.some((a) => a !== r && r.startsWith(a + "/"))
+    );
+    return { from: from, paths: paths };
+  }
+
+  $cloneToggle.addEventListener("click", () => {
+    $clonePanel.hidden = !$clonePanel.hidden;
+    if (!$clonePanel.hidden) populateCloneSources();
+  });
+
+  async function populateCloneSources() {
+    const posts = await fetch("/api/posts").then((r) => r.json());
+    const cur = $cloneSource.value;
+    $cloneSource.innerHTML = '<option value="">(선택)</option>';
+    posts.forEach((p) => {
+      const o = document.createElement("option");
+      o.value = p.post_id;
+      o.textContent = p.topic;
+      $cloneSource.appendChild(o);
+    });
+    $cloneSource.value = cur;
+  }
+
+  $cloneSource.addEventListener("change", async () => {
+    cloneChecked.clear();
+    $cloneTree.innerHTML = "";
+    if ($cloneSource.value) await renderCloneTree($cloneTree, "");
+  });
+
+  async function renderCloneTree(container, rel) {
+    const nodes = await fetch(
+      `/api/posts/${$cloneSource.value}/tree?path=${encodeURIComponent(rel)}`
+    ).then((r) => r.json());
+    nodes.forEach((n) => container.appendChild(cloneNode(n)));
+  }
+
+  function cloneNode(n) {
+    const row = document.createElement("div");
+    row.className = "clone-node";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.addEventListener("change", () => {
+      if (cb.checked) cloneChecked.add(n.rel);
+      else cloneChecked.delete(n.rel);
+    });
+    const label = document.createElement("span");
+    label.className = "clone-name";
+    label.textContent =
+      (n.type === "dir" ? "📁 " : "📄 ") + n.name + " (" + fmtSize(n.size) + ")";
+    row.appendChild(cb);
+    row.appendChild(label);
+    if (n.type === "dir") {
+      const kids = document.createElement("div");
+      kids.className = "clone-kids";
+      kids.hidden = true;
+      let loaded = false;
+      label.style.cursor = "pointer";
+      label.addEventListener("click", async () => {
+        kids.hidden = !kids.hidden;
+        if (!loaded) {
+          loaded = true;
+          await renderCloneTree(kids, n.rel);
+        }
+      });
+      row.appendChild(kids);
+    }
+    return row;
+  }
+
+  function fmtSize(b) {
+    if (b < 1024) return b + "B";
+    if (b < 1024 * 1024) return (b / 1024).toFixed(0) + "K";
+    return (b / 1024 / 1024).toFixed(1) + "M";
+  }
   $topic.addEventListener("keydown", (e) => {
     if (e.key === "Enter") create();
   });

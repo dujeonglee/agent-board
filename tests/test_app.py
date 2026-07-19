@@ -373,6 +373,144 @@ class TestGatewayBanner:
         assert b.startswith("caddy") and "127.0.0.1:2019" in b
 
 
+class TestClonePost:
+    """대화방 clone (v1.20.0) — 트리 엔드포인트 + POST /api/posts 확장."""
+
+    def _seed_source(self, cfg, store, *, with_session=True):
+        import json as _json
+
+        post = store.create_post(topic="source")
+        ws = cfg.workspace_for(post.post_id)
+        ws.mkdir(parents=True)
+        (ws / "main.py").write_text("print('hi')")
+        if with_session:
+            sdir = ws / ".agent-cli" / "sessions" / "1111111111"
+            sdir.mkdir(parents=True)
+            (sdir / "session.jsonl").write_text(
+                _json.dumps(
+                    {
+                        "_meta": {
+                            "session_id": "1111111111",
+                            "workspace": str(ws),
+                            "updated_at": "x",
+                            "response_format": "json_fc",
+                        }
+                    }
+                )
+                + "\n"
+            )
+            (sdir / "history.jsonl").write_text('{"role":"user"}\n')
+            (sdir / "web.json").write_text('{"pid":999}')
+        return post
+
+    def test_tree_lists_source_workspace(self, tmp_path):
+        cfg, store, c = _client(tmp_path)
+        src = self._seed_source(cfg, store)
+        tree = c.get(f"/api/posts/{src.post_id}/tree").json()
+        names = [e["name"] for e in tree]
+        assert "main.py" in names and ".agent-cli" in names
+        # 하위 레벨
+        sub = c.get(
+            f"/api/posts/{src.post_id}/tree", params={"path": ".agent-cli/sessions"}
+        ).json()
+        assert [e["name"] for e in sub] == ["1111111111"]
+
+    def test_tree_unknown_post_404(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        assert c.get("/api/posts/nope/tree").status_code == 404
+
+    def test_clone_files_only_fresh_session(self, tmp_path):
+        cfg, store, c = _client(tmp_path)
+        src = self._seed_source(cfg, store)
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "cloned",
+                "clone_from": src.post_id,
+                "clone_paths": ["main.py"],
+            },
+        )
+        assert r.status_code == 200
+        new_id = r.json()["post_id"]
+        new_ws = cfg.workspace_for(new_id)
+        assert (new_ws / "main.py").read_text() == "print('hi')"
+        # 세션 안 가져옴 → session_id 없음(fresh)
+        assert store.get(new_id).session_id is None
+
+    def test_clone_with_session_resumes(self, tmp_path, monkeypatch):
+        import json as _json
+
+        from agent_board import app as app_mod
+
+        cfg, store, c = _client(tmp_path)
+        src = self._seed_source(cfg, store)
+        monkeypatch.setattr(app_mod, "_new_session_id", lambda: "2222222222")
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "cloned",
+                "clone_from": src.post_id,
+                "clone_paths": [".agent-cli"],
+            },
+        )
+        assert r.status_code == 200
+        new_id = r.json()["post_id"]
+        # 세션 remap → set_session_id 로 --resume 배선
+        assert store.get(new_id).session_id == "2222222222"
+        newdir = cfg.workspace_for(new_id) / ".agent-cli" / "sessions" / "2222222222"
+        assert newdir.is_dir()
+        assert not (newdir / "web.json").exists()  # 사이드카 제외
+        header = _json.loads((newdir / "session.jsonl").read_text().splitlines()[0])
+        assert header["_meta"]["session_id"] == "2222222222"
+        assert header["_meta"]["workspace"] == str(cfg.workspace_for(new_id).resolve())
+
+    def test_clone_paths_without_source_400(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        r = c.post("/api/posts", json={"topic": "x", "clone_paths": ["a"]})
+        assert r.status_code == 400
+
+    def test_clone_unknown_source_404(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        r = c.post(
+            "/api/posts",
+            json={"topic": "x", "clone_from": "nope", "clone_paths": ["a"]},
+        )
+        assert r.status_code == 404
+
+    def test_clone_traversal_rejected_and_rolled_back(self, tmp_path):
+        cfg, store, c = _client(tmp_path)
+        src = self._seed_source(cfg, store)
+        (tmp_path / "secret").write_text("s")
+        before = len(store.list_posts())
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "x",
+                "clone_from": src.post_id,
+                "clone_paths": ["../../secret"],
+            },
+        )
+        assert r.status_code == 400
+        # 방 롤백 (orphan 없음)
+        assert len(store.list_posts()) == before
+
+    def test_plain_create_still_works(self, tmp_path):
+        _, store, c = _client(tmp_path)
+        r = c.post("/api/posts", json={"topic": "plain"})
+        assert r.status_code == 200 and store.get(r.json()["post_id"]) is not None
+
+    def test_frontend_clone_ui_wired(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        html = c.get("/").text
+        js = c.get("/static/app.js").text
+        css = c.get("/static/style.css").text
+        assert 'id="clone-source"' in html and 'id="clone-tree"' in html
+        assert "clone_from" in js and "clone_paths" in js
+        assert "cloneSelection" in js  # 조상-dedupe 선택 수집
+        assert "/tree?path=" in js  # 트리 lazy 로드
+        assert "#clone-panel" in css
+
+
 class TestAgentsInPostView:
     """v1.17.0: 상주 에이전트 요약(status.json `agents`, agent-cli
     ≥7.10.0)을 행에 노출 — 🤖 W/N 칩 + main 유휴·에이전트 작업 중이면

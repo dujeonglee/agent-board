@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.20.0] - 2026-07-19
+
+### Added
+
+- **대화방 clone** — 새 글 생성 시 `📋 복제` 로 원본 글 선택 + 워크스페이스
+  파일 트리(체크박스, lazy 로드)에서 복사할 파일/폴더 선택. `POST
+  /api/posts` 가 `{clone_from, clone_paths}` 수용, `GET /api/posts/{id}/tree`
+  신설(board 가 fs 직접 — 인스턴스 미기동도 동작). `.agent-cli/sessions/
+  <sid>` 포함 시 세션 remap(새 sid rename + session.jsonl `_meta`
+  재작성 + web/status/instance.log 제외 → 첫 open 시 `--resume` 로 대화
+  이어받기), 미포함 시 파일만 fresh. 경로 traversal 가드 + 실패 시 방
+  롤백. `agent_board/clone.py`(순수 함수, 유닛) + 브라우저 e2e.
+
+
 ## [1.19.0] - 2026-07-19
 
 ### Added

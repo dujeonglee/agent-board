@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel
 
+from agent_board import clone as clone_mod
 from agent_board import instances, models_registry, sessions
 
 from agent_board import admin
@@ -73,6 +74,14 @@ def pick_board_port(host: str, preferred: int) -> int:
                 continue
             return s.getsockname()[1]
     return preferred  # let uvicorn surface the error
+
+
+def _new_session_id() -> str:
+    """clone 대상 새 세션 id — agent-cli create_session 과 동형
+    (``str(int(time.time()))``). 모듈 함수라 테스트가 monkeypatch 가능."""
+    import time
+
+    return str(int(time.time()))
 
 
 def gateway_banner(config: Config) -> str:
@@ -161,6 +170,11 @@ def build_log_config(log_file: str | Path) -> dict:
 class NewPost(BaseModel):
     topic: str
     model_id: str | None = None
+    # 대화방 clone (v1.20.0): 원본 post + 그 워크스페이스에서 복사할
+    # 상대경로들. clone_from 만 주고 paths 를 비우면 아무것도 안 옮김
+    # (fresh). `.agent-cli/sessions/<sid>` 가 포함되면 대화까지 이어받음.
+    clone_from: str | None = None
+    clone_paths: list[str] = []
 
 
 class ForceActive(BaseModel):
@@ -409,8 +423,30 @@ def create_app(
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
+    @app.get("/api/posts/{post_id}/tree")
+    async def post_tree(post_id: str, path: str = ""):
+        """원본 post 워크스페이스 한 레벨 목록 — clone 트리 피커용 (board
+        가 fs 직접 읽음, 인스턴스 미기동이어도 동작). `.agent-cli` 포함."""
+        if store.get(post_id) is None:
+            raise HTTPException(status_code=404, detail="no such post")
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(
+                None, clone_mod.list_tree, config.workspace_for(post_id), path
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
     @app.post("/api/posts")
     async def create_post(body: NewPost):
+        # clone 원본 검증 (선택). paths 있는데 원본 없으면 거절.
+        if body.clone_paths and not body.clone_from:
+            raise HTTPException(
+                status_code=400, detail="clone_paths without clone_from"
+            )
+        if body.clone_from and store.get(body.clone_from) is None:
+            raise HTTPException(status_code=404, detail="clone source not found")
+
         post = store.create_post(topic=body.topic, model_id=body.model_id)
         ws = config.workspace_for(post.post_id)
         try:
@@ -418,6 +454,33 @@ def create_app(
         except OSError as e:
             store.delete(post.post_id)  # roll back the row (no orphan)
             raise HTTPException(status_code=500, detail=f"workspace: {e}") from e
+
+        if body.clone_from and body.clone_paths:
+            src_ws = config.workspace_for(body.clone_from)
+            # 새 session_id = post 생성 시각 기반(agent-cli 규칙과 동형:
+            # str(int(time))). clone 은 첫 open 전에 배정돼 --resume 된다.
+            new_sid = _new_session_id()
+            loop = asyncio.get_event_loop()
+            try:
+                sid = await loop.run_in_executor(
+                    None,
+                    lambda: clone_mod.clone_paths(
+                        src_ws, ws, body.clone_paths, new_session_id=new_sid
+                    ),
+                )
+            except ValueError as e:
+                # traversal 등 — 방·워크스페이스 롤백
+                shutil.rmtree(ws, ignore_errors=True)
+                store.delete(post.post_id)
+                raise HTTPException(status_code=400, detail=str(e)) from e
+            if sid is not None:
+                # 세션까지 복제 → 첫 open 이 --resume <sid> 로 대화 이어받음.
+                try:
+                    store.set_session_id(post.post_id, sid)
+                    post = store.get(post.post_id)
+                except Exception:
+                    pass  # sid 충돌 등 — fresh 로 강등(파일은 이미 복사됨)
+
         return _post_view(config, store, post)
 
     @app.delete("/api/posts/{post_id}")
