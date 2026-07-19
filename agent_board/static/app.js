@@ -201,11 +201,15 @@
       (up
         ? `<button class="restart btn-ghost" type="button" title="재실행 — 프로세스를 재시작(새로 설치한 agent-cli 반영). 세션은 이어집니다.">🔄</button>`
         : "") +
+      `<button class="clone btn-ghost" type="button" title="이 글의 파일/대화를 복사해 새 글 시작">📋 복제</button>` +
       `<button class="open btn-primary" type="button">열기</button>` +
       `<button class="del btn-danger" type="button" title="삭제(영구)">🗑</button>` +
       `</div>`;
 
     el.querySelector(".open").addEventListener("click", () => open(p.post_id));
+    el.querySelector(".clone").addEventListener("click", () =>
+      openCloneDialog(p)
+    );
     el.querySelector(".del").addEventListener("click", () => del(p));
     const restartBtn = el.querySelector(".restart");
     if (restartBtn)
@@ -362,99 +366,57 @@
       $topic.focus();
       return;
     }
-    const clone = cloneSelection();
     await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: topic,
-        model_id: $model.value || null,
-        clone_from: clone.from,
-        clone_paths: clone.paths,
-      }),
+      body: JSON.stringify({ topic: topic, model_id: $model.value || null }),
     });
     $topic.value = "";
-    resetClone();
     load();
   }
 
   $create.addEventListener("click", create);
 
-  // ── 대화방 clone (v1.20.0) ─────────────────────────────
-  // 원본 글 선택 → 워크스페이스 파일 트리에서 복사 항목 체크. dir 체크 =
-  // 통째 복사(하위는 백엔드 copytree). 부모가 체크되면 자식 rel 은 보낼
-  // 필요 없음(dedupe). .agent-cli/sessions/… 포함 시 대화까지 이어받음.
-  const $cloneToggle = document.getElementById("clone-toggle");
-  const $clonePanel = document.getElementById("clone-panel");
-  const $cloneSource = document.getElementById("clone-source");
+  // ── 대화방 복제 모달 (v1.21.0) ─────────────────────────
+  // 각 글 카드의 '복제' 버튼이 그 글을 원본으로 이 모달을 연다. 한 창에서
+  // 주제·모델·복사 항목을 다 설정하고 [복제 생성]. 닫기(backdrop/Esc/✕/
+  // 취소) = 중단. dir 체크 = 통째 복사(하위는 백엔드 copytree), 조상이
+  // 체크되면 자식 rel 은 안 보냄(dedupe). .agent-cli/sessions/… 포함 시
+  // 대화까지 이어받음.
+  const $cloneDlg = document.getElementById("clone-dlg");
+  const $cloneTopic = document.getElementById("clone-topic");
+  const $cloneModel = document.getElementById("clone-model");
+  const $cloneSrcLabel = document.getElementById("clone-src-label");
   const $cloneTree = document.getElementById("clone-tree");
+  const $cloneMsg = document.getElementById("clone-msg");
+  const $cloneGo = document.getElementById("clone-go");
   const cloneChecked = new Set(); // 체크된 rel 들
+  let cloneFrom = null;
 
-  function resetClone() {
+  async function openCloneDialog(p) {
+    cloneFrom = p.post_id;
     cloneChecked.clear();
-    $cloneSource.value = "";
-    $cloneTree.innerHTML = "";
-    $clonePanel.hidden = true;
-  }
-
-  function cloneSelection() {
-    const from = $cloneSource.value || null;
-    if (!from) return { from: null, paths: [] };
-    // 조상이 이미 체크된 rel 은 제거 (dir 통째 복사가 커버).
-    const all = [...cloneChecked];
-    const paths = all.filter(
-      (r) => !all.some((a) => a !== r && r.startsWith(a + "/"))
-    );
-    return { from: from, paths: paths };
-  }
-
-  $cloneToggle.addEventListener("click", () => {
-    $clonePanel.hidden = !$clonePanel.hidden;
-    if (!$clonePanel.hidden) {
-      populateCloneSources();
-      setCloneHint();
-    }
-  });
-
-  async function populateCloneSources() {
-    const posts = await fetch("/api/posts").then((r) => r.json());
-    const cur = $cloneSource.value;
-    $cloneSource.innerHTML = '<option value="">(선택)</option>';
-    posts.forEach((p) => {
+    $cloneSrcLabel.textContent = "원본: " + p.topic;
+    $cloneTopic.value = p.topic + " (복제)";
+    $cloneMsg.textContent = "";
+    $cloneGo.disabled = false;
+    // 모델 옵션 채우기 (new-model 과 동일 소스)
+    $cloneModel.innerHTML = '<option value="">기본 모델</option>';
+    MODELS.forEach((m) => {
       const o = document.createElement("option");
-      o.value = p.post_id;
-      o.textContent = p.topic;
-      $cloneSource.appendChild(o);
+      o.value = m.id;
+      o.textContent = m.provider ? `${m.id} (${m.provider})` : m.id;
+      $cloneModel.appendChild(o);
     });
-    $cloneSource.value = cur;
-  }
-
-  const $cloneHint = document.getElementById("clone-hint");
-
-  function setCloneHint() {
-    if (!$cloneSource.value) {
-      $cloneHint.textContent = "먼저 복제 원본 글을 선택하세요.";
-    } else {
-      $cloneHint.innerHTML =
-        "복사할 파일/폴더를 체크하세요. <code>.agent-cli</code> 를 포함하면 대화까지 이어집니다.";
-    }
-  }
-
-  $cloneSource.addEventListener("change", async () => {
-    cloneChecked.clear();
-    $cloneTree.innerHTML = "";
-    setCloneHint();
-    if (!$cloneSource.value) return;
+    $cloneModel.value = p.model_id || "";
+    $cloneDlg.showModal();
+    // 트리 로드
     $cloneTree.textContent = "불러오는 중…";
     const res = await fetchTree("");
     $cloneTree.textContent = "";
     if (!res.ok) {
-      // 트리 엔드포인트 부재/에러 — 흔한 원인은 정적(app.js)만 새로고침되고
-      // board 프로세스가 구버전(clone 미탑재)인 경우. "파일 없음"으로
-      // 오인시키지 않고 실제 원인을 알린다.
       $cloneTree.innerHTML =
-        '<div class="clone-empty">파일 목록을 불러오지 못했습니다 ' +
-        "(HTTP " +
+        '<div class="clone-empty">파일 목록을 불러오지 못했습니다 (HTTP ' +
         res.status +
         "). board 프로세스가 구버전일 수 있습니다 — <b>재시작</b> 후 다시 시도하세요.</div>";
       return;
@@ -466,16 +428,59 @@
       return;
     }
     res.nodes.forEach((n) => $cloneTree.appendChild(cloneNode(n)));
-  });
+  }
+
+  function closeCloneDialog() {
+    if ($cloneDlg.open) $cloneDlg.close();
+    cloneFrom = null;
+    cloneChecked.clear();
+    $cloneTree.innerHTML = "";
+  }
+
+  function cloneSelection() {
+    const all = [...cloneChecked];
+    // 조상이 이미 체크된 rel 은 제거 (dir 통째 복사가 커버).
+    return all.filter(
+      (r) => !all.some((a) => a !== r && r.startsWith(a + "/"))
+    );
+  }
+
+  async function submitClone() {
+    const topic = $cloneTopic.value.trim();
+    if (!topic) {
+      $cloneTopic.focus();
+      return;
+    }
+    $cloneGo.disabled = true;
+    $cloneMsg.textContent = "복제 중…";
+    const r = await fetch("/api/posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: topic,
+        model_id: $cloneModel.value || null,
+        clone_from: cloneFrom,
+        clone_paths: cloneSelection(),
+      }),
+    });
+    if (!r.ok) {
+      const detail = await r.json().catch(() => ({}));
+      $cloneMsg.textContent = "실패: " + (detail.detail || r.status);
+      $cloneGo.disabled = false;
+      return;
+    }
+    closeCloneDialog();
+    load();
+  }
 
   // {ok, status, nodes} — 부재/에러(404 등)를 빈 디렉토리와 구분한다.
   async function fetchTree(rel) {
     try {
-      const r = await fetch(
-        `/api/posts/${$cloneSource.value}/tree?path=${encodeURIComponent(rel)}`
+      const resp = await fetch(
+        `/api/posts/${cloneFrom}/tree?path=${encodeURIComponent(rel)}`
       );
-      if (!r.ok) return { ok: false, status: r.status, nodes: [] };
-      return { ok: true, status: 200, nodes: await r.json() };
+      if (!resp.ok) return { ok: false, status: resp.status, nodes: [] };
+      return { ok: true, status: 200, nodes: await resp.json() };
     } catch (e) {
       return { ok: false, status: 0, nodes: [] };
     }
@@ -524,6 +529,24 @@
     if (b < 1024 * 1024) return (b / 1024).toFixed(0) + "K";
     return (b / 1024 / 1024).toFixed(1) + "M";
   }
+
+  document.getElementById("clone-go").addEventListener("click", submitClone);
+  document
+    .getElementById("clone-cancel")
+    .addEventListener("click", closeCloneDialog);
+  document.getElementById("clone-x").addEventListener("click", closeCloneDialog);
+  // backdrop 클릭(다이얼로그 바깥) = 닫기
+  $cloneDlg.addEventListener("click", (e) => {
+    if (e.target === $cloneDlg) closeCloneDialog();
+  });
+  // Esc(native cancel) 로 닫을 때도 상태 정리
+  $cloneDlg.addEventListener("close", () => {
+    cloneFrom = null;
+    cloneChecked.clear();
+  });
+  $cloneTopic.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitClone();
+  });
   $topic.addEventListener("keydown", (e) => {
     if (e.key === "Enter") create();
   });

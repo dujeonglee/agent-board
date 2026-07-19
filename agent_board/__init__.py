@@ -1,3 +1,3 @@
 """agent-board — forum-style board over agent-cli sessions."""
 
-__version__ = "1.20.2"
+__version__ = "1.21.0"

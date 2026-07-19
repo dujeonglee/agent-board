@@ -499,19 +499,22 @@ class TestClonePost:
         r = c.post("/api/posts", json={"topic": "plain"})
         assert r.status_code == 200 and store.get(r.json()["post_id"]) is not None
 
-    def test_frontend_clone_ui_wired(self, tmp_path):
+    def test_frontend_clone_modal_wired(self, tmp_path):
+        """v1.21.0: 각 글 카드 복제 버튼 → 모달. 팝업 한 창에 전부."""
         _, _, c = _client(tmp_path)
         html = c.get("/").text
         js = c.get("/static/app.js").text
         css = c.get("/static/style.css").text
-        assert 'id="clone-source"' in html and 'id="clone-tree"' in html
+        assert 'id="clone-dlg"' in html and 'id="clone-tree"' in html
+        assert 'id="clone-topic"' in html and 'id="clone-model"' in html
+        assert "openCloneDialog" in js and "showModal" in js
         assert "clone_from" in js and "clone_paths" in js
         assert "cloneSelection" in js  # 조상-dedupe 선택 수집
-        assert "/tree?path=" in js  # 트리 lazy 로드
-        assert "setCloneHint" in js  # 상태별 안내(v1.20.1)
-        assert "복사할 파일이 없" in js  # 빈 워크스페이스 명시 메시지
-        assert "구버전" in js  # 404=구버전 서버 안내(v1.20.2)
-        assert "#clone-panel" in css
+        assert "closeCloneDialog" in js  # 취소/닫기 = 중단
+        assert "구버전" in js  # 404=구버전 서버 안내
+        assert "dialog#clone-dlg" in css and "::backdrop" in css
+        # 카드에 복제 버튼 배선
+        assert '"clone btn-ghost"' in js and ".clone" in js
 
 
 class TestAgentsInPostView:

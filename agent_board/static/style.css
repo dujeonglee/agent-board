@@ -228,18 +228,33 @@ header h1 { margin: 0; font-size: 18px; }
 #admin-link:hover { opacity: 1; }
 
 
-/* 대화방 clone 패널 (v1.20.0) */
-#clone-panel {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2, var(--surface));
+/* 대화방 복제 모달 (v1.21.0) — native <dialog> */
+dialog#clone-dlg {
+  width: min(560px, 92vw);
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 16px 18px;
 }
-.clone-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.clone-hint { font-size: 12px; color: var(--text-2); }
+dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
+.clone-dlg-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.clone-dlg-title { font-weight: 600; font-size: 15px; }
+.clone-src-label { font-size: 12px; color: var(--text-2); margin-bottom: 10px; }
+.clone-fields { display: flex; gap: 8px; margin-bottom: 10px; }
+.clone-fields #clone-topic { flex: 1 1 auto; }
+.clone-hint { font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
 .clone-hint code { font-family: ui-monospace, monospace; }
-.clone-tree { margin-top: 8px; max-height: 240px; overflow-y: auto; font-size: 13px; }
+.clone-tree {
+  max-height: 300px; overflow-y: auto; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px; min-height: 60px;
+}
 .clone-node { padding: 2px 0; }
 .clone-node .clone-name { margin-left: 6px; }
 .clone-kids { margin-left: 20px; border-left: 1px solid var(--border); padding-left: 6px; }
-.clone-tree { border: 1px solid var(--border); border-radius: 6px; padding: 6px; min-height: 40px; }
 .clone-empty { color: var(--text-2); font-size: 12px; padding: 8px; }
+.clone-msg { font-size: 12px; color: var(--text-2); min-height: 16px; margin-top: 8px; }
+.clone-dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
