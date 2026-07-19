@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.22.1] - 2026-07-19
+
+### Tests
+
+- clone 경로 재작성이 memory.jsonl(<session>/memory.jsonl)까지 커버함을
+  명시 회귀 테스트로 고정 — .agent-cli rglob 순회가 특정 파일을 빠뜨리는
+  리팩터를 잡는다(사용자 확인 요청). 뮤테이션으로 캐치 검증.
+
+
 ## [1.22.0] - 2026-07-19
 
 ### Fixed

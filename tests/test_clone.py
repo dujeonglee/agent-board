@@ -204,6 +204,34 @@ class TestWorkspacePathRewrite:
         assert "/etc/hosts" in notes  # 워크스페이스 밖은 보존
         assert old not in notes and new in notes
 
+    def test_memory_jsonl_paths_rewritten(self, tmp_path):
+        """★회귀 가드: memory.jsonl(<session>/memory.jsonl, .agent-cli
+        하위)의 workspace 경로도 치환된다 — rglob 순회가 특정 파일을
+        빠뜨리는 리팩터를 잡는다. 사용자 확인 요청."""
+        import json as _json
+
+        root = tmp_path / "wsroot"
+        src, dst = root / "OLDPID", root / "NEWPID"
+        src.mkdir(parents=True)
+        dst.mkdir(parents=True)
+        sdir = src / ".agent-cli" / "sessions" / "1111111111"
+        sdir.mkdir(parents=True)
+        old = str(src.resolve())
+        (sdir / "session.jsonl").write_text(
+            '{"_meta": {"session_id": "1111111111", "workspace": "' + old + '"}}\n'
+        )
+        # 모델이 기록한 memory 엔트리에 workspace 절대경로가 박힘
+        (sdir / "memory.jsonl").write_text(
+            _json.dumps({"type": "project", "summary": "config at " + old + "/c.yaml"})
+            + "\n"
+        )
+        clone.clone_paths(src, dst, [".agent-cli"], new_session_id="2222222222")
+        new = str(dst.resolve())
+        memf = dst / ".agent-cli" / "sessions" / "2222222222" / "memory.jsonl"
+        body = memf.read_text()
+        assert old not in body
+        assert new + "/c.yaml" in body
+
     def test_binary_and_pathless_files_untouched(self, tmp_path):
         root = tmp_path / "wsroot"
         src, dst = root / "OLD", root / "NEW"
