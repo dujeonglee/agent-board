@@ -446,26 +446,44 @@
     setCloneHint();
     if (!$cloneSource.value) return;
     $cloneTree.textContent = "불러오는 중…";
-    const nodes = await fetchTree("");
+    const res = await fetchTree("");
     $cloneTree.textContent = "";
-    if (!nodes.length) {
+    if (!res.ok) {
+      // 트리 엔드포인트 부재/에러 — 흔한 원인은 정적(app.js)만 새로고침되고
+      // board 프로세스가 구버전(clone 미탑재)인 경우. "파일 없음"으로
+      // 오인시키지 않고 실제 원인을 알린다.
+      $cloneTree.innerHTML =
+        '<div class="clone-empty">파일 목록을 불러오지 못했습니다 ' +
+        "(HTTP " +
+        res.status +
+        "). board 프로세스가 구버전일 수 있습니다 — <b>재시작</b> 후 다시 시도하세요.</div>";
+      return;
+    }
+    if (!res.nodes.length) {
       $cloneTree.innerHTML =
         '<div class="clone-empty">이 방에는 아직 복사할 파일이 없습니다 ' +
         "(한 번도 열지 않았거나 빈 워크스페이스).</div>";
       return;
     }
-    nodes.forEach((n) => $cloneTree.appendChild(cloneNode(n)));
+    res.nodes.forEach((n) => $cloneTree.appendChild(cloneNode(n)));
   });
 
-  function fetchTree(rel) {
-    return fetch(
-      `/api/posts/${$cloneSource.value}/tree?path=${encodeURIComponent(rel)}`
-    ).then((r) => (r.ok ? r.json() : []));
+  // {ok, status, nodes} — 부재/에러(404 등)를 빈 디렉토리와 구분한다.
+  async function fetchTree(rel) {
+    try {
+      const r = await fetch(
+        `/api/posts/${$cloneSource.value}/tree?path=${encodeURIComponent(rel)}`
+      );
+      if (!r.ok) return { ok: false, status: r.status, nodes: [] };
+      return { ok: true, status: 200, nodes: await r.json() };
+    } catch (e) {
+      return { ok: false, status: 0, nodes: [] };
+    }
   }
 
   async function renderCloneTree(container, rel) {
-    const nodes = await fetchTree(rel);
-    nodes.forEach((n) => container.appendChild(cloneNode(n)));
+    const res = await fetchTree(rel);
+    res.nodes.forEach((n) => container.appendChild(cloneNode(n)));
   }
 
   function cloneNode(n) {

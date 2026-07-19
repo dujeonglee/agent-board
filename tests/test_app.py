@@ -510,6 +510,7 @@ class TestClonePost:
         assert "/tree?path=" in js  # 트리 lazy 로드
         assert "setCloneHint" in js  # 상태별 안내(v1.20.1)
         assert "복사할 파일이 없" in js  # 빈 워크스페이스 명시 메시지
+        assert "구버전" in js  # 404=구버전 서버 안내(v1.20.2)
         assert "#clone-panel" in css
 
 
