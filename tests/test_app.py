@@ -677,6 +677,26 @@ class TestDeathEdgeRouteWiring:
         assert spy.removed == [post.post_id]
 
 
+class TestVersionApi:
+    """헤더 버전 표시 — board 자신 + board 가 spawn 하는 agent-cli 바이너리."""
+
+    def test_reports_board_version_and_cli_key(self, tmp_path):
+        import agent_board
+
+        _, _, c = _client(tmp_path)
+        r = c.get("/api/version")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["board"] == agent_board.__version__
+        # cli 는 바이너리 유무에 따라 str/None — 환경 비의존 계약만 검증
+        assert "cli" in d and (d["cli"] is None or isinstance(d["cli"], str))
+
+    def test_frontend_wires_version(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        assert 'id="version"' in c.get("/").text
+        assert "/api/version" in c.get("/static/app.js").text
+
+
 class TestTabGuard:
     """브라우저-로컬 탭 가드 (v1.14.0) — board-proxy 게이트웨이에서 방/대시
     보드 탭들이 origin 당 6연결(HTTP/1.1) 풀을 소진해 승인 클릭까지

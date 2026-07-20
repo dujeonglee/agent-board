@@ -7,8 +7,10 @@ spawned process's pid. Liveness = pid alive + /api/health 200.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -19,6 +21,25 @@ import httpx
 
 from agent_board.config import Config
 from agent_board.models import Post
+
+
+@functools.lru_cache(maxsize=8)
+def cli_version(agent_cli_bin: str) -> str | None:
+    """``<agent_cli_bin> --version`` 의 x.y.z — board 가 방을 spawn 하는
+    agent-cli 바이너리 버전. 바이너리 부재/실패/미인식이면 None. lru_cache
+    로 (bin 경로당) 프로세스 생애 1회만 실행 — 버전은 프로세스 중 안 바뀐다.
+    ``--version`` 은 stdout/stderr 어디로든 나올 수 있어 둘 다 스캔."""
+    try:
+        out = subprocess.run(
+            [agent_cli_bin, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"(\d+\.\d+\.\d+)", (out.stdout or "") + (out.stderr or ""))
+    return m.group(1) if m else None
 
 
 def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> list[str]:

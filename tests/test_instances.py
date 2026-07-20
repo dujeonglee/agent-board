@@ -90,6 +90,26 @@ class TestBuildSpawnCmd:
         assert "--model" not in cmd  # provider default
 
 
+class TestCliVersion:
+    """board 가 spawn 하는 agent-cli 바이너리 버전 파싱 (헤더 표시용).
+    lru_cache 는 bin 경로 키라 테스트마다 유니크 경로로 캐시 충돌 회피."""
+
+    def test_parses_version(self, tmp_path):
+        fake = tmp_path / "fake-cli"
+        fake.write_text("#!/bin/sh\necho 'agent-cli 9.9.9'\n")
+        fake.chmod(0o755)
+        assert instances.cli_version(str(fake)) == "9.9.9"
+
+    def test_none_for_missing_binary(self):
+        assert instances.cli_version("no-such-binary-agentboard-xyz") is None
+
+    def test_none_when_unrecognized_output(self, tmp_path):
+        fake = tmp_path / "fake-cli-nover"
+        fake.write_text("#!/bin/sh\necho 'hello world'\n")
+        fake.chmod(0o755)
+        assert instances.cli_version(str(fake)) is None
+
+
 class TestPickFreePort:
     def test_returns_bindable_port_in_range(self):
         import socket

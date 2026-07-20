@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel
 
+from agent_board import __version__
 from agent_board import clone as clone_mod
 from agent_board import instances, models_registry, sessions
 
@@ -399,6 +400,17 @@ def create_app(
         탭마다 SSE 1개 점유)에서만 위험 — caddy(h2, 연결 1개 멀티플렉스)
         모드면 가드가 스스로 물러난다."""
         return {"gateway": config.gateway}
+
+    @app.get("/api/version")
+    async def version_info():
+        """헤더에 표시할 버전 — board 자신 + board 가 방을 spawn 하는
+        agent-cli 바이너리(config.agent_cli_bin). cli 는 부재/미인식이면
+        None(프런트가 board 만 표시). cli_version 은 lru_cache 라 반복
+        호출해도 프로세스당 1회만 실행."""
+        return {
+            "board": __version__,
+            "cli": instances.cli_version(config.agent_cli_bin),
+        }
 
     @app.get("/api/events")
     async def events():

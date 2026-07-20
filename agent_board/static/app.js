@@ -40,6 +40,18 @@
     })
     .catch(() => {});
 
+  // 헤더 버전 표시 — board 자신 + board 가 spawn 하는 agent-cli 바이너리.
+  // cli 부재/미인식이면 board 만. 서버 값은 x.y.z 정규식으로 뽑은 것이라
+  // textContent 로만 넣는다(마크업 주입 없음).
+  fetch("/api/version")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      const el = document.getElementById("version");
+      if (!d || !el) return;
+      el.textContent = "v" + d.board + (d.cli ? "  ·  cli " + d.cli : "");
+    })
+    .catch(() => {});
+
   // ── 연결 카운트 (v1.16.0 — 샘플링 복귀) ──
   // v1.15 의 Web Locks 는 secure context 전용이라 LAN http(주 운용)에서
   // 락 API 자체가 노출되지 않아 무동작이었다. 열기 게이트는 사람 속도의
