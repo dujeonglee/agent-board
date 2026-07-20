@@ -202,7 +202,7 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
 |---|---|---|
 | `/s/<id>/*` 프록시 · SSE 무버퍼 · 업로드 | ✅ | ✅ (Caddy 네이티브) |
 | 라우트 등록/해제(`ensure_route`/`remove_route`) | ✅ | ✅ |
-| **idle-reap 인스턴스 접속 시 자동 재기동** | ✅ dead-port ConnectError→revive | ✅ **death 엣지에 라우트 삭제→Caddyfile catch-all fall-through→보드 revive 핸들러→reopen+302** |
+| **idle-reap 인스턴스 접속 시 자동 재기동** | ✅ dead/reset upstream `httpx.TransportError`(ConnectError=idle-reap dead 포트, ReadError/RemoteProtocolError=kill 로 죽은 stale keep-alive 풀)→GET/HEAD revive (v1.23.1: 좁은 ConnectError-만 catch 가 stale-풀 ReadError 를 놓쳐 부하 시 run_asgi 500 크래시였던 것 수리) | ✅ **death 엣지에 라우트 삭제→Caddyfile catch-all fall-through→보드 revive 핸들러→reopen+302** |
 | **TLS 종단 · 단일 포트** | ❌ (평문 HTTP, 보드 포트) | ✅ |
 | **`/s/<id>` basic-auth** | ❌ (보드 앞단 네트워크 격리에 의존) | ✅ (라우트에 임베드) |
 | 보드가 data-path 안에 있나 | 예(중계) | 아니오(Caddy 직결; revive 시에만 잠깐) |

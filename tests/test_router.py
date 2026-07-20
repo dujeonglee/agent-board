@@ -166,6 +166,29 @@ class TestBoardProxyRouter:
         assert b"partial" in b"".join(chunks)  # partial data relayed before EOF
 
     @pytest.mark.asyncio
+    async def test_pooled_reset_on_send_returns_502_not_crash(self, monkeypatch):
+        """kill/재시작으로 죽은 인스턴스의 stale keep-alive 풀을 초기 send()
+        에서 재사용하면 ConnectError 가 아닌 ReadError(=TransportError)가 난다
+        — 좁은 (ConnectError, ConnectTimeout) catch 를 빠져나가 run_asgi 500
+        크래시가 됐던 회귀(실측: 부하 시 재열기 크래시, kill 직후 반열림 풀
+        재사용 = ReadError). 이제 우아한 502(GET → revive 시도 후)여야 한다."""
+        router = BoardProxyRouter()
+        router.ensure_route("p1", 59999)  # 포트 무의미 — send 를 boom 으로 가로챔
+
+        async def boom(*a, **k):
+            raise httpx.ReadError("Server disconnected without sending a response.")
+
+        monkeypatch.setattr(router._client, "send", boom)
+        app = _board_app(router)
+        transport = httpx.ASGITransport(app=app)  # 앱 예외를 raise = 크래시 감지
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            r = await c.get("/s/p1/api/echo")
+        # 좁은 catch 였으면 ReadError 가 새어 위에서 raise(테스트 실패=red).
+        # 넓힌 뒤엔 revive(미배선 → None) → 502.
+        assert r.status_code == 502
+        await router.aclose()
+
+    @pytest.mark.asyncio
     async def test_no_route_no_reopen_is_503(self, upstream):
         # no route + no reopen hook → clean 503 (not a raw exception)
         router = BoardProxyRouter()

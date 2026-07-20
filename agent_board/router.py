@@ -145,11 +145,18 @@ class BoardProxyRouter(Router):
             )
         try:
             return await self._proxy(request, post_id, path, port, body_stream=True)
-        except (httpx.ConnectError, httpx.ConnectTimeout):
-            # Stale route: the instance was idle-reaped, so the old /s/<id> URL
-            # now points at a dead port. Revive once and retry — but only for a
-            # safe method (no request body to re-stream); a POST to a dead
-            # instance just surfaces the error (reload reopens it).
+        except httpx.TransportError:
+            # upstream 이 사라진 두 경로가 모두 여기로 온다:
+            #  ① idle-reap 된 dead 포트로 신규 연결 → ConnectError,
+            #  ② kill/재시작으로 죽은 인스턴스의 stale keep-alive 풀을 초기
+            #     send() 에서 재사용 → ReadError/RemoteProtocolError.
+            # 좁게 (ConnectError, ConnectTimeout) 만 잡던 때는 ②가 _proxy 밖으로
+            # 새어 uvicorn run_asgi 500 크래시("가끔 안 열림")가 됐다 — 부하 시
+            # 잦음(실측 재현: kill 직후 반열림 풀 재사용 = ReadError). TransportError
+            # (전송 실패 상위 — timeout=None 이라 타임아웃은 미발생)로 넓혀 ②도
+            # 우아하게 처리(_relay_body 의 미스트림 catch 와 파리티).
+            # Revive 는 안전 메서드(GET/HEAD)만 — 바디 재스트림 불가한 POST 는
+            # 그대로 502(리로드가 재열기).
             if request.method in ("GET", "HEAD"):
                 port = await self._revive(post_id)
                 if port is not None:
