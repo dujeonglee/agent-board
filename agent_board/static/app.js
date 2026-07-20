@@ -240,12 +240,14 @@
 
   async function open(post_id) {
     const sameTab = $sameTab.checked;
-    // Open the new tab SYNCHRONOUSLY (inside the click gesture) so the popup
-    // blocker allows it; the await below would otherwise break the gesture.
-    // Named target(post_id): 같은 글을 다시 열면 새 탭 대신 그 글의 기존
-    // 창을 재사용 — 실수로 연결 잡는 탭이 하나 더 생기는 걸 막고, 의도적
-    // 두 번째 창은 URL 복사로 여전히 가능(다중 뷰어는 설계 기능).
-    const win = sameTab ? null : window.open("", "agentcli-" + post_id);
+    // 게이트·POST 를 먼저 끝내고, 완성된 방 URL 로 새 탭을 **바로** 연다.
+    // ★예전엔 클릭 제스처 안에서 빈 탭(window.open(""))을 먼저 열고 나중에
+    // win.location 으로 navigate 했는데, 그 about:blank→실URL 전환이
+    // 재열기를 ~1초 굼뜨게 하는 주범이었다 — 직접 URL 붙여넣기·현재 탭
+    // 열기(둘 다 실 URL 로 바로 이동)가 빠른 것과 대비되어 실측 확정.
+    // window.open 을 await(게이트~100ms + fetch~15ms) 뒤에 호출해도
+    // Chrome 의 transient user activation(클릭 후 ~5초)이 살아 있어 팝업
+    // 차단 없이 열린다(실측 확인) — 차단 시엔 현재 탭 이동으로 폴백.
     if (gatewayMode !== "caddy") {
       const held = await countHeldTabs();
       // 이 글의 탭이 이미 있으면(named-window 재사용 or sameTab 전환)
@@ -253,7 +255,6 @@
       const reusing = held.paths.some((p) => p.startsWith(`/s/${post_id}/`));
       if (!reusing) {
         if (held.count >= MAX_HELD_TABS) {
-          if (win) win.close();
           toast(
             `연결 한도 — 이 브라우저에 연결을 잡은 탭이 ${held.count}개입니다. ` +
               `HTTP/1.1 은 주소당 동시 연결 6개뿐이라 더 열면 모든 탭이 멈춥니다. ` +
@@ -272,7 +273,6 @@
     }
     const r = await fetch(`/api/posts/${post_id}/open`, { method: "POST" });
     if (!r.ok) {
-      if (win) win.close();
       alert("열기 실패: " + r.status);
       return;
     }
@@ -280,8 +280,12 @@
     if (sameTab) {
       location.href = url;
     } else {
-      win.location.href = url;
-      win.focus();
+      // 완성된 URL 로 직접 — named target(post_id)은 같은 글을 다시 열면
+      // 새 탭 대신 그 글의 기존 창을 재사용(연결이 안 늘어 게이트 면제
+      // 대상). 팝업이 차단되면(null) 현재 탭 이동으로 폴백.
+      const win = window.open(url, "agentcli-" + post_id);
+      if (win) win.focus();
+      else location.href = url;
     }
   }
 

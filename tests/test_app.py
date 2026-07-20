@@ -737,6 +737,20 @@ class TestTabGuard:
         # 샘플러가 상수를 실제로 사용하는지(하드코딩 큰 값 차단)
         assert "}, HELD_SAMPLE_MS);" in js
 
+    def test_open_navigates_new_tab_directly_not_blank(self, tmp_path):
+        """새 탭을 빈 창(window.open(""))으로 먼저 열고 나중에 navigate
+        하면 그 about:blank→실URL 전환이 재열기를 ~1초 굼뜨게 한다
+        (v1.22.3 실측 — 직접 URL·현재 탭 열기는 빠른데 빈-창→navigate 만
+        느림). 게이트·POST 를 먼저 끝내고 완성된 URL 로 바로 window.open
+        해야 한다(await 뒤에도 transient activation 으로 팝업 허용). 빈-창
+        패턴 재발 방지."""
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        # 빈 창 먼저 열기 금지 — 이 패턴이 재열기 굼뜸의 주범
+        assert 'window.open("", ' not in js
+        # 완성된 URL 로 직접 열어야(named target 재사용은 유지)
+        assert 'window.open(url, "agentcli-" + post_id)' in js
+
 
 class TestSingletonLock:
     def test_first_acquires_second_refused(self, tmp_path):

@@ -121,6 +121,16 @@ async with lock[id]:
   store.touch_opened(id)
 return {"url": f"/s/{id}/?token={token}"}      # 프론트가 location 이동
 ```
+**★ 프론트 열기 = 완성된 URL 로 직접 (v1.22.3)**: 대시보드 `open()` 은
+게이트(탭 카운트)·`POST /open` 을 먼저 끝낸 뒤 그 URL 로 `window.open(url, name)`
+(현재 탭 옵션이면 `location.href`). 예전엔 popup blocker 회피용으로 클릭 제스처
+안에서 빈 탭 `window.open("")` 을 열고 나중에 `win.location` 으로 navigate 했는데,
+그 about:blank→실URL 전환이 재열기를 ~1초 굼뜨게 하는 주범이었다(직접 URL
+붙여넣기·현재 탭 열기는 빠른데 빈-창→navigate 만 느림 — 실측). `await`(게이트
+~100ms + fetch ~15ms) 뒤 호출해도 Chrome transient user activation(클릭 후 ~5초)
+이 살아 있어 팝업 차단 없이 열린다(차단 시 현재 탭 이동 폴백). named target 은
+같은 글 재열기 시 기존 창 재사용.
+
 **★ 토큰을 URL 에 실어야 함**: agent-cli 프론트(app.js)는 브라우저 URL 에 `?token=` 이
 없으면 연결을 시도조차 안 함(클라이언트측 게이트). `--trust-local` 은 *서버측* 만
 풀어주므로 프론트엔 토큰이 필요 → `backend.info`/spawn 이 토큰을 함께 반환.
