@@ -717,12 +717,12 @@ class TestTabGuard:
         assert "agentcli-conn-slot-" not in js
 
     def test_open_gate_sampling_window_is_small(self, tmp_path):
-        """열기 게이트 샘플링 창(HELD_SAMPLE_MS)은 열기 클릭 직후
-        about:blank 창이 대기하는 시간이라 재열기 체감 지연에 직결된다 —
-        실측상 방 페이지 로드는 87ms 인데 옛 300ms 창이 "blank 이후"
-        지연의 ~77% 였다(v1.22.2 축소). pong 은 같은 브라우저 내 전달이라
-        유휴 탭이 ~5ms 에 답하므로 작은 창이면 충분하고, 큰 블로킹 값으로
-        되돌아가면 재열기 지연 회귀. 창은 상수로 setTimeout 에 배선돼야
+        """열기 게이트 샘플링 창(HELD_SAMPLE_MS)은 게이트가 window.open
+        앞에서 도는 pre-open 지연이라 재열기 체감에 더해진다 → 작게 유지.
+        pong 은 같은 브라우저 내 전달이라 유휴 탭이 ~5ms 에 답하므로 100ms
+        면 충분하고, 큰 블로킹 값으로 되돌아가면 재열기 지연 회귀. (재열기
+        굼뜸의 실제 주범은 빈 탭→navigate 였고 v1.22.3 의 직접 open 으로
+        해결 — 이 창 축소는 부차적 이득.) 창은 상수로 setTimeout 에 배선돼야
         하드코딩된 큰 값이 우회하지 못한다."""
         import re
 
