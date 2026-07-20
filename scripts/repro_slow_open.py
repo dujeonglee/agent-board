@@ -90,8 +90,19 @@ def grep_last_traceback(path: str) -> None:
         print("  board 를 `agent-board 2>&1 | tee ~/agentboard.log` 로 띄웠는지 확인.")
         return
     print("  ═══ board stderr 마지막 traceback ═══")
-    for line in txt[idx : idx + 2500].splitlines():
+    # 마지막 traceback 을 예외 라인(들여쓰기 없는 ...Error/Exception: )까지
+    # 전부 출력 — 프레임워크 프레임보다 **밑의 router.py 프레임 + 예외 타입**
+    # 이 핵심이라 잘리면 안 된다(상한 200 줄).
+    lines = txt[idx:].splitlines()
+    for j, line in enumerate(lines[:200]):
         print("  " + line)
+        if (
+            j > 0
+            and line
+            and not line[0].isspace()
+            and ("Error" in line or "Exception" in line)
+        ):
+            break
 
 
 def mode_kill(board: str, post_id: str, rounds: int, board_log: str | None) -> None:
