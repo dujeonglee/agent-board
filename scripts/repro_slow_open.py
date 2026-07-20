@@ -132,24 +132,30 @@ def mode_kill(board: str, post_id: str, rounds: int, board_log: str | None) -> N
         for _ in range(25):
             st, _, _ = http(f"{board}/s/{post_id}/static/app.js", timeout=5)
             codes.append(st)
-        n500 = sum(1 for c in codes if c == 500)
-        n502 = sum(1 for c in codes if c == 502)  # 좁은 catch 가 잡은 정상 강등
+        n500 = sum(1 for c in codes if c == 500)  # 미처리 ASGI 예외 = 크래시
+        n502 = sum(1 for c in codes if c == 502)  # 우아한 강등(revive 실패)
+        n200 = sum(1 for c in codes if c == 200)  # revive 성공(재기동 후 프록시)
         nnone = sum(1 for c in codes if c is None)
         print(
-            f"  [{i}] kill {pid} → 응답 500={n500} 502={n502} "
-            f"연결끊김={nnone} 기타={len(codes) - n500 - n502 - nnone}"
+            f"  [{i}] kill {pid} → 응답 500={n500}(크래시) 502={n502} "
+            f"200={n200}(revive성공) 연결끊김={nnone} "
+            f"기타={len(codes) - n500 - n502 - n200 - nnone}"
         )
         if n500:
             saw_crash = True
-            print("      ↑ 500 = 미처리 ASGI 예외(run_asgi 크래시) 재현됨")
+            print("      ↑ 500 = 미처리 ASGI 예외(run_asgi 크래시) — 수리 전 버전")
         time.sleep(0.6)
     print()
     if saw_crash:
-        print("결과: 크래시(500) 재현됨. board stderr 의 traceback 을 확보하세요.")
+        print(
+            "결과: 크래시(500) 재현됨 = 수리 전 버전. board stderr 의 traceback 을\n"
+            "      확보하거나 board 를 v1.23.1+ 로 업데이트 후 재실행하세요."
+        )
     else:
         print(
-            "결과: 500 미관측. 라운드를 늘리거나(-n), 부하(다른 터미널 stress)와 "
-            "함께 돌리면 stale-풀 재사용 창이 넓어져 더 잘 잡힙니다."
+            "결과: 크래시(500) 0건 — 죽은 인스턴스 접속이 200(revive 성공)/502\n"
+            "      (우아한 실패)로 처리됨 = 프록시 하드닝(v1.23.1) 확인. ✅\n"
+            "      (수리 전 버전인데 0건이면 -n 으로 라운드를 늘리거나 stress 병행)"
         )
     if board_log:
         print()
