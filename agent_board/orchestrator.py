@@ -87,11 +87,15 @@ class Orchestrator:
         respawn in ``change_model``. ``reuse_token`` (set by ``restart``) spawns
         with a specific token instead of a fresh one so already-open viewers
         reconnect without re-opening; ignored when the instance is already up."""
-        info = self.backend.info(post)
+        loop = asyncio.get_event_loop()
+        # info() 는 동기 health(httpx.get, timeout=1s) 를 포함 — 느린 인스턴스
+        # 에서 이벤트 루프를 막으면 그 사이 board 전역(다른 방 SSE 프록시·다른
+        # open)이 stall 된다(부하 시 재열기 cascade). executor 로 오프로드해
+        # 이 open 만 기다리게 하고 루프는 계속 돌게 한다(_await_dead 와 동형).
+        info = await loop.run_in_executor(None, self.backend.info, post)
         if info is None:  # not up → spawn
             port = self.backend.pick_free_port()
             token = reuse_token or secrets.token_urlsafe(16)
-            loop = asyncio.get_event_loop()
             sid = await loop.run_in_executor(
                 None,
                 lambda: self.backend.spawn_and_wait(post, port=port, token=token),
@@ -128,7 +132,9 @@ class Orchestrator:
             raise KeyError(post_id)
         async with self._lock(post_id):
             post = self.store.get(post_id)  # re-read inside the lock
-            info = self.backend.info(post)
+            loop = asyncio.get_event_loop()
+            # 동기 health 오프로드 (open 과 동일 이유 — 이벤트 루프 비블로킹)
+            info = await loop.run_in_executor(None, self.backend.info, post)
             reuse_token = info["token"] if info else None
             if info is not None:  # up → stop it, drop route, wait until dead
                 self.backend.stop_instance(post)

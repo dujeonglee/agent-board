@@ -188,6 +188,15 @@ class TestBoardProxyRouter:
         assert r.status_code == 502
         await router.aclose()
 
+    def test_proxy_client_bounds_connect_but_not_stream(self):
+        """프록시 client 는 connect 만 상한(응답 없는/반쯤 죽은 upstream 에
+        무한 대기하다 요청이 영영 안 끝나는 것 방지), read 는 무제한 —
+        SSE 스트림(/api/stream)이 무한히 열려 있어야 하므로."""
+        router = BoardProxyRouter()
+        t = router._client.timeout
+        assert t.connect is not None  # 연결은 상한
+        assert t.read is None  # 스트림 읽기는 무제한
+
     @pytest.mark.asyncio
     async def test_no_route_no_reopen_is_503(self, upstream):
         # no route + no reopen hook → clean 503 (not a raw exception)

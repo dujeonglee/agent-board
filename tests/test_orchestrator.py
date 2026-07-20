@@ -116,6 +116,46 @@ async def test_attach_when_already_up_no_spawn(setup):
 
 
 @pytest.mark.asyncio
+async def test_open_offloads_blocking_health_no_loop_block(setup):
+    """info()(동기 health httpx.get)가 느려도 open 이 이벤트 루프를 막지
+    않아야 한다 — run_in_executor 오프로드. 안 하면 health 동안 board 전역
+    (다른 방 SSE 프록시·다른 open)이 stall(부하 시 재열기 cascade). 슬로우
+    info 동안 병렬 ticker 가 도는지로 검증."""
+    import time as _time
+
+    cfg, store = setup
+    be = FakeBackend(already_up=True)
+    orig_info = be.info
+
+    def slow_info(p):
+        _time.sleep(0.3)  # 느린 동기 health 흉내(블로킹 호출)
+        return orig_info(p)
+
+    be.info = slow_info
+    orch = Orchestrator(cfg, store, backend=be)
+    post = store.create_post(topic="t")
+    store.set_session_id(post.post_id, "EXISTING")
+
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        for _ in range(40):
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    t = asyncio.create_task(ticker())
+    await orch.open(post.post_id)
+    ticks_during_open = ticks  # open 완료 시점 스냅샷
+    await t
+    # 오프로드됐으면 slow_info(0.3s) 동안 ticker 가 여러 번(≥10) 돌았어야.
+    # 동기 블로킹이면 루프가 막혀 open 완료까지 거의 0.
+    assert ticks_during_open >= 10, (
+        f"이벤트 루프가 health 동안 막힘 (ticks={ticks_during_open})"
+    )
+
+
+@pytest.mark.asyncio
 async def test_second_open_resumes_not_new(setup):
     cfg, store = setup
     be = FakeBackend(already_up=False, session_id="S1")

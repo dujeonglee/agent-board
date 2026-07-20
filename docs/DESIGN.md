@@ -135,6 +135,15 @@ return {"url": f"/s/{id}/?token={token}"}      # 프론트가 location 이동
 없으면 연결을 시도조차 안 함(클라이언트측 게이트). `--trust-local` 은 *서버측* 만
 풀어주므로 프론트엔 토큰이 필요 → `backend.info`/spawn 이 토큰을 함께 반환.
 
+**★ 부하 내성 (v1.23.2)**: `_ensure_up`/`restart` 의 `backend.info()` 는 동기
+health(`httpx.get /api/health`, timeout=1s)를 포함하므로 **`run_in_executor` 로
+오프로드** — 느린 인스턴스에서 health 를 기다리는 동안 async 이벤트 루프가 막혀
+board 전역(다른 방 SSE 프록시·다른 open)이 stall 되던 것 방지(부하 시 재열기
+cascade). 그 open 만 기다리고 루프는 계속 돈다(`_await_dead` 와 동형). 또한 프록시
+`httpx.AsyncClient` 는 **connect 만 상한(10s), read/write/pool 은 무제한** —
+응답 없는 upstream 에 무한 대기하다 요청이 영영 안 끝나는 것을 막되 SSE 스트림은
+무한히 열려 있게 한다.
+
 ## 6. spawn 상세 (`instances.spawn`) — session_id 발견이 관건
 - **보드가 port·token 을 정해서 넘김**(라우트를 바로 등록할 수 있게).
 - 명령:

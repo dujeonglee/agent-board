@@ -88,10 +88,15 @@ async def _relay_body(upstream: httpx.Response):
 class BoardProxyRouter(Router):
     def __init__(self):
         self._routes: dict[str, int] = {}  # post_id → upstream port
-        # one shared client (connection pooling); no timeout so SSE can hang
-        # open. trust_env=False: loopback proxying must bypass any corporate
-        # HTTP proxy (which "Access Denied"s 127.0.0.1).
-        self._client = httpx.AsyncClient(timeout=None, trust_env=False)
+        # one shared client (connection pooling). connect 만 상한(응답 없는/
+        # 반쯤 죽은 upstream 에 무한 대기하다 요청이 영원히 안 끝나는 것 방지),
+        # read/write/pool 은 무제한 — SSE 스트림(/api/stream)이 무한히 열려
+        # 있어야 하므로. trust_env=False: loopback 프록시는 사내 HTTP proxy
+        # (127.0.0.1 을 "Access Denied")를 우회해야 한다.
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, read=None, write=None, pool=None),
+            trust_env=False,
+        )
         # async reopen(post_id) — re-spawn/attach a stopped instance so hitting
         # the old /s/<id> URL after idle-reap revives it (wired to the
         # orchestrator's open). Must register the route before returning.
