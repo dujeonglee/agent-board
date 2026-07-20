@@ -711,10 +711,31 @@ class TestTabGuard:
         assert "/api/gateway" in js
         assert '"agentcli-" + post_id' in js
         # v1.16.0: Web Locks 는 secure context 전용이라 LAN http(주 운용)
-        # 에서 무동작 — ping/pong 샘플링 카운트로 복귀(창 300ms). 열기는
-        # 사람 속도의 버튼 클릭이라 샘플링으로 충분.
+        # 에서 무동작 — ping/pong 샘플링 카운트로 복귀. 열기는 사람 속도의
+        # 버튼 클릭이라 샘플링으로 충분.
         assert "navigator.locks" not in js
         assert "agentcli-conn-slot-" not in js
+
+    def test_open_gate_sampling_window_is_small(self, tmp_path):
+        """열기 게이트 샘플링 창(HELD_SAMPLE_MS)은 열기 클릭 직후
+        about:blank 창이 대기하는 시간이라 재열기 체감 지연에 직결된다 —
+        실측상 방 페이지 로드는 87ms 인데 옛 300ms 창이 "blank 이후"
+        지연의 ~77% 였다(v1.22.2 축소). pong 은 같은 브라우저 내 전달이라
+        유휴 탭이 ~5ms 에 답하므로 작은 창이면 충분하고, 큰 블로킹 값으로
+        되돌아가면 재열기 지연 회귀. 창은 상수로 setTimeout 에 배선돼야
+        하드코딩된 큰 값이 우회하지 못한다."""
+        import re
+
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        m = re.search(r"HELD_SAMPLE_MS\s*=\s*(\d+)", js)
+        assert m, "HELD_SAMPLE_MS 상수 부재 — 샘플링 창이 하드코딩됨?"
+        window_ms = int(m.group(1))
+        assert window_ms <= 150, (
+            f"열기 게이트 샘플링 창 {window_ms}ms — 너무 큼(블로킹 재열기 회귀)"
+        )
+        # 샘플러가 상수를 실제로 사용하는지(하드코딩 큰 값 차단)
+        assert "}, HELD_SAMPLE_MS);" in js
 
 
 class TestSingletonLock:
