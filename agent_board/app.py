@@ -16,22 +16,17 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-
-
 from pydantic import BaseModel
 
-from agent_board import __version__
+from agent_board import __version__, admin, instances, models_registry, sessions
 from agent_board import clone as clone_mod
-from agent_board import instances, models_registry, sessions
-
-from agent_board import admin
 from agent_board.config import Config
-from agent_board.live_events import LiveEvents
 from agent_board.keepalive import (
     KeepAliveManager,
     default_port_for,
     make_sse_connect,
 )
+from agent_board.live_events import LiveEvents
 from agent_board.orchestrator import Orchestrator, RealBackend
 from agent_board.router import BoardProxyRouter, CaddyRouter, Router
 from agent_board.store import Store
@@ -506,7 +501,15 @@ def create_app(
         router.remove_route(post_id)
         # kill the running instance BEFORE removing its workspace, else it is
         # orphaned with a deleted cwd (fails to save its session on exit).
-        instances.stop_instance(config.workspace_for(post_id), post.session_id)
+        # ``wait_s``: 종료를 실제로 확인하고 나서 rmtree — signal-만-보내던
+        # 종전엔 죽어가는 인스턴스의 마지막 status 발행이 지워진 경로를
+        # 재생성해 고아 워크스페이스를 남겼다 (v1.24.0 레이스 봉합).
+        await asyncio.to_thread(
+            instances.stop_instance,
+            config.workspace_for(post_id),
+            post.session_id,
+            wait_s=8.0,
+        )
         ws = config.workspace_for(post_id).resolve()
         # safety: only ever remove a board-owned dir under the workspaces root
         if config.workspaces_root in ws.parents and ws.is_dir():

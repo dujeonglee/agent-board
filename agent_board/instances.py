@@ -130,23 +130,48 @@ def pid_alive(pid: int) -> bool:
     return bool(out)  # 빈 출력 = ps 가 못 찾음 (경계: kill 직후)
 
 
-def stop_instance(workspace: Path, session_id: str | None) -> bool:
+def stop_instance(
+    workspace: Path, session_id: str | None, *, wait_s: float = 0.0
+) -> bool:
     """Terminate a post's running instance (SIGTERM by pid from web.json).
     Returns True if a live instance was signalled. Called BEFORE removing the
-    workspace so the instance isn't orphaned with a deleted cwd."""
+    workspace so the instance isn't orphaned with a deleted cwd.
+
+    ``wait_s`` > 0 — SIGTERM 후 프로세스가 **실제로 사라질 때까지** 유한
+    대기(폴링), 타임아웃이면 SIGKILL 후 짧게 재대기 (v1.24.0). 삭제 경로의
+    좀비-워크스페이스 레이스 봉합: signal-만-보내고-반환하던 종전 동작은
+    rmtree 뒤에 죽어가는 인스턴스의 마지막 status 발행이 지워진 경로를
+    재생성해, DB 행 없는 고아 디렉토리(내용물=status.json 하나)를 남겼다."""
     if not session_id:
         return False
     info = read_web_json(workspace, session_id)
     if not info:
         return False
     pid = info.get("pid")
-    if pid and pid_alive(pid):
+    if not (pid and pid_alive(pid)):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return False
+    if wait_s > 0 and not _wait_pid_gone(pid, wait_s):
         try:
-            os.kill(pid, signal.SIGTERM)
+            os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
-            return False
-        return True
-    return False
+            return True
+        _wait_pid_gone(pid, 2.0)
+    return True
+
+
+def _wait_pid_gone(pid: int, timeout_s: float, step_s: float = 0.1) -> bool:
+    """``pid`` 가 사라질 때까지 폴링 — True=소멸, False=타임아웃.
+    pid_alive 가 좀비를 죽음으로 판정+reap 하므로 여기서 따로 wait 안 한다."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        time.sleep(step_s)
+    return not pid_alive(pid)
 
 
 def _session_dir(workspace: Path, session_id: str) -> Path:
