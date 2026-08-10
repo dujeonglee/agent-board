@@ -138,7 +138,7 @@ class TestBoardProxyRouter:
         router.ensure_route("p1", upstream)
         app = _board_app(router)
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:  # noqa: SIM117
             async with c.stream("GET", "/s/p1/api/stream") as r:
                 assert r.status_code == 200
                 assert "text/event-stream" in r.headers["content-type"]
@@ -156,7 +156,7 @@ class TestBoardProxyRouter:
         router.ensure_route("p1", upstream)
         app = _board_app(router)
         transport = httpx.ASGITransport(app=app)  # raises app exceptions by default
-        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:  # noqa: SIM117
             async with c.stream("GET", "/s/p1/api/broken-stream") as r:
                 assert r.status_code == 200
                 chunks = []

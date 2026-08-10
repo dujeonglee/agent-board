@@ -186,6 +186,12 @@ class TestModelEntryEdit:
 
 
 class TestDetect:
+    @pytest.fixture(autouse=True)
+    def _require_agent_cli(self):
+        # These validate the REAL agent-cli capability detector — a co-install
+        # in dev/CI. Skip (not fail) where agent-cli is absent.
+        pytest.importorskip("agent_cli")
+
     def test_detect_returns_entry_without_saving(self, tmp_path, monkeypatch):
         cfg = _cfg_file(tmp_path)
         import agent_cli.providers.capabilities as caps_mod
@@ -341,6 +347,10 @@ class TestWireFormatBinding:
     동형), 목록은 agent-cli lazy import — 자유입력 금지 (agent-cli 부트가
     unknown 이름 fail-fast)."""
 
+    @pytest.fixture(autouse=True)
+    def _require_agent_cli(self):
+        pytest.importorskip("agent_cli")
+
     def test_list_wire_format_names_from_agent_cli(self):
         # dev/배포 환경은 agent-cli co-install 전제 (detect 동형)
         names = admin.list_wire_format_names()
@@ -384,3 +394,83 @@ class TestWireFormatBinding:
         assert "wire_formats" in js  # 옵션 소스
         assert "entry.wire_format = wf" in js  # 선택 시에만 필드 기록
         assert 'entry.wire_format || "auto"' in js  # 행 셀 표시
+
+
+class TestBaseUrlIsRemote:
+    """AUDIT B-2 defense-in-depth: recognise when a models probe would ship the
+    stored API key off-box (attacker-repointed base_url exfil surface)."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost:8000",
+            "http://127.0.0.1:8000/v1",
+            "http://[::1]:1234",
+            "http://192.168.1.50:8000",
+            "http://10.0.0.5",
+            "http://172.16.3.4:9000",
+        ],
+    )
+    def test_local_or_private_not_remote(self, url):
+        assert admin.base_url_is_remote(url) is False
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://evil.example.com/v1",
+            "https://api.openai.com",
+            "http://8.8.8.8:8000",
+        ],
+    )
+    def test_remote_detected(self, url):
+        assert admin.base_url_is_remote(url) is True
+
+    def test_empty_is_not_remote(self):
+        assert admin.base_url_is_remote("") is False
+
+    def test_probe_warns_on_remote_key_send(self, tmp_path, monkeypatch, capsys):
+        # A remote base_url with a key → stderr warning that the key leaves box.
+        cfg = tmp_path / "config.json"
+        cfg.write_text(
+            json.dumps(
+                {
+                    "provider": "openai",
+                    "base_url": "http://evil.example.com",
+                    "api_key": "sk-secret",
+                }
+            )
+        )
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"data": [{"id": "m1"}]}
+
+        monkeypatch.setattr(admin.httpx, "get", lambda *a, **k: _Resp())
+        admin.list_served_models(cfg)
+        assert "원격 호스트" in capsys.readouterr().err
+
+    def test_probe_no_warn_on_local(self, tmp_path, monkeypatch, capsys):
+        cfg = tmp_path / "config.json"
+        cfg.write_text(
+            json.dumps(
+                {
+                    "provider": "openai",
+                    "base_url": "http://127.0.0.1:8000",
+                    "api_key": "sk-secret",
+                }
+            )
+        )
+
+        class _Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"data": [{"id": "m1"}]}
+
+        monkeypatch.setattr(admin.httpx, "get", lambda *a, **k: _Resp())
+        admin.list_served_models(cfg)
+        assert "원격 호스트" not in capsys.readouterr().err

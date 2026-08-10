@@ -77,7 +77,7 @@ class TestSignature:
         assert live._sig(post)[2] is False
 
     def test_missing_files_are_none_not_error(self, tmp_path, monkeypatch):
-        cfg, store, live = _live(tmp_path)
+        _cfg, store, live = _live(tmp_path)
         post = store.create_post(topic="t")
         store.set_session_id(post.post_id, "S1")  # session_id but no files on disk
         monkeypatch.setattr(instances, "pid_alive", lambda pid: True)

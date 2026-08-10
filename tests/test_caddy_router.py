@@ -73,7 +73,7 @@ class TestCaddyRouter:
         # ★ auth must be enforced ON the dynamic route itself (no bypass).
         router, calls = _router_with_recorder(basic_auth="alice:$2a$14$abc")
         router.ensure_route("p1", 50010)
-        route = [c for c in calls if c["method"] == "PUT"][0]["json"]
+        route = next(c for c in calls if c["method"] == "PUT")["json"]
         handlers = [h["handler"] for h in route["handle"]]
         assert handlers == ["authentication", "rewrite", "reverse_proxy"]
         auth = route["handle"][0]

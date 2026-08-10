@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_board import sessions
 
 
@@ -263,6 +265,12 @@ class TestStatusFileCrossRepoContract:
     다 통과한다("working" 어휘 버그와 같은 부류). dev/배포 환경은
     agent-cli co-install 전제(admin 테스트 동형)이므로 **agent-cli 의
     실제 writer 로 생산한 파일**을 board 가 읽는 계약을 고정한다."""
+
+    @pytest.fixture(autouse=True)
+    def _require_agent_cli(self):
+        # Real cross-repo contract needs agent-cli co-installed (dev/CI). Skip
+        # (not fail) where it is absent so the board suite stays green solo.
+        pytest.importorskip("agent_cli")
 
     def _ws(self, tmp_path):
         import json as _json

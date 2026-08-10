@@ -35,6 +35,7 @@ def cli_version(agent_cli_bin: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -118,6 +119,7 @@ def pid_alive(pid: int) -> bool:
             capture_output=True,
             text=True,
             timeout=1.0,
+            check=False,
         ).stdout.strip()
     except Exception:
         return True  # ps 실패 — 보수적으로 살아있다고 본다

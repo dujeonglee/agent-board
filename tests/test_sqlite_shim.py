@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -30,7 +31,7 @@ def test_shim_exports_working_sqlite():
 def test_store_uses_shim_not_plain_import():
     # a plain ``import sqlite3`` in store.py would crash on sqlite-less Python
     src = importlib.util.find_spec("agent_board.store").origin
-    text = open(src, encoding="utf-8").read()
+    text = Path(src).read_text(encoding="utf-8")
     assert "from agent_board._sqlite import sqlite3" in text
     assert "\nimport sqlite3" not in text
 
@@ -44,7 +45,6 @@ def test_falls_back_to_pysqlite3_when_stdlib_missing(monkeypatch):
         def find_spec(self, name, path=None, target=None):
             if name == "sqlite3":
                 raise ImportError("simulated: stdlib sqlite3 unavailable")
-            return None
 
     monkeypatch.setattr(sys, "meta_path", [_Block(), *sys.meta_path])
     try:

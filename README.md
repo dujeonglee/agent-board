@@ -56,7 +56,7 @@ agent-board
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | **─ 네트워크 ─** | | |
-| `AGENT_BOARD_HOST` | `0.0.0.0` | 바인드 호스트 |
+| `AGENT_BOARD_HOST` | `127.0.0.1` | 바인드 호스트. board-proxy(기본)는 인증이 없어 비-loopback 바인드를 거부한다 — LAN 노출은 `gateway=caddy`(인증) 또는 `AGENT_BOARD_ALLOW_UNAUTH_LAN=1`(명시 위험 감수) |
 | `AGENT_BOARD_PORT` | `51966` (0xCAFE) | 보드 포트 (생략 시 fallback 다이나믹·인스턴스 50000~60000·omlx 8000·cli 0xC0DE 회피) |
 | **─ 경로 · 저장 ─** | | |
 | `AGENT_BOARD_HOME` | `./data` | 데이터 루트 base (아래 DATA·WORKSPACES 의 기본값 base) |

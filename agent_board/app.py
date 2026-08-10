@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -89,6 +90,38 @@ def gateway_banner(config: Config) -> str:
     if config.gateway == "caddy":
         return f"caddy (admin {config.caddy_admin})"
     return "board-proxy (in-process reverse proxy — default)"
+
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def enforce_bind_policy(
+    host: str, gateway: str, *, allow_unauth_lan: bool = False
+) -> None:
+    """Refuse an unsafe bind: ``board-proxy`` gateway has no auth of its own, so
+    binding it to a non-loopback address exposes the whole control plane
+    (spawn/kill/delete/admin) to the network unauthenticated (AUDIT B-1).
+
+    Raises ``SystemExit(1)`` for ``board-proxy`` + non-loopback host unless the
+    operator explicitly opts in (``AGENT_BOARD_ALLOW_UNAUTH_LAN=1``). ``caddy``
+    is unaffected here — it embeds auth per route; its non-loopback bind is a
+    separate footgun handled by a warning in ``main()``."""
+    if gateway == "board-proxy" and host not in _LOOPBACK_HOSTS:
+        if allow_unauth_lan:
+            print(
+                f"  ⚠️  board-proxy 를 {host} 로 바인드 — 인증 없는 컨트롤 플레인이 "
+                "네트워크에 노출됩니다 (AGENT_BOARD_ALLOW_UNAUTH_LAN=1 로 허용됨).",
+                file=sys.stderr,
+            )
+            return
+        print(
+            f"board-proxy 게이트웨이는 인증이 없어 {host} 바인드를 거부합니다 "
+            "(스폰/삭제/admin 무인증 노출). AGENT_BOARD_HOST=127.0.0.1 로 바인드하거나 "
+            "gateway=caddy 인증을 쓰세요. 위험을 감수하면 "
+            "AGENT_BOARD_ALLOW_UNAUTH_LAN=1 로 명시 허용.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 def acquire_singleton_lock(data_dir: Path) -> int | None:
@@ -570,7 +603,6 @@ def create_app(
 
 def main() -> None:  # pragma: no cover
     import os
-    import sys
 
     import uvicorn
 
@@ -590,7 +622,17 @@ def main() -> None:  # pragma: no cover
             file=sys.stderr,
         )
         raise SystemExit(1)
-    host = os.environ.get("AGENT_BOARD_HOST", "0.0.0.0")
+    host = os.environ.get("AGENT_BOARD_HOST", "127.0.0.1")
+    # board-proxy has NO auth of its own — binding it to a non-loopback address
+    # exposes spawn/kill/delete/admin to the whole network unauthenticated
+    # (AUDIT B-1). Refuse to start in that configuration unless the operator
+    # explicitly opts in. Evaluated before port binding so we never open a
+    # socket in the unsafe config.
+    enforce_bind_policy(
+        host,
+        config.gateway,
+        allow_unauth_lan=os.environ.get("AGENT_BOARD_ALLOW_UNAUTH_LAN") == "1",
+    )
     # AGENT_BOARD_PORT set → bind it exactly (fail loudly on conflict). Omitted →
     # prefer 0xCAFE but dynamically fall back to a free port if it's taken.
     explicit = os.environ.get("AGENT_BOARD_PORT")

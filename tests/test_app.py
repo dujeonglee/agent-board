@@ -9,11 +9,41 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
-from agent_board.app import acquire_singleton_lock, create_app, gateway_banner
+from agent_board.app import (
+    acquire_singleton_lock,
+    create_app,
+    enforce_bind_policy,
+    gateway_banner,
+)
 from agent_board.config import Config
 from agent_board.store import Store
+
+
+class TestEnforceBindPolicy:
+    """AUDIT B-1: board-proxy has no auth, so a non-loopback bind exposes the
+    control plane unauthenticated. main() must refuse it unless opted in."""
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
+    def test_loopback_allowed(self, host):
+        enforce_bind_policy(host, "board-proxy")  # no raise
+
+    @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::"])
+    def test_board_proxy_non_loopback_refused(self, host):
+        with pytest.raises(SystemExit) as ei:
+            enforce_bind_policy(host, "board-proxy")
+        assert ei.value.code == 1
+
+    @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10"])
+    def test_opt_in_allows_non_loopback(self, host):
+        enforce_bind_policy(host, "board-proxy", allow_unauth_lan=True)  # no raise
+
+    def test_caddy_non_loopback_not_refused_here(self):
+        # caddy embeds per-route auth; its non-loopback bind is a separate
+        # (warning-only) footgun handled in main(), not a hard refusal.
+        enforce_bind_policy("0.0.0.0", "caddy")  # no raise
 
 
 class FakeOrch:
@@ -144,7 +174,7 @@ class TestPostsApi:
 
     def test_open_calls_orchestrator(self, tmp_path):
         orch = FakeOrch()
-        cfg, _, c = _client(tmp_path, orch=orch)
+        _cfg, _, c = _client(tmp_path, orch=orch)
         pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
         r = c.post(f"/api/posts/{pid}/open")
         assert r.status_code == 200
@@ -157,7 +187,7 @@ class TestPostsApi:
 
     def test_restart_calls_orchestrator(self, tmp_path):
         orch = FakeOrch()
-        cfg, _, c = _client(tmp_path, orch=orch)
+        _cfg, _, c = _client(tmp_path, orch=orch)
         pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
         r = c.post(f"/api/posts/{pid}/restart")
         assert r.status_code == 200
@@ -170,7 +200,7 @@ class TestPostsApi:
 
     def test_force_active_on_off(self, tmp_path):
         ka = FakeKeepalive()
-        cfg, store, c = _client(tmp_path, keepalive=ka)
+        _cfg, store, c = _client(tmp_path, keepalive=ka)
         pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
 
         c.post(f"/api/posts/{pid}/force_active", json={"enabled": True})
@@ -225,7 +255,7 @@ class TestModelSelection:
         assert out == [{"id": "Qwen-X", "provider": "omlx", "context_window": None}]
 
     def test_create_with_model_id_persists(self, tmp_path):
-        cfg, store, c = _client(tmp_path)
+        _cfg, store, c = _client(tmp_path)
         pid = c.post("/api/posts", json={"topic": "t", "model_id": "Qwen-X"}).json()[
             "post_id"
         ]
@@ -561,7 +591,7 @@ class TestAgentsInPostView:
     def test_post_view_passes_agents_through(self, tmp_path, monkeypatch):
         from agent_board import sessions
 
-        cfg, store, c = _client(tmp_path)
+        _cfg, store, c = _client(tmp_path)
         store.create_post(topic="t")
         monkeypatch.setattr(
             sessions,
@@ -597,7 +627,7 @@ class TestAgentsInPostView:
     def test_post_view_agents_absent_when_not_provided(self, tmp_path, monkeypatch):
         from agent_board import sessions
 
-        cfg, store, c = _client(tmp_path)
+        _cfg, store, c = _client(tmp_path)
         store.create_post(topic="t")
         monkeypatch.setattr(
             sessions,

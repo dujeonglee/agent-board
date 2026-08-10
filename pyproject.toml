@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-board"
-version = "1.24.0"
+dynamic = ["version"]
 description = "Forum-style board over agent-cli — each post is an agent-cli session + workspace"
 requires-python = ">=3.10"
 dependencies = [
@@ -23,6 +23,25 @@ dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "ruff", "playwright>=1.40"]
 
 [project.scripts]
 agent-board = "agent_board.app:main"
+
+[tool.ruff.lint]
+# Mirrors agent-cli's policy (sibling repo) so lint is consistent across the
+# harness. The default select (E/F + ruff's current stable set) applies; the
+# ignores below are DELIBERATE patterns in this codebase, not un-fixed debt:
+ignore = [
+    # broad ``except Exception:`` — intentional defensive boundaries (proxy
+    # relay, health probe, scanner loop, clone) that must degrade, not crash.
+    "BLE001",
+    # try/except/pass|continue — skip a malformed/stale entry and keep going
+    # (corrupt sidecar, dead pid, sid collision).
+    "S110",
+    "S112",
+]
+
+[tool.setuptools.dynamic]
+# Single source of truth for the version — agent_board/__init__.py.__version__
+# (previously duplicated here as a literal, which drifted; AUDIT hygiene).
+version = { attr = "agent_board.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["agent_board*"]

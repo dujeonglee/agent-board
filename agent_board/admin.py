@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -34,6 +35,33 @@ DEFAULT_CONFIG_JSON = Path.home() / ".agent-cli" / "config.json"
 # 폼 편집 대상 — 이 외 키는 PUT 에서 무조건 보존.
 CONFIG_FORM_FIELDS = ("provider", "base_url", "api_key", "default_model")
 KEY_MASK = "***"
+
+
+def base_url_is_remote(base_url: str) -> bool:
+    """True if ``base_url`` points at a non-loopback host — i.e. probing it
+    ships the stored API key off-box.
+
+    The models probe legitimately sends the key to the configured endpoint (a
+    real remote LLM server needs it), so we cannot refuse remote targets
+    without breaking normal use. But an attacker who can reach the admin API
+    (closed remotely by AUDIT B-1's loopback bind) could repoint ``base_url``
+    to exfiltrate the key; surfacing WHERE the key goes is the residual
+    defense-in-depth. Full insider mitigation needs per-user perms (v2)."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(base_url).hostname or "").lower()
+    if not host:
+        return False
+    if host in ("localhost",):
+        return False
+    try:
+        import ipaddress
+
+        ip = ipaddress.ip_address(host)
+        return not (ip.is_loopback or ip.is_private)
+    except ValueError:
+        # A hostname (not an IP literal) that isn't localhost → treat as remote.
+        return True
 
 
 class AdminError(Exception):
@@ -129,6 +157,15 @@ def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
     else:
         url = f"{base_url}/models"
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    if api_key and base_url_is_remote(base_url):
+        # Defense-in-depth (AUDIT B-2): make it visible that the stored key is
+        # being sent to a remote host — an attacker-repointed base_url would
+        # otherwise exfiltrate it silently. (Remote is legitimate for a real
+        # remote LLM, so we warn, not block.)
+        print(
+            f"  ⚠️  admin 모델 프로브가 API 키를 원격 호스트로 전송합니다: {base_url}",
+            file=sys.stderr,
+        )
     try:
         r = httpx.get(url, headers=headers, timeout=10.0)
         r.raise_for_status()

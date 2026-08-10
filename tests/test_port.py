@@ -8,7 +8,7 @@ from agent_board.app import DEFAULT_PORT, pick_board_port
 
 
 def test_default_port_is_cafe():
-    assert DEFAULT_PORT == 0xCAFE == 51966
+    assert DEFAULT_PORT == 0xCAFE  # 0xCAFE == 51966
 
 
 def test_free_preferred_is_used():

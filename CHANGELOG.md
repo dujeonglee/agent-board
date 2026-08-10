@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.25.0] - 2026-08-09
+
+### Security
+
+- **기본 바인드를 loopback 으로 (AUDIT B-1).** `AGENT_BOARD_HOST` 기본이
+  `0.0.0.0`→`127.0.0.1`. board-proxy 게이트웨이는 자체 인증이 없어 비-loopback
+  바인드 시 spawn/kill/delete/admin 이 무인증으로 네트워크에 노출됐다. 이제
+  `main()` 이 board-proxy + 비-loopback 바인드를 **기동 거부**(SystemExit)한다 —
+  LAN 노출은 `gateway=caddy`(라우트 인증) 또는 명시 opt-in
+  `AGENT_BOARD_ALLOW_UNAUTH_LAN=1` 로만. (기능 보존, 기본값만 변경.)
+- **admin 모델 프로브의 API 키 원격 전송 가시화 (AUDIT B-2, 심층방어).**
+  attacker-repointed `base_url` 로 저장된 API 키가 유출될 수 있던 표면 —
+  1차 방어는 B-1(무인증 원격 접근 차단), 추가로 프로브 대상이 비-loopback 이면
+  키가 off-box 로 나감을 stderr 경고. (정상 원격 LLM 사용은 무영향; 완전한
+  내부자 방어는 per-user 권한=v2.) `get_config` 의 키 마스킹은 계약 테스트로 고정.
+
+### Changed
+
+- **버전 단일 소스화**: `pyproject.toml` 의 리터럴 `version` 제거,
+  `dynamic = ["version"]` + `[tool.setuptools.dynamic] attr = agent_board.__version__`.
+  종전 2중 소스(pyproject+`__init__`) 드리프트 위험 해소 (agent-cli 와 동형).
+
+### Internal
+
+- ruff 정책을 agent-cli 와 동형으로 명시(`[tool.ruff.lint]` — BLE001/S110/S112
+  deliberate ignore) + 기존 린트 잔여 정리(subprocess `check=`, nested-with 등).
+- agent-cli 통합 테스트(capability 탐지·wire-format·status 계약)에
+  `importorskip("agent_cli")` — 미co-install 환경에선 fail 대신 skip(정직한 그린).
+
 ## [1.22.1] - 2026-07-19
 
 ### Tests

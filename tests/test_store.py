@@ -58,7 +58,7 @@ class TestStore:
         a = store.create_post(topic="a")
         b = store.create_post(topic="b")
         store.set_session_id(a.post_id, "S1")
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 — UNIQUE(session_id) 위반이 어떤 예외든 거부되면 충분
             store.set_session_id(b.post_id, "S1")  # one session = one post
 
     def test_set_force_active(self, store):
