@@ -38,6 +38,16 @@ ignore = [
     "S112",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# ⏰ 스케줄은 의도적으로 naive 서버-로컬 datetime 을 쓴다 (cron 의미론이
+# 로컬 — docs/schedule-design.md §3). DTZ 는 여기선 설계 위반이 아니라 설계.
+"agent_board/cron.py" = ["DTZ"]
+"agent_board/scheduler.py" = ["DTZ"]
+"agent_board/sched_contract.py" = ["DTZ"]
+"agent_board/app.py" = ["DTZ005"]
+"tests/test_cron.py" = ["DTZ"]
+"tests/test_scheduler.py" = ["DTZ"]
+
 [tool.setuptools.dynamic]
 # Single source of truth for the version — agent_board/__init__.py.__version__
 # (previously duplicated here as a literal, which drifted; AUDIT hygiene).

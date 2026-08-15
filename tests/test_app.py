@@ -842,3 +842,143 @@ class TestSingletonLock:
         finally:
             os.close(fd_a)
             os.close(fd_b)
+
+
+class TestSchedulesApi:
+    """⏰ 예약 API (docs/schedule-design.md §6) — CRUD·toggle·run-now·dismiss."""
+
+    def _client_with_sched(self, tmp_path):
+        from agent_board.scheduler import Scheduler
+        from agent_board.store import Store as _Store
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = _Store(cfg.db_path)
+        injected = []
+
+        class _Orch(FakeOrch):
+            pass
+
+        orch = _Orch()
+        sched = Scheduler(
+            store, orch, inject_fn=lambda post, prompt: injected.append(prompt)
+        )
+        app = create_app(
+            cfg,
+            store=store,
+            orchestrator=orch,
+            keepalive=FakeKeepalive(),
+            scheduler=sched,
+        )
+        return store, sched, injected, TestClient(app)
+
+    def _post(self, c):
+        return c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+
+    def test_add_and_list(self, tmp_path):
+        _store, _sched, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        r = c.post(
+            f"/api/posts/{pid}/schedules",
+            json={"cron": "0 9 * * 1", "prompt": "주간 보고", "label": "주간"},
+        )
+        assert r.status_code == 200
+        v = r.json()
+        assert v["source"] == "user"
+        assert v["human"] == "매주 월 09:00"
+        assert v["next_fire"]  # 계산됨
+        rows = c.get(f"/api/posts/{pid}/schedules").json()
+        assert len(rows) == 1 and rows[0]["label"] == "주간"
+
+    def test_add_rearms_scheduler(self, tmp_path):
+        # API 변이가 sleep 을 깨우는 배선 — 빠지면 다음 heartbeat(≤5분)까지 미발화
+        _store, sched, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        assert not sched._rearm.is_set()
+        c.post(f"/api/posts/{pid}/schedules", json={"cron": "* * * * *", "prompt": "x"})
+        assert sched._rearm.is_set()
+
+    def test_add_invalid_cron_400(self, tmp_path):
+        _, _, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        r = c.post(f"/api/posts/{pid}/schedules", json={"cron": "bad", "prompt": "x"})
+        assert r.status_code == 400
+        assert "invalid cron" in r.json()["detail"]
+
+    def test_add_requires_prompt(self, tmp_path):
+        _, _, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        r = c.post(f"/api/posts/{pid}/schedules", json={"cron": "* * * * *"})
+        assert r.status_code == 400
+
+    def test_unknown_post_404(self, tmp_path):
+        _, _, _, c = self._client_with_sched(tmp_path)
+        assert c.get("/api/posts/nope/schedules").status_code == 404
+        assert (
+            c.post(
+                "/api/posts/nope/schedules", json={"cron": "* * * * *", "prompt": "x"}
+            ).status_code
+            == 404
+        )
+
+    def test_delete_and_404(self, tmp_path):
+        store, _, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        sid = c.post(
+            f"/api/posts/{pid}/schedules", json={"cron": "* * * * *", "prompt": "x"}
+        ).json()["schedule_id"]
+        assert c.delete(f"/api/schedules/{sid}").status_code == 200
+        assert c.delete(f"/api/schedules/{sid}").status_code == 404
+        assert store.list_schedules(pid) == []
+
+    def test_toggle(self, tmp_path):
+        _, _, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        sid = c.post(
+            f"/api/posts/{pid}/schedules", json={"cron": "* * * * *", "prompt": "x"}
+        ).json()["schedule_id"]
+        v = c.post(f"/api/schedules/{sid}/toggle", json={"enabled": False}).json()
+        assert v["enabled"] is False and v["next_fire"] is None
+
+    def test_run_now_fires_and_clears_missed(self, tmp_path):
+        store, _, injected, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        sid = c.post(
+            f"/api/posts/{pid}/schedules",
+            json={"cron": "0 9 * * 1", "prompt": "보고서"},
+        ).json()["schedule_id"]
+        store.mark_missed(sid, "2026-08-17T09:00:00")
+        r = c.post(f"/api/schedules/{sid}/run-now")
+        assert r.json()["ok"] is True
+        assert injected == ["보고서"]
+        got = store.get_schedule(sid)
+        assert got.missed_at is None and got.last_fired_at is not None
+
+    def test_dismiss_missed(self, tmp_path):
+        store, _, injected, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        sid = c.post(
+            f"/api/posts/{pid}/schedules", json={"cron": "0 9 * * 1", "prompt": "x"}
+        ).json()["schedule_id"]
+        store.mark_missed(sid, "2026-08-17T09:00:00")
+        assert c.post(f"/api/schedules/{sid}/dismiss-missed").json()["ok"] is True
+        assert store.get_schedule(sid).missed_at is None
+        assert injected == []  # 건너뛰기는 실행 안 함
+
+    def test_post_view_carries_schedule_summary(self, tmp_path):
+        store, _, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        sid = c.post(
+            f"/api/posts/{pid}/schedules",
+            json={"cron": "0 9 * * 1", "prompt": "x", "label": "아침"},
+        ).json()["schedule_id"]
+        store.mark_missed(sid, "2026-08-17T09:00:00")
+        row = next(p for p in c.get("/api/posts").json() if p["post_id"] == pid)
+        assert row["schedules"]["count"] == 1
+        assert row["schedules"]["missed"][0]["label"] == "아침"
+
+    def test_post_delete_removes_schedules(self, tmp_path):
+        store, _, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        c.post(f"/api/posts/{pid}/schedules", json={"cron": "* * * * *", "prompt": "x"})
+        c.delete(f"/api/posts/{pid}")
+        assert store.list_schedules() == []

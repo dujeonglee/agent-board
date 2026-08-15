@@ -241,6 +241,36 @@ def health(port: int, *, timeout: float = 1.0) -> bool:
     return health_info(port, timeout=timeout) is not None
 
 
+def inject_prompt(
+    workspace: Path,
+    session_id: str,
+    prompt: str,
+    *,
+    nickname: str = "",
+    timeout: float = 5.0,
+) -> None:
+    """Deliver a chat prompt to the post's RUNNING instance (schedules —
+    docs/schedule-design.md §4). Reads ``web.json`` for port+token and POSTs
+    ``/api/input`` on loopback; the instance queues it and injects at a turn
+    boundary, so a busy agent is safe. ``nickname`` attributes the message
+    (cli >= 8.9.0; older instances ignore the field and show '?'). Raises on
+    any failure — the scheduler demotes the fire to a missed question."""
+    wj = read_web_json(workspace, session_id)
+    if not wj:
+        raise RuntimeError("instance web.json missing — not running?")
+    port, token = wj.get("port"), wj.get("token")
+    body: dict = {"kind": "chat", "content": prompt}
+    if nickname:
+        body["nickname"] = nickname
+    r = httpx.post(
+        f"http://127.0.0.1:{port}/api/input?token={token}",
+        json=body,
+        timeout=timeout,
+        trust_env=False,  # health_info 와 동일 — 회사 프록시 우회
+    )
+    r.raise_for_status()
+
+
 def alive(info: dict) -> bool:
     """An instance is alive iff its pid is running AND it answers health."""
     pid = info.get("pid")
@@ -278,6 +308,10 @@ def spawn(config: Config, post: Post, *, port: int, token: str) -> subprocess.Po
             stdin=subprocess.DEVNULL,
             stdout=logf,
             stderr=subprocess.STDOUT,
+            # ⏰ "외부 스케줄러가 이 워크스페이스를 본다"는 일반화된 신호
+            # (board 특정 아님 — cli 는 board 를 모른다). cli >= 8.9.0 은 이
+            # env 가 있을 때만 schedule 도구를 등록; 구버전은 그냥 무시.
+            env={**os.environ, "AGENT_CLI_SCHEDULER": "1"},
         )
     finally:
         logf.close()  # the child has its own dup of the fd; the parent's isn't needed

@@ -12,6 +12,7 @@ import json
 import shutil
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -19,7 +20,15 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent_board import __version__, admin, instances, models_registry, sessions
+from agent_board import (
+    __version__,
+    admin,
+    cron,
+    instances,
+    models_registry,
+    sched_contract,
+    sessions,
+)
 from agent_board import clone as clone_mod
 from agent_board.config import Config
 from agent_board.keepalive import (
@@ -30,6 +39,7 @@ from agent_board.keepalive import (
 from agent_board.live_events import LiveEvents
 from agent_board.orchestrator import Orchestrator, RealBackend
 from agent_board.router import BoardProxyRouter, CaddyRouter, Router
+from agent_board.scheduler import SCHEDULE_NICKNAME, Scheduler
 from agent_board.store import Store
 
 
@@ -239,6 +249,52 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "model_changeable": model_changeable,
         # 상주 에이전트 요약 (없으면 None — 프런트가 칩/상태 숨김)
         "agents": state.get("agents"),
+        # ⏰ 예약 요약 — 카드 배지(개수)와 놓친 발화 배너용. 전체 목록은
+        # 패널이 열릴 때 /api/posts/{id}/schedules 로 가져온다.
+        "schedules": _schedules_summary(store, post.post_id),
+    }
+
+
+def _schedules_summary(store: Store, post_id: str) -> dict:
+    scheds = store.list_schedules(post_id)
+    return {
+        "count": len(scheds),
+        "missed": [
+            {
+                "schedule_id": s.schedule_id,
+                "label": s.label or cron.describe(s.cron),
+                "missed_at": s.missed_at,
+            }
+            for s in scheds
+            if s.missed_at
+        ],
+    }
+
+
+def _schedule_view(s) -> dict:
+    """A schedule row for the API/UI — cron + human label + next fire."""
+    next_fire = None
+    human = s.cron
+    try:
+        spec = cron.parse(s.cron)
+        human = cron.describe(s.cron)
+        if s.enabled:
+            next_fire = cron.next_fire(spec, datetime.now()).isoformat()
+    except ValueError:
+        pass  # corrupt cron → 원문 표기, next 없음
+    return {
+        "schedule_id": s.schedule_id,
+        "post_id": s.post_id,
+        "source": s.source,
+        "cron": s.cron,
+        "human": human,
+        "prompt": s.prompt,
+        "label": s.label,
+        "enabled": s.enabled,
+        "created_at": s.created_at,
+        "last_fired_at": s.last_fired_at,
+        "missed_at": s.missed_at,
+        "next_fire": next_fire,
     }
 
 
@@ -268,6 +324,7 @@ def create_app(
     router: Router | None = None,
     orchestrator=None,
     keepalive=None,
+    scheduler=None,
 ) -> FastAPI:
     store = store or Store(config.db_path)
     if router is None:
@@ -294,21 +351,64 @@ def create_app(
     # live_events out of the app layer. on_death → drop the dead instance's
     # gateway route so a stale /s/<id> hit revives (Caddy falls through to the
     # board revive handler; board-proxy re-revives on next access).
+    # ⏰ 에이전트 파일 계약 (§7): 요청파일 변경을 live 스캐너가 감지하면 반영
+    # 후 스케줄러를 깨움 (rearm 은 thread-safe — executor 스레드에서 호출됨).
+    def _on_sched_requests(post) -> None:
+        changed = sched_contract.apply_requests(
+            store, post.post_id, config.workspace_for(post.post_id)
+        )
+        if changed:
+            scheduler.rearm()
+
     live = LiveEvents(
         config,
         store,
         lambda p: _post_view(config, store, p),
         on_death=router.remove_route,
+        on_sched_requests=_on_sched_requests,
     )
+
+    # ⏰ 스케줄러 (docs/schedule-design.md) — sleep-until-next + rearm. 발화 =
+    # spawn-or-attach(orchestrator.open) 후 인스턴스 /api/input 에 주입.
+    def _sched_inject(post, prompt: str) -> None:
+        if post is None or not post.session_id:
+            raise RuntimeError("no session to inject into")
+        instances.inject_prompt(
+            config.workspace_for(post.post_id),
+            post.session_id,
+            prompt,
+            nickname=SCHEDULE_NICKNAME,
+        )
+
+    def _sched_changed(post_id: str) -> None:
+        # 스케줄 상태 변화(발화·missed·UI 뮤테이션)를 그 행의 post_update 로
+        # 즉시 push — 프런트 배지가 새로고침 없이 갱신된다. 에이전트 쪽 state
+        # 파일도 함께 갱신해(§7 refresh) agent 의 다음 list 가 진실을 본다.
+        try:
+            sched_contract.refresh_state(store, post_id, config.workspace_for(post_id))
+        except OSError:
+            pass  # state 갱신 실패가 API/발화를 막으면 안 됨
+        post = store.get(post_id)
+        if post is not None:
+            live._broadcast(
+                {"type": "post_update", "post": _post_view(config, store, post)}
+            )
+
+    if scheduler is None:
+        scheduler = Scheduler(
+            store, orchestrator, inject_fn=_sched_inject, on_change=_sched_changed
+        )
 
     @asynccontextmanager
     async def lifespan(_app):
         await restore_state(config, store, router, keepalive)
         scanner = asyncio.create_task(live.run())
+        sched_task = asyncio.create_task(scheduler.run())
         try:
             yield
         finally:
             scanner.cancel()
+            sched_task.cancel()
             if hasattr(router, "aclose"):
                 await router.aclose()  # release the router's httpx client
 
@@ -317,6 +417,7 @@ def create_app(
     # router.remove_route)을 합동 검증할 수 있게 노출 — 배선 누락은
     # 양쪽 반쪽 유닛만으로는 안 잡힌다.
     app.state.live_events = live
+    app.state.scheduler = scheduler
     router.mount(app)  # /s/<post_id>/* reverse proxy
 
     # no-cache — plain StaticFiles 는 Cache-Control 미설정이라 브라우저가
@@ -597,6 +698,74 @@ def create_app(
         else:
             await keepalive.disable(post_id)
         return JSONResponse({"force_active": body.enabled})
+
+    # ── ⏰ 예약 API (docs/schedule-design.md §6) ─────────────
+
+    @app.get("/api/posts/{post_id}/schedules")
+    async def list_schedules_api(post_id: str):
+        if store.get(post_id) is None:
+            raise HTTPException(status_code=404, detail="no such post")
+        return [_schedule_view(s) for s in store.list_schedules(post_id)]
+
+    @app.post("/api/posts/{post_id}/schedules")
+    async def add_schedule_api(post_id: str, body: dict):
+        if store.get(post_id) is None:
+            raise HTTPException(status_code=404, detail="no such post")
+        expr = (body.get("cron") or "").strip()
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=400, detail="prompt is required")
+        try:
+            cron.parse(expr)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"invalid cron: {e}") from e
+        s = store.add_schedule(
+            post_id=post_id,
+            source="user",
+            cron=expr,
+            prompt=prompt,
+            label=(body.get("label") or "").strip(),
+        )
+        scheduler.rearm()
+        _sched_changed(post_id)
+        return _schedule_view(s)
+
+    def _get_sched_or_404(schedule_id: str):
+        s = store.get_schedule(schedule_id)
+        if s is None:
+            raise HTTPException(status_code=404, detail="no such schedule")
+        return s
+
+    @app.delete("/api/schedules/{schedule_id}")
+    async def delete_schedule_api(schedule_id: str):
+        s = _get_sched_or_404(schedule_id)
+        store.delete_schedule(schedule_id)
+        scheduler.rearm()
+        _sched_changed(s.post_id)
+        return JSONResponse({"deleted": schedule_id})
+
+    @app.post("/api/schedules/{schedule_id}/toggle")
+    async def toggle_schedule_api(schedule_id: str, body: dict):
+        s = _get_sched_or_404(schedule_id)
+        store.set_schedule_enabled(schedule_id, bool(body.get("enabled")))
+        scheduler.rearm()
+        _sched_changed(s.post_id)
+        return _schedule_view(store.get_schedule(schedule_id))
+
+    @app.post("/api/schedules/{schedule_id}/run-now")
+    async def run_now_api(schedule_id: str):
+        """즉시 1회 발화 — 놓친 발화의 [지금 실행] 과 수동 ▶ 버튼 공용.
+        성공 시 mark_fired 가 missed 도 함께 해소한다."""
+        s = _get_sched_or_404(schedule_id)
+        ok = await scheduler.fire(s)
+        return JSONResponse({"ok": ok})
+
+    @app.post("/api/schedules/{schedule_id}/dismiss-missed")
+    async def dismiss_missed_api(schedule_id: str):
+        s = _get_sched_or_404(schedule_id)
+        store.clear_missed(schedule_id)
+        _sched_changed(s.post_id)
+        return JSONResponse({"ok": True})
 
     return app
 

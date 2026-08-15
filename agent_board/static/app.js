@@ -225,11 +225,19 @@
       (up
         ? `<button class="restart btn-ghost" type="button" title="재실행 — 프로세스를 재시작(새로 설치한 agent-cli 반영). 세션은 이어집니다.">🔄</button>`
         : "") +
+      `<button class="sched btn-ghost" type="button" title="예약 — 주기적으로 요청을 자동 주입">⏰` +
+      (p.schedules && p.schedules.count
+        ? `<span class="scnt">${p.schedules.count}</span>`
+        : "") +
+      `</button>` +
       `<button class="clone btn-ghost" type="button" title="이 글의 파일/대화를 복사해 새 글 시작">📋 복제</button>` +
       `<button class="open btn-primary" type="button">열기</button>` +
       `<button class="del btn-danger" type="button" title="삭제(영구)">🗑</button>` +
-      `</div>`;
+      `</div>` +
+      missedBanner(p) +
+      `<div class="sched-panel" hidden></div>`;
 
+    wireSchedule(el, p);
     el.querySelector(".open").addEventListener("click", () => open(p.post_id));
     el.querySelector(".clone").addEventListener("click", () =>
       openCloneDialog(p)
@@ -249,6 +257,172 @@
         changeModel(p, e.target.value, e.target)
       );
     return el;
+  }
+
+  // ── ⏰ 예약 (docs/schedule-design.md §6) ──────────────────
+  // 패널 열림 상태는 post_id 로 기억 — SSE post_update 가 카드를 통째로
+  // 교체해도(라이브 갱신 경로) 열려 있던 패널이 다시 열리고 목록을 재조회.
+  const openSchedPanels = new Set();
+
+  const SCHED_PRESETS = [
+    { c: "0 9 * * *", h: "매일 9시" },
+    { c: "0 9 * * 1", h: "매주 월 9시" },
+    { c: "0 10 1 * *", h: "매월 1일" },
+    { c: "0 * * * *", h: "매시간" },
+    { c: "*/30 * * * *", h: "30분마다" },
+  ];
+
+  function missedBanner(p) {
+    const missed = (p.schedules && p.schedules.missed) || [];
+    if (!missed.length) return "";
+    return missed
+      .map(
+        (m) =>
+          `<div class="sched-missed" data-sid="${m.schedule_id}">` +
+          `<span class="lbl">⏰ 놓친 예약: ${esc(m.label)}</span>` +
+          `<span class="why">예정 ${fmtDate(m.missed_at)} — 보드가 꺼져 있었음</span>` +
+          `<span class="acts">` +
+          `<button class="m-run btn-primary" type="button">지금 실행</button>` +
+          `<button class="m-skip btn-ghost" type="button">건너뛰기</button>` +
+          `</span></div>`
+      )
+      .join("");
+  }
+
+  function wireSchedule(el, p) {
+    const btn = el.querySelector(".sched");
+    const panel = el.querySelector(".sched-panel");
+    btn.addEventListener("click", () => {
+      if (panel.hidden) {
+        openSchedPanels.add(p.post_id);
+        panel.hidden = false;
+        btn.classList.add("sched-on");
+        loadSchedPanel(panel, p.post_id);
+      } else {
+        openSchedPanels.delete(p.post_id);
+        panel.hidden = true;
+        btn.classList.remove("sched-on");
+      }
+    });
+    if (openSchedPanels.has(p.post_id)) {
+      panel.hidden = false;
+      btn.classList.add("sched-on");
+      loadSchedPanel(panel, p.post_id);
+    }
+    el.querySelectorAll(".sched-missed").forEach((row) => {
+      const sid = row.dataset.sid;
+      row.querySelector(".m-run").addEventListener("click", () => schedRunNow(sid));
+      row
+        .querySelector(".m-skip")
+        .addEventListener("click", () => schedApi(`/api/schedules/${sid}/dismiss-missed`));
+    });
+  }
+
+  async function schedApi(path, opts) {
+    const r = await fetch(path, Object.assign({ method: "POST" }, opts || {}));
+    if (!r.ok) {
+      let why = r.status;
+      try {
+        why = (await r.json()).detail || why;
+      } catch (e) {
+        /* non-JSON error body — keep the status code */
+      }
+      toast("예약 실패: " + why, true);
+    }
+    return r;
+  }
+
+  async function schedRunNow(sid) {
+    const r = await schedApi(`/api/schedules/${sid}/run-now`);
+    if (r.ok && !(await r.json()).ok)
+      toast("실행 실패 — 놓친 예약으로 남겨둡니다", true);
+  }
+
+  async function loadSchedPanel(panel, post_id) {
+    const rows = await fetch(`/api/posts/${post_id}/schedules`).then((r) =>
+      r.json()
+    );
+    const list = rows
+      .map((s) => {
+        const badge =
+          s.source === "agent"
+            ? '<span class="src agent">🤖 AGENT</span>'
+            : '<span class="src user">👤 USER</span>';
+        const next = s.enabled
+          ? s.next_fire
+            ? `다음: ${fmtDate(s.next_fire)}`
+            : ""
+          : "꺼짐";
+        return (
+          `<div class="srow ${s.enabled ? "" : "s-off"}" data-sid="${s.schedule_id}">` +
+          badge +
+          `<span class="slabel">${esc(s.label) || "(무제)"}</span>` +
+          `<span class="scron" title="${esc(s.cron)}">${esc(s.human)}</span>` +
+          `<span class="snext">${next}</span>` +
+          `<span class="sacts">` +
+          `<button class="s-tgl btn-ghost ${s.enabled ? "tgl-on" : ""}" type="button" title="켜기/끄기">${s.enabled ? "ON" : "OFF"}</button>` +
+          `<button class="s-run btn-ghost" type="button" title="지금 즉시 1회 실행">▶</button>` +
+          `<button class="s-del btn-danger" type="button" title="삭제">🗑</button>` +
+          `</span></div>` +
+          `<div class="sprompt">${esc(s.prompt)}</div>`
+        );
+      })
+      .join("");
+    panel.innerHTML =
+      `<div class="sched-head">⏰ 예약 <span class="sub">발화 시 인스턴스가 꺼져 있으면 자동 재시작 후 주입</span></div>` +
+      (list || '<div class="muted" style="font-size:12px">아직 예약이 없습니다.</div>') +
+      `<div class="sform">` +
+      `<input class="f-label" type="text" placeholder="이름 (예: 주간 보고)" maxlength="60">` +
+      `<span class="cronbox"><input class="f-cron" type="text" placeholder="0 9 * * 1" spellcheck="false">` +
+      `<span class="f-human muted"></span></span>` +
+      `<div class="presets">` +
+      SCHED_PRESETS.map(
+        (x) => `<button type="button" data-c="${x.c}" data-h="${x.h}">${x.h}</button>`
+      ).join("") +
+      `</div>` +
+      `<textarea class="f-prompt" rows="2" placeholder="LLM 에 주입할 요청 — 예: 지난 한 주의 작업을 정리해 주간 보고서를 작성해줘"></textarea>` +
+      `<div class="sfoot"><button class="f-add btn-primary" type="button">+ 예약 추가</button></div>` +
+      `</div>`;
+
+    panel.querySelectorAll(".srow").forEach((row) => {
+      const sid = row.dataset.sid;
+      row.querySelector(".s-del").addEventListener("click", async () => {
+        if (!confirm("이 예약을 삭제할까요?")) return;
+        await schedApi(`/api/schedules/${sid}`, { method: "DELETE" });
+      });
+      row.querySelector(".s-run").addEventListener("click", () => schedRunNow(sid));
+      row.querySelector(".s-tgl").addEventListener("click", async (e) => {
+        const on = e.target.classList.contains("tgl-on");
+        await schedApi(`/api/schedules/${sid}/toggle`, {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !on }),
+        });
+      });
+    });
+    const $cron = panel.querySelector(".f-cron");
+    const $human = panel.querySelector(".f-human");
+    panel.querySelector(".presets").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      $cron.value = b.dataset.c;
+      $human.textContent = "= " + b.dataset.h;
+    });
+    panel.querySelector(".f-add").addEventListener("click", async () => {
+      const body = {
+        label: panel.querySelector(".f-label").value.trim(),
+        cron: $cron.value.trim(),
+        prompt: panel.querySelector(".f-prompt").value.trim(),
+      };
+      if (!body.cron || !body.prompt) {
+        toast("cron 식과 요청 내용을 입력하세요", true);
+        return;
+      }
+      const r = await schedApi(`/api/posts/${post_id}/schedules`, {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) loadSchedPanel(panel, post_id); // SSE 교체 전에도 즉시 반영
+    });
   }
 
   async function open(post_id) {

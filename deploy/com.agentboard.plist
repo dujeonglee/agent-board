@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  agent-board launchd 서비스 (macOS) — ⏰ 예약(schedules)의 배포 전제.
+
+  board 내부 스케줄러는 board 프로세스가 떠 있는 동안만 발화하므로, 예약을
+  쓰려면 board 를 OS 가 상시 유지해야 한다 (docs/schedule-design.md §8).
+  launchd 의 KeepAlive 가 크래시/재부팅 후 자동 재기동을 보장한다.
+  (리눅스는 deploy/agent-board.service — systemd Restart=always.)
+
+  설치:
+    1. 아래 세 자리를 자기 환경으로 치환:
+       - __AGENT_BOARD_BIN__  : `which agent-board` 결과 (예: /Library/Frameworks/Python.framework/Versions/3.11/bin/agent-board)
+       - __DATA_DIR__         : board 데이터 디렉토리 (예: /Users/me/agent-board-data)
+       - __USER_HOME__        : 자기 홈 (로그 경로용)
+    2. cp deploy/com.agentboard.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.agentboard.plist
+       (해제: launchctl unload ...)
+
+  주의: 머신이 잠들면(sleep) launchd 도 board 도 멈춘다 — 그 동안 지난 예약은
+  깨어난 뒤 "놓친 예약" 질문으로 표시된다(자동실행 없음). 상시 발화가 필요하면
+  시스템 설정에서 잠자기 방지(또는 pmset) 를 함께 설정할 것.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agentboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__AGENT_BOARD_BIN__</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AGENT_BOARD_HOME</key>
+    <string>__DATA_DIR__</string>
+    <!-- 기본 loopback 바인드 (v1.25.0 보안 기본값) — LAN 노출은 caddy 게이트웨이 권장 -->
+    <key>AGENT_BOARD_HOST</key>
+    <string>127.0.0.1</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__USER_HOME__/Library/Logs/agent-board.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__USER_HOME__/Library/Logs/agent-board.launchd.log</string>
+</dict>
+</plist>

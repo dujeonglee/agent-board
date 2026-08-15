@@ -116,6 +116,20 @@ agent-board
      agent-cli 등록 포맷명만(자유입력 금지 — 오타는 agent-cli 부트 fail-fast 대상).
    - 자동 삭제는 없음 — 모든 파괴적 동작은 confirm 클릭으로. 쓰기는 원자적(temp+replace)이라
      agent-cli 인스턴스의 auto-detect 저장과 겹쳐도 안전.
+8. **⏰ 예약** (v1.26.0): 게시글 카드의 ⏰ 버튼 → 패널에서 **주기 실행**을 등록 —
+   cron 식(`0 9 * * 1` 등, 프리셋 버튼이 채워줌) + LLM 에 주입할 요청. 발화 시각이 되면
+   보드가 **인스턴스를 자동 기동(spawn-or-attach, `--resume`)한 뒤 요청을 주입**하고,
+   트랜스크립트에 `⏰ schedule` 닉네임으로 귀속된다(cli ≥ 8.9.0). 예: "매주 월 9시에
+   주간 보고 작성". 세부:
+   - **👤/🤖 배지**: 사용자 등록분 / 에이전트 등록분(대화 중 에이전트가 `schedule`
+     도구로 등록 — post 당 5개 캡) 구분. 둘 다 UI 에서 토글·▶즉시실행·🗑삭제 가능.
+   - **놓친 예약 = 질문**: 보드/머신이 꺼져 있어 발화를 지나치면 자동실행하지 않고
+     카드에 배너로 **[지금 실행] [건너뛰기]** 를 묻는다(여러 번 놓쳐도 질문 1건).
+   - **상시성**: 스케줄러는 보드가 떠 있어야 동작 — macOS 는
+     `deploy/com.agentboard.plist`(launchd, KeepAlive), 리눅스는
+     `deploy/agent-board.service`(systemd) 로 상시화 권장.
+   - 스케줄은 `board.db` 에 게시글 종속으로 저장되고 글 삭제 시 함께 삭제.
+     설계: `docs/schedule-design.md`.
 
 ## 아키텍처 · 게이트웨이
 `AGENT_BOARD_GATEWAY` 로 라우팅 데이터 평면을 고른다:
@@ -154,6 +168,7 @@ agent-board
 ## 설계 문서
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — 요구사항
 - [docs/DESIGN.md](docs/DESIGN.md) — 모듈/API/DB/라이프사이클 설계
+- [docs/schedule-design.md](docs/schedule-design.md) — ⏰ 게시글별 예약 실행 (v1.26.0)
 
 ## 개발
 ```bash

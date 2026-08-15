@@ -89,3 +89,116 @@ class TestStore:
         s2 = Store(path)
         assert s2.get(pid).topic == "persisted"
         s2.close()
+
+
+class TestSchedules:
+    """schedules 테이블 (docs/schedule-design.md §2) — CRUD·cascade·missed."""
+
+    def _post(self, store):
+        return store.create_post(topic="t")
+
+    def test_add_and_get(self, store):
+        p = self._post(store)
+        s = store.add_schedule(
+            post_id=p.post_id,
+            source="user",
+            cron="0 9 * * 1",
+            prompt="주간 보고를 작성해줘",
+            label="주간 보고",
+        )
+        got = store.get_schedule(s.schedule_id)
+        assert got.post_id == p.post_id
+        assert got.source == "user"
+        assert got.cron == "0 9 * * 1"
+        assert got.enabled is True
+        assert got.last_fired_at is None and got.missed_at is None
+
+    def test_list_by_post(self, store):
+        a, b = self._post(store), self._post(store)
+        store.add_schedule(
+            post_id=a.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.add_schedule(
+            post_id=b.post_id, source="agent", cron="* * * * *", prompt="y"
+        )
+        assert len(store.list_schedules(a.post_id)) == 1
+        assert len(store.list_schedules()) == 2
+
+    def test_agent_count_for_cap(self, store):
+        p = self._post(store)
+        store.add_schedule(
+            post_id=p.post_id, source="agent", cron="* * * * *", prompt="x"
+        )
+        store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="y"
+        )
+        assert store.count_agent_schedules(p.post_id) == 1  # user 분은 캡 미산입
+
+    def test_delete_schedule(self, store):
+        p = self._post(store)
+        s = store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.delete_schedule(s.schedule_id)
+        assert store.get_schedule(s.schedule_id) is None
+
+    def test_post_delete_cascades(self, store):
+        # 글 삭제 후 스케줄이 남으면 유령 발화 — 핵심 회귀
+        p = self._post(store)
+        store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.delete(p.post_id)
+        assert store.list_schedules(p.post_id) == []
+
+    def test_toggle(self, store):
+        p = self._post(store)
+        s = store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.set_schedule_enabled(s.schedule_id, False)
+        assert store.get_schedule(s.schedule_id).enabled is False
+
+    def test_mark_fired_clears_missed(self, store):
+        p = self._post(store)
+        s = store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.mark_missed(s.schedule_id, "2026-08-13T09:00:00")
+        assert store.get_schedule(s.schedule_id).missed_at is not None
+        store.mark_fired(s.schedule_id, "2026-08-13T10:00:00")
+        got = store.get_schedule(s.schedule_id)
+        assert got.last_fired_at == "2026-08-13T10:00:00"
+        assert got.missed_at is None  # run-now 가 missed 해소를 겸함
+
+    def test_mark_missed_collapses_to_latest(self, store):
+        # 여러 주기 놓쳐도 질문 1건 (최신으로 덮어씀)
+        p = self._post(store)
+        s = store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.mark_missed(s.schedule_id, "2026-08-06T09:00:00")
+        store.mark_missed(s.schedule_id, "2026-08-13T09:00:00")
+        assert store.get_schedule(s.schedule_id).missed_at == "2026-08-13T09:00:00"
+
+    def test_clear_missed(self, store):
+        p = self._post(store)
+        s = store.add_schedule(
+            post_id=p.post_id, source="user", cron="* * * * *", prompt="x"
+        )
+        store.mark_missed(s.schedule_id, "2026-08-13T09:00:00")
+        store.clear_missed(s.schedule_id)
+        assert store.get_schedule(s.schedule_id).missed_at is None
+
+    def test_old_db_gains_table_on_reopen(self, tmp_path):
+        # 구버전 DB(스케줄 테이블 없음) 재열기 → IF NOT EXISTS 로 추가, 기존 행 무손상
+        db = tmp_path / "board.db"
+        s1 = Store(db)
+        s1.create_post(topic="old")
+        s1._conn.execute("DROP TABLE schedules")
+        s1._conn.commit()
+        s1.close()
+        s2 = Store(db)
+        assert len(s2.list_posts()) == 1
+        assert s2.list_schedules() == []
+        s2.close()

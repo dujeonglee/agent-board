@@ -126,6 +126,9 @@ header h1 { margin: 0; font-size: 18px; }
   display: flex; align-items: center; gap: 12px;
   padding: 12px 14px; border-radius: 10px;
   background: var(--surface); border: 1px solid var(--border);
+  /* ⏰ missed 배너·예약 패널이 새 줄(full-width)로 흐르도록 — main+side 는
+     한 줄에 들어가므로 데스크톱 레이아웃은 변화 없음 */
+  flex-wrap: wrap;
 }
 .post-main { flex: 1; min-width: 0; }
 .post-topic { font-weight: 600; }
@@ -262,3 +265,83 @@ dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
 .clone-empty { color: var(--text-2); font-size: 12px; padding: 8px; }
 .clone-msg { font-size: 12px; color: var(--text-2); min-height: 16px; margin-top: 8px; }
 .clone-dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+/* ── ⏰ 예약 (docs/schedule-design.md §6 UI) ─────────────── */
+.post-side .sched { position: relative; padding: 6px 9px; }
+.post-side .sched .scnt {
+  position: absolute; top: -5px; right: -6px;
+  background: var(--accent); color: var(--on-accent);
+  border-radius: 8px; font-size: 9.5px; font-weight: 700;
+  padding: 1px 4.5px; line-height: 1.3;
+}
+.post-side .sched.sched-on {
+  border-color: var(--accent); color: var(--text); background: var(--accent-soft);
+}
+
+.sched-missed {
+  flex-basis: 100%;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; border-radius: 8px; font-size: 12.5px;
+  background: var(--warn-soft-bg); border: 1px solid var(--warn-soft-border);
+}
+.sched-missed .lbl { color: var(--warn); font-weight: 600; }
+.sched-missed .why { color: var(--text-2); }
+.sched-missed .acts { margin-left: auto; display: flex; gap: 6px; }
+
+.sched-panel {
+  flex-basis: 100%;
+  border-top: 1px solid var(--border); padding-top: 10px;
+}
+.sched-head { font-size: 12.5px; font-weight: 700; color: var(--text-2); margin-bottom: 8px; }
+.sched-head .sub { font-weight: 400; font-size: 11px; color: var(--muted); margin-left: 6px; }
+
+.srow {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 4px; background: var(--surface-2); font-size: 12.5px;
+}
+.srow.s-off { opacity: .55; }
+.srow .src {
+  flex: none; font-size: 10.5px; font-weight: 700;
+  padding: 2px 7px; border-radius: 6px; letter-spacing: .02em;
+}
+.srow .src.user { background: var(--accent-soft); color: var(--text); }
+.srow .src.agent { background: rgba(167,139,250,.22); color: var(--agent-work); }
+.srow .slabel { font-weight: 600; }
+.srow .scron { color: var(--text-2); }
+.srow .snext { color: var(--muted); font-size: 11px; margin-left: auto; }
+.srow .sacts { display: flex; gap: 4px; }
+.srow .sacts button { padding: 4px 7px; font-size: 11.5px; }
+.srow .s-tgl.tgl-on { color: var(--ok); border-color: rgba(63,185,80,.4); }
+.sprompt {
+  color: var(--muted); font-size: 11.5px; margin: 0 0 8px 2px;
+  padding-left: 10px; border-left: 2px solid var(--border-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.sform {
+  margin-top: 8px; padding: 10px 12px;
+  border: 1px dashed var(--border-2); border-radius: 8px;
+  display: grid; grid-template-columns: 170px 1fr; gap: 8px;
+}
+.sform input, .sform textarea {
+  background: var(--bg); border: 1px solid var(--border-2); border-radius: 7px;
+  color: var(--text); font-family: inherit; font-size: 12.5px; padding: 7px 10px;
+}
+.sform input:focus, .sform textarea:focus {
+  outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: transparent;
+}
+.sform .cronbox { display: flex; gap: 8px; align-items: center; }
+.sform .cronbox .f-cron {
+  font-family: ui-monospace, Menlo, monospace; width: 130px; flex: none;
+}
+.sform .f-human { font-size: 11.5px; }
+.sform .presets { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
+.sform .presets button {
+  font-size: 11px; padding: 3px 9px;
+  border-color: var(--ghost-border); border-radius: 999px;
+}
+.sform .presets button:hover { border-color: var(--accent); color: var(--text); }
+.sform .f-prompt { grid-column: 1 / -1; resize: vertical; }
+.sform .sfoot { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+@media (max-width: 720px) { .sform { grid-template-columns: 1fr; } }

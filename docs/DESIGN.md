@@ -37,8 +37,14 @@ agent_board/
   keepalive.py    force-active = 인스턴스에 SSE 연결 유지 (asyncio task)
   sessions.py     agent-cli 세션 파일 읽기 (last_query, status)  ← on-disk 통합 계약
   live_events.py  라이브 push — mtime 스캐너 + /api/events SSE (프론트 폴링 제거, §7 Phase 2)
+  cron.py         ⏰ cron 식 엔진 (parse/next_fire/prev_fire/describe — 의존 0)
+  scheduler.py    ⏰ 예약 발화 루프 (sleep-until-next + rearm; schedule-design.md §4)
+  sched_contract.py ⏰ 에이전트 파일 계약 (schedule-requests.jsonl → state.json; §7)
   static/         보드 UI (index.html · app.js · style.css)
 ```
+
+> ⏰ **게시글별 예약 실행**(v1.26.0)의 상세 설계는 **`docs/schedule-design.md`** —
+> DB(`schedules` 테이블)·API 6종·놓친 발화 질문 플로우·launchd/systemd 상시화 전제.
 
 ## 2. 데이터 저장 — SQLite (`<DATA_DIR>/board.db`, stdlib sqlite3, 무의존)
 

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_board._sqlite import sqlite3  # stdlib sqlite3, or pysqlite3 fallback
-from agent_board.models import Post
+from agent_board.models import Post, Schedule
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -30,6 +30,19 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_recent
   ON posts(last_opened_at DESC, created_at DESC);
+CREATE TABLE IF NOT EXISTS schedules (
+  schedule_id   TEXT PRIMARY KEY,
+  post_id       TEXT NOT NULL,
+  source        TEXT NOT NULL,
+  cron          TEXT NOT NULL,
+  prompt        TEXT NOT NULL,
+  label         TEXT NOT NULL DEFAULT '',
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL,
+  last_fired_at TEXT,
+  missed_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_post ON schedules(post_id);
 """
 
 # additive, nullable migrations for DBs created before a column existed —
@@ -39,6 +52,26 @@ CREATE INDEX IF NOT EXISTS idx_posts_recent
 _MIGRATIONS = {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"}
 
 _COLS = "post_id, topic, session_id, model_id, force_active, created_at, last_opened_at"
+
+_SCHED_COLS = (
+    "schedule_id, post_id, source, cron, prompt, label, enabled, "
+    "created_at, last_fired_at, missed_at"
+)
+
+
+def _row_to_schedule(row: sqlite3.Row) -> Schedule:
+    return Schedule(
+        schedule_id=row["schedule_id"],
+        post_id=row["post_id"],
+        source=row["source"],
+        cron=row["cron"],
+        prompt=row["prompt"],
+        label=row["label"],
+        enabled=bool(row["enabled"]),
+        created_at=row["created_at"],
+        last_fired_at=row["last_fired_at"],
+        missed_at=row["missed_at"],
+    )
 
 
 def _now() -> str:
@@ -128,6 +161,8 @@ class Store:
         self._conn.commit()
 
     def delete(self, post_id: str) -> None:
+        # cascade: a deleted post's schedules must never fire again
+        self._conn.execute("DELETE FROM schedules WHERE post_id = ?", (post_id,))
         self._conn.execute("DELETE FROM posts WHERE post_id = ?", (post_id,))
         self._conn.commit()
 
@@ -149,3 +184,103 @@ class Store:
             f"SELECT {_COLS} FROM posts WHERE force_active = 1"
         ).fetchall()
         return [_row_to_post(r) for r in rows]
+
+    # ── schedules (docs/schedule-design.md §2) ──────────────
+    def add_schedule(
+        self,
+        *,
+        post_id: str,
+        source: str,
+        cron: str,
+        prompt: str,
+        label: str = "",
+    ) -> Schedule:
+        sched = Schedule(
+            schedule_id=uuid.uuid4().hex,
+            post_id=post_id,
+            source=source,
+            cron=cron,
+            prompt=prompt,
+            label=label,
+            created_at=_now(),
+        )
+        self._conn.execute(
+            "INSERT INTO schedules (schedule_id, post_id, source, cron, prompt, "
+            "label, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            (
+                sched.schedule_id,
+                sched.post_id,
+                sched.source,
+                sched.cron,
+                sched.prompt,
+                sched.label,
+                sched.created_at,
+            ),
+        )
+        self._conn.commit()
+        return sched
+
+    def get_schedule(self, schedule_id: str) -> Schedule | None:
+        row = self._conn.execute(
+            f"SELECT {_SCHED_COLS} FROM schedules WHERE schedule_id = ?",
+            (schedule_id,),
+        ).fetchone()
+        return _row_to_schedule(row) if row else None
+
+    def list_schedules(self, post_id: str | None = None) -> list[Schedule]:
+        if post_id is None:
+            rows = self._conn.execute(
+                f"SELECT {_SCHED_COLS} FROM schedules ORDER BY created_at"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                f"SELECT {_SCHED_COLS} FROM schedules WHERE post_id = ? "
+                "ORDER BY created_at",
+                (post_id,),
+            ).fetchall()
+        return [_row_to_schedule(r) for r in rows]
+
+    def count_agent_schedules(self, post_id: str) -> int:
+        """에이전트 등록분 캡 판정용 (source='agent' 만)."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM schedules WHERE post_id = ? AND source = 'agent'",
+            (post_id,),
+        ).fetchone()
+        return int(row["n"])
+
+    def delete_schedule(self, schedule_id: str) -> None:
+        self._conn.execute(
+            "DELETE FROM schedules WHERE schedule_id = ?", (schedule_id,)
+        )
+        self._conn.commit()
+
+    def set_schedule_enabled(self, schedule_id: str, enabled: bool) -> None:
+        self._conn.execute(
+            "UPDATE schedules SET enabled = ? WHERE schedule_id = ?",
+            (1 if enabled else 0, schedule_id),
+        )
+        self._conn.commit()
+
+    def mark_fired(self, schedule_id: str, fired_at: str) -> None:
+        """정상 발화 기록 — missed 상태도 함께 해소 (run-now 겸용)."""
+        self._conn.execute(
+            "UPDATE schedules SET last_fired_at = ?, missed_at = NULL "
+            "WHERE schedule_id = ?",
+            (fired_at, schedule_id),
+        )
+        self._conn.commit()
+
+    def mark_missed(self, schedule_id: str, missed_at: str) -> None:
+        """놓친 발화 스탬프 — 여러 주기 놓쳐도 최신 1건으로 덮어씀(질문 접기)."""
+        self._conn.execute(
+            "UPDATE schedules SET missed_at = ? WHERE schedule_id = ?",
+            (missed_at, schedule_id),
+        )
+        self._conn.commit()
+
+    def clear_missed(self, schedule_id: str) -> None:
+        self._conn.execute(
+            "UPDATE schedules SET missed_at = NULL WHERE schedule_id = ?",
+            (schedule_id,),
+        )
+        self._conn.commit()

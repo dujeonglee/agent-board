@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.26.0] - 2026-08-13
+
+### Added
+
+- **⏰ 게시글별 예약 실행 (schedules)** — `docs/schedule-design.md`. 게시글마다
+  cron 식 주기로 LLM 요청을 자동 주입한다("매주 월 9시 주간 보고" 류).
+  - **엔진**: `cron.py`(5필드 cron 파서/next·prev_fire/한국어 라벨 — 의존 0) +
+    `scheduler.py`(**sleep-until-next + rearm** — 폴링 아님; 변이 시 즉시 재무장,
+    300s 상한 = 시스템 sleep/시계점프 안전망; `last_fired_at` exactly-once 가드).
+  - **발화 = spawn-then-inject**: 인스턴스가 꺼져 있으면 orchestrator.open
+    (spawn-or-attach, `--resume`)으로 되살린 뒤 `/api/input` 에 주입 —
+    `⏰ schedule` 닉네임 귀속(cli ≥ 8.9.0; 구버전은 '?' 로 표시). 주입은 큐잉이라
+    busy 인스턴스에도 안전(턴 경계 주입).
+  - **놓친 발화 = 자동실행 없이 질문** (사용자 결정): 보드/머신 다운으로 지나친
+    발화는 `missed` 로 스탬프되어 카드 배너에서 **[지금 실행] [건너뛰기]** 를
+    묻는다. 여러 주기 놓쳐도 질문 1건. fire 실패(스폰 실패 등)도 missed 로 강등.
+  - **DB**: `schedules` 테이블(post 종속, `IF NOT EXISTS` additive — 구 DB 무손상).
+    글 삭제 시 스케줄 cascade 삭제.
+  - **API 6종**: GET/POST `/api/posts/{id}/schedules`, DELETE
+    `/api/schedules/{sid}`, `/toggle`, `/run-now`, `/dismiss-missed`. 뮤테이션은
+    scheduler rearm + SSE post_update push(`schedules` 요약이 post 행에 동봉).
+  - **UI**: 카드 ⏰ 버튼(+개수 배지) → 패널(👤/🤖 소스 배지·cron 라벨·다음 발화·
+    ON/OFF·▶즉시실행·🗑) + 추가 폼(cron 프리셋 도우미) + 놓친 예약 warn 배너.
+  - **에이전트 파일 계약** (`sched_contract.py`): 에이전트가
+    `<ws>/.agent-cli/schedule-requests.jsonl` 에 add/delete/list 를 append 하면
+    live 스캐너(기존 1s 루프에 stat 1개 추가 — 새 폴링 0)가 반영하고
+    `schedule-state.json` 으로 ack. **에이전트 등록분 post 당 5개 캡**, 자기 post
+    만 접근(파일 위치로 자연 격리), 오프셋 idempotent(재처리 없음), 기동 시
+    catch-up. spawn env `AGENT_CLI_SCHEDULER=1` 전달(일반화 신호 — cli ≥ 8.9.0 이
+    schedule 도구 등록, 구버전 무시).
+  - **상시성 전제**: `deploy/com.agentboard.plist`(macOS launchd, KeepAlive) 신규 —
+    리눅스는 기존 systemd 유닛. 보드가 꺼진 동안의 발화는 missed 질문으로 수습.
+  - 테스트 84 신규(cron 41·store 10·scheduler 12·contract 11·API 11·scanner 3 등) +
+    뮤테이션(exactly-once 가드·missed 자동실행 금지 — 제거 시 해당 테스트 실패 확인).
+
 ## [1.25.0] - 2026-08-09
 
 ### Security

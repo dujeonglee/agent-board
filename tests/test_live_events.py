@@ -66,7 +66,7 @@ class TestSignature:
     def test_no_session_id_is_stable_sentinel(self, tmp_path):
         _cfg, store, live = _live(tmp_path)
         post = store.create_post(topic="t")  # never opened → no session_id
-        assert live._sig(post) == (None, None, False)
+        assert live._sig(post) == (None, None, False, None)
 
     def test_reflects_pid_liveness(self, tmp_path, monkeypatch):
         cfg, store, live = _live(tmp_path)
@@ -81,7 +81,7 @@ class TestSignature:
         post = store.create_post(topic="t")
         store.set_session_id(post.post_id, "S1")  # session_id but no files on disk
         monkeypatch.setattr(instances, "pid_alive", lambda pid: True)
-        assert live._sig(store.get(post.post_id)) == (None, None, False)
+        assert live._sig(store.get(post.post_id)) == (None, None, False, None)
 
 
 class TestScan:
@@ -247,3 +247,84 @@ class TestRunLoop:
             assert msg["post"]["post_id"] == post.post_id
         finally:
             task.cancel()
+
+
+class TestSchedRequestsEdge:
+    """⏰ 파일 계약 감지 (docs/schedule-design.md §7) — 요청파일 mtime edge 가
+    on_sched_requests 를 부르고, 그 변경이 이번 post_update 에 실린다."""
+
+    def _live_with_contract(self, tmp_path):
+        import json as _json
+
+        from agent_board import sched_contract as sc
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+        calls = []
+
+        def on_req(post):
+            calls.append(post.post_id)
+            sc.apply_requests(store, post.post_id, cfg.workspace_for(post.post_id))
+
+        live = LiveEvents(
+            cfg, store, lambda p: {"post_id": p.post_id}, on_sched_requests=on_req
+        )
+        post = store.create_post(topic="t")
+        ws = cfg.workspace_for(post.post_id)
+        (ws / ".agent-cli").mkdir(parents=True)
+        return cfg, store, live, post, ws, calls, _json, sc
+
+    def test_request_file_edge_applies_contract(self, tmp_path):
+        _cfg, store, live, post, ws, calls, _json, sc = self._live_with_contract(
+            tmp_path
+        )
+        live._prime()  # 파일 없음 → 호출 없음
+        assert calls == []
+        req = sc.requests_path(ws)
+        req.write_text(
+            _json.dumps(
+                {"op": "add", "cron": "0 9 * * 1", "prompt": "보고", "req_id": "r1"}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        events = live._scan()
+        assert calls == [post.post_id]  # edge 가 계약을 발화
+        assert len(store.list_schedules(post.post_id)) == 1  # 반영됨
+        assert any(e["type"] == "post_update" for e in events)  # 행 push
+
+    def test_prime_catches_up_pending_requests(self, tmp_path):
+        # board 가 꺼진 동안 쌓인 요청 — 기동 시(prime) 1회 반영
+        _cfg, store, live, post, ws, calls, _json, sc = self._live_with_contract(
+            tmp_path
+        )
+        sc.requests_path(ws).write_text(
+            _json.dumps(
+                {"op": "add", "cron": "* * * * *", "prompt": "x", "req_id": "r1"}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        live._prime()
+        assert calls == [post.post_id]
+        assert len(store.list_schedules(post.post_id)) == 1
+
+    def test_callback_error_does_not_kill_scan(self, tmp_path):
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+
+        def boom(post):
+            raise RuntimeError("boom")
+
+        live = LiveEvents(
+            cfg, store, lambda p: {"post_id": p.post_id}, on_sched_requests=boom
+        )
+        post = store.create_post(topic="t")
+        ws = cfg.workspace_for(post.post_id)
+        (ws / ".agent-cli").mkdir(parents=True)
+        live._prime()
+        (ws / ".agent-cli" / "schedule-requests.jsonl").write_text(
+            "{}\n", encoding="utf-8"
+        )
+        events = live._scan()  # no raise
+        assert any(e["type"] == "post_update" for e in events)
