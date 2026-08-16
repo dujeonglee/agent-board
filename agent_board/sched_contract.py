@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agent_board import cron
+from agent_board.models import DEFAULT_SCHEDULE_NICKNAME
 
 REQUESTS_REL = Path(".agent-cli") / "schedule-requests.jsonl"
 STATE_REL = Path(".agent-cli") / "schedule-state.json"
@@ -76,6 +77,8 @@ def _schedule_state_view(s) -> dict:
         "cron": s.cron,
         "human": cron.describe(s.cron),
         "label": s.label,
+        "nickname": s.nickname,
+        "effective_nickname": s.nickname or DEFAULT_SCHEDULE_NICKNAME,
         "prompt": s.prompt,
         "enabled": s.enabled,
         "last_fired_at": s.last_fired_at,
@@ -111,6 +114,7 @@ def _apply_one(store, post_id: str, req: dict, *, agent_cap: int) -> dict:
             cron=expr,
             prompt=prompt,
             label=(req.get("label") or "").strip(),
+            nickname=(req.get("nickname") or "").strip(),
         )
         return {"ok": True, "schedule_id": s.schedule_id}
     if op == "delete":

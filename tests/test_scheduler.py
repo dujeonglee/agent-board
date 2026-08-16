@@ -65,8 +65,8 @@ def _mk(store, cron_expr, *, created: datetime, enabled=True, source="user"):
 def _sched(store, clock, *, orch=None, inject=None, notes=None):
     injected: list[tuple] = []
 
-    def _inject(post, prompt):
-        injected.append((post.post_id, prompt))
+    def _inject(post, prompt, nickname):
+        injected.append((post.post_id, prompt, nickname))
 
     sch = Scheduler(
         store,
@@ -89,9 +89,31 @@ class TestSettle:
         sch, injected = _sched(store, clock)
         clock.t = datetime(2026, 8, 17, 9, 0, 30)  # 발화 30초 뒤 기상
         await sch.settle()
-        assert injected == [(s.post_id, "do it")]
+        # 닉네임 미지정 → 기본값으로 귀속
+        assert injected == [(s.post_id, "do it", "⏰ Scheduler")]
         got = store.get_schedule(s.schedule_id)
         assert got.last_fired_at is not None and got.missed_at is None
+
+    @pytest.mark.asyncio
+    async def test_custom_nickname_used(self, store):
+        clock = Clock(BASE)
+        p = store.create_post(topic="t")
+        s = store.add_schedule(
+            post_id=p.post_id,
+            source="user",
+            cron="0 9 * * 1",
+            prompt="do it",
+            nickname="주간봇",
+        )
+        store._conn.execute(
+            "UPDATE schedules SET created_at = ? WHERE schedule_id = ?",
+            (BASE.isoformat(), s.schedule_id),
+        )
+        store._conn.commit()
+        sch, injected = _sched(store, clock)
+        clock.t = datetime(2026, 8, 17, 9, 0, 30)
+        await sch.settle()
+        assert injected == [(p.post_id, "do it", "주간봇")]
 
     @pytest.mark.asyncio
     async def test_exactly_once(self, store):
@@ -195,7 +217,7 @@ class TestRunLoop:
         clock = Clock(datetime(2026, 8, 17, 9, 0, 30))
         injected: list[tuple] = []
 
-        def _inject(post, prompt):
+        def _inject(post, prompt, nickname):
             injected.append((post.post_id, prompt))
 
         sch = Scheduler(
@@ -220,7 +242,11 @@ class TestRunLoop:
     async def test_settle_crash_does_not_kill_loop(self, store):
         clock = Clock(BASE)
         sch = Scheduler(
-            store, FakeOrch(), inject_fn=lambda p, x: None, clock=clock, max_sleep=0.02
+            store,
+            FakeOrch(),
+            inject_fn=lambda p, x, n: None,
+            clock=clock,
+            max_sleep=0.02,
         )
         calls = {"n": 0}
 

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   cron          TEXT NOT NULL,
   prompt        TEXT NOT NULL,
   label         TEXT NOT NULL DEFAULT '',
+  nickname      TEXT NOT NULL DEFAULT '',
   enabled       INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL,
   last_fired_at TEXT,
@@ -45,16 +46,22 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_post ON schedules(post_id);
 """
 
-# additive, nullable migrations for DBs created before a column existed —
-# old rows get NULL (no behaviour change), so resuming an old DB never breaks.
-# (The dropped ``directive`` column is simply left unqueried on old DBs — no
-# migration needed, so an old DB still resumes cleanly.)
-_MIGRATIONS = {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"}
+# additive migrations for DBs created before a column existed — old rows get the
+# default (no behaviour change), so resuming an old DB never breaks. Keyed by
+# table, then column → the ALTER that adds it. (The dropped ``directive`` column
+# is simply left unqueried on old DBs — no migration needed.)
+_MIGRATIONS = {
+    "posts": {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"},
+    "schedules": {
+        # 1.26.0 DB (nickname 이전) 재열기 → 기본값 '' 로 컬럼 추가
+        "nickname": "ALTER TABLE schedules ADD COLUMN nickname TEXT NOT NULL DEFAULT ''",
+    },
+}
 
 _COLS = "post_id, topic, session_id, model_id, force_active, created_at, last_opened_at"
 
 _SCHED_COLS = (
-    "schedule_id, post_id, source, cron, prompt, label, enabled, "
+    "schedule_id, post_id, source, cron, prompt, label, nickname, enabled, "
     "created_at, last_fired_at, missed_at"
 )
 
@@ -67,6 +74,7 @@ def _row_to_schedule(row: sqlite3.Row) -> Schedule:
         cron=row["cron"],
         prompt=row["prompt"],
         label=row["label"],
+        nickname=row["nickname"],
         enabled=bool(row["enabled"]),
         created_at=row["created_at"],
         last_fired_at=row["last_fired_at"],
@@ -102,10 +110,13 @@ class Store:
         self._conn.commit()
 
     def _migrate(self) -> None:
-        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(posts)")}
-        for col, ddl in _MIGRATIONS.items():
-            if col not in cols:
-                self._conn.execute(ddl)
+        for table, cols_ddl in _MIGRATIONS.items():
+            existing = {
+                r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            for col, ddl in cols_ddl.items():
+                if col not in existing:
+                    self._conn.execute(ddl)
 
     def close(self) -> None:
         self._conn.close()
@@ -194,6 +205,7 @@ class Store:
         cron: str,
         prompt: str,
         label: str = "",
+        nickname: str = "",
     ) -> Schedule:
         sched = Schedule(
             schedule_id=uuid.uuid4().hex,
@@ -202,11 +214,12 @@ class Store:
             cron=cron,
             prompt=prompt,
             label=label,
+            nickname=nickname,
             created_at=_now(),
         )
         self._conn.execute(
             "INSERT INTO schedules (schedule_id, post_id, source, cron, prompt, "
-            "label, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            "label, nickname, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
             (
                 sched.schedule_id,
                 sched.post_id,
@@ -214,6 +227,7 @@ class Store:
                 sched.cron,
                 sched.prompt,
                 sched.label,
+                sched.nickname,
                 sched.created_at,
             ),
         )

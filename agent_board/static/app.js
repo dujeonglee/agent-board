@@ -353,11 +353,13 @@
             ? `다음: ${fmtDate(s.next_fire)}`
             : ""
           : "꺼짐";
+        const who = s.effective_nickname || "⏰ Scheduler";
         return (
           `<div class="srow ${s.enabled ? "" : "s-off"}" data-sid="${s.schedule_id}">` +
           badge +
           `<span class="slabel">${esc(s.label) || "(무제)"}</span>` +
           `<span class="scron" title="${esc(s.cron)}">${esc(s.human)}</span>` +
+          `<span class="swho" title="주입 메시지 표시 이름">as ${esc(who)}</span>` +
           `<span class="snext">${next}</span>` +
           `<span class="sacts">` +
           `<button class="s-tgl btn-ghost ${s.enabled ? "tgl-on" : ""}" type="button" title="켜기/끄기">${s.enabled ? "ON" : "OFF"}</button>` +
@@ -375,6 +377,7 @@
       `<input class="f-label" type="text" placeholder="이름 (예: 주간 보고)" maxlength="60">` +
       `<span class="cronbox"><input class="f-cron" type="text" placeholder="0 9 * * 1" spellcheck="false">` +
       `<span class="f-human muted"></span></span>` +
+      `<input class="f-nick" type="text" placeholder="표시 이름 (선택, 기본 ⏰ Scheduler)" maxlength="24">` +
       `<div class="presets">` +
       SCHED_PRESETS.map(
         (x) => `<button type="button" data-c="${x.c}" data-h="${x.h}">${x.h}</button>`
@@ -411,6 +414,7 @@
       const body = {
         label: panel.querySelector(".f-label").value.trim(),
         cron: $cron.value.trim(),
+        nickname: panel.querySelector(".f-nick").value.trim(),
         prompt: panel.querySelector(".f-prompt").value.trim(),
       };
       if (!body.cron || !body.prompt) {

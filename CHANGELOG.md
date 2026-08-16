@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.27.0] - 2026-08-16
+
+### Added
+
+- **예약 실행 표시 이름(nickname) 지정** — 스케줄 발화 시 주입되는 프롬프트가
+  트랜스크립트·팀뷰에 표시될 이름을 예약별로 정할 수 있다. 사용자(추가 폼) 또는
+  에이전트(파일 계약 `nickname` 필드)가 지정하며, 비우면 기본값 **`⏰ Scheduler`**.
+  - **DB**: `schedules.nickname TEXT NOT NULL DEFAULT ''` 컬럼 추가. 마이그레이션은
+    `PRAGMA table_info` 기반 additive `ALTER TABLE ADD COLUMN` 으로 재구성 —
+    1.26.0 이전 DB 재열기 시 기본값 `''` 로 무손상 추가.
+  - **저장 원본(`nickname`, `''` 허용) vs 표시값(`effective_nickname`) 분리**:
+    API 목록·상태 뷰가 둘 다 노출해, 비어 있으면 `⏰ Scheduler` 로 귀속.
+  - **발화**: `scheduler.fire` 가 `sched.nickname or "⏰ Scheduler"` 를
+    `/api/input` 의 `nickname` 으로 주입.
+  - **API/UI**: `POST /api/posts/{id}/schedules` 가 `nickname?` 수용; 목록 행에
+    `as <표시이름>` 표기 + 추가 폼에 표시 이름 입력(선택) 추가.
+  - 검증: board 유닛 추가(API add with/without nickname·contract add·상태 뷰
+    effective_nickname·scheduler 기본값/커스텀 주입). 전체 364 통과.
+
 ## [1.26.0] - 2026-08-13
 
 ### Added

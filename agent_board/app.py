@@ -37,9 +37,10 @@ from agent_board.keepalive import (
     make_sse_connect,
 )
 from agent_board.live_events import LiveEvents
+from agent_board.models import DEFAULT_SCHEDULE_NICKNAME
 from agent_board.orchestrator import Orchestrator, RealBackend
 from agent_board.router import BoardProxyRouter, CaddyRouter, Router
-from agent_board.scheduler import SCHEDULE_NICKNAME, Scheduler
+from agent_board.scheduler import Scheduler
 from agent_board.store import Store
 
 
@@ -290,6 +291,9 @@ def _schedule_view(s) -> dict:
         "human": human,
         "prompt": s.prompt,
         "label": s.label,
+        "nickname": s.nickname,
+        # 발화 시 실제 쓰일 이름(미지정이면 기본값) — UI 표시·확인용
+        "effective_nickname": s.nickname or DEFAULT_SCHEDULE_NICKNAME,
         "enabled": s.enabled,
         "created_at": s.created_at,
         "last_fired_at": s.last_fired_at,
@@ -370,14 +374,14 @@ def create_app(
 
     # ⏰ 스케줄러 (docs/schedule-design.md) — sleep-until-next + rearm. 발화 =
     # spawn-or-attach(orchestrator.open) 후 인스턴스 /api/input 에 주입.
-    def _sched_inject(post, prompt: str) -> None:
+    def _sched_inject(post, prompt: str, nickname: str) -> None:
         if post is None or not post.session_id:
             raise RuntimeError("no session to inject into")
         instances.inject_prompt(
             config.workspace_for(post.post_id),
             post.session_id,
             prompt,
-            nickname=SCHEDULE_NICKNAME,
+            nickname=nickname,
         )
 
     def _sched_changed(post_id: str) -> None:
@@ -725,6 +729,7 @@ def create_app(
             cron=expr,
             prompt=prompt,
             label=(body.get("label") or "").strip(),
+            nickname=(body.get("nickname") or "").strip(),
         )
         scheduler.rearm()
         _sched_changed(post_id)

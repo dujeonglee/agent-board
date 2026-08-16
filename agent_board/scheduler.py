@@ -23,15 +23,13 @@ import logging
 from datetime import datetime
 
 from agent_board import cron
-from agent_board.models import Schedule
+from agent_board.models import DEFAULT_SCHEDULE_NICKNAME, Schedule
 
 log = logging.getLogger("agent_board.scheduler")
 
 MISS_THRESHOLD_S = 120.0  # 이보다 오래 지난 발화 = 놓침 → 질문 (자동실행 금지)
 MAX_SLEEP_S = 300.0  # 시스템 sleep/시계점프 안전망 (≤5분 내 재평가)
 AGENT_CAP_PER_POST = 5  # 에이전트 등록분 캡 (파일 계약에서 검사)
-
-SCHEDULE_NICKNAME = "⏰ schedule"  # 주입 귀속 (cli ≥8.9.0; 구 cli 는 '?' 로 표시)
 
 
 def _parse_local(ts: str | None) -> datetime | None:
@@ -49,10 +47,11 @@ def _parse_local(ts: str | None) -> datetime | None:
 
 
 class Scheduler:
-    """Owns the rearm event + the sleep loop. ``inject_fn(post, prompt)`` is a
-    SYNC callable (run in an executor) that delivers the prompt to the post's
-    running instance; ``on_change(post_id)`` notifies the SSE layer so the UI
-    updates without a refresh. Both injected for tests."""
+    """Owns the rearm event + the sleep loop. ``inject_fn(post, prompt,
+    nickname)`` is a SYNC callable (run in an executor) that delivers the prompt
+    to the post's running instance under ``nickname``; ``on_change(post_id)``
+    notifies the SSE layer so the UI updates without a refresh. Both injected
+    for tests."""
 
     def __init__(
         self,
@@ -146,8 +145,9 @@ class Scheduler:
         try:
             await self._orch.open(sched.post_id)  # spawn-or-attach
             post = self._store.get(sched.post_id)  # re-read: first open set sid
+            nickname = sched.nickname or DEFAULT_SCHEDULE_NICKNAME
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._inject, post, sched.prompt)
+            await loop.run_in_executor(None, self._inject, post, sched.prompt, nickname)
         except Exception:
             log.exception(
                 "schedule fire failed (post=%s label=%r) — demoting to missed",

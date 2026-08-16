@@ -12,6 +12,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# 예약 발화 시 주입 메시지의 귀속 닉네임 기본값 (스케줄에 미지정 시). 발화
+# 시점에 `sched.nickname or DEFAULT_SCHEDULE_NICKNAME` 로 해석하므로 기본을
+# 바꾸면 빈 항목에 소급 적용된다. ⏰ 접두 = 트랜스크립트/팀뷰에서 사람 닉네임과
+# 시각적으로 구분.
+DEFAULT_SCHEDULE_NICKNAME = "⏰ Scheduler"
+
 
 @dataclass
 class Post:
@@ -40,6 +46,9 @@ class Schedule:
     cron: str
     prompt: str
     label: str = ""
+    # 주입 메시지 귀속 닉네임 — 사용자/에이전트가 지정 가능, 빈 값이면 발화 시
+    # DEFAULT_SCHEDULE_NICKNAME 으로 해석.
+    nickname: str = ""
     enabled: bool = True
     created_at: str = ""
     last_fired_at: str | None = None

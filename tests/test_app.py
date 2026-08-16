@@ -860,7 +860,9 @@ class TestSchedulesApi:
 
         orch = _Orch()
         sched = Scheduler(
-            store, orch, inject_fn=lambda post, prompt: injected.append(prompt)
+            store,
+            orch,
+            inject_fn=lambda post, prompt, nickname: injected.append(prompt),
         )
         app = create_app(
             cfg,
@@ -873,6 +875,25 @@ class TestSchedulesApi:
 
     def _post(self, c):
         return c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+
+    def test_add_with_nickname(self, tmp_path):
+        _store, _sched, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        v = c.post(
+            f"/api/posts/{pid}/schedules",
+            json={"cron": "0 9 * * 1", "prompt": "x", "nickname": "주간봇"},
+        ).json()
+        assert v["nickname"] == "주간봇"
+        assert v["effective_nickname"] == "주간봇"
+
+    def test_add_without_nickname_shows_default_effective(self, tmp_path):
+        _store, _sched, _, c = self._client_with_sched(tmp_path)
+        pid = self._post(c)
+        v = c.post(
+            f"/api/posts/{pid}/schedules", json={"cron": "0 9 * * 1", "prompt": "x"}
+        ).json()
+        assert v["nickname"] == ""
+        assert v["effective_nickname"] == "⏰ Scheduler"
 
     def test_add_and_list(self, tmp_path):
         _store, _sched, _, c = self._client_with_sched(tmp_path)

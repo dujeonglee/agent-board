@@ -37,6 +37,7 @@ CREATE TABLE schedules (
   cron          TEXT NOT NULL,             -- '분 시 일 월 요일' (5필드)
   prompt        TEXT NOT NULL,             -- 주입할 사용자 요청 텍스트
   label         TEXT NOT NULL DEFAULT '',  -- UI 표시용 짧은 이름 (예 "주간 보고")
+  nickname      TEXT NOT NULL DEFAULT '',  -- 주입 표시 이름 ('' 이면 기본값 '⏰ Scheduler')
   enabled       INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL,
   last_fired_at TEXT,                      -- 마지막 정상 발화 (exactly-once 가드)
@@ -45,7 +46,8 @@ CREATE TABLE schedules (
 CREATE INDEX idx_schedules_post ON schedules(post_id);
 ```
 
-- **user_version 2 마이그레이션**: 기동 시 `PRAGMA user_version` 확인 → 1 이면 CREATE TABLE + version 2. 기존 DB 무손상.
+- **additive 마이그레이션**: 기동 시 `PRAGMA table_info(schedules)` 로 컬럼 존재를 확인해 없는 것만 `ALTER TABLE ADD COLUMN` (예: `nickname` 은 1.26.0 이전 DB 재열기 시 기본값 `''` 로 추가). 기존 DB 무손상.
+- **`nickname`**: 발화 시 프롬프트가 트랜스크립트/팀뷰에 표시될 이름. 사용자/에이전트가 예약 생성 시 인자로 지정 가능하며, 비우면 기본값 **`⏰ Scheduler`** (`effective_nickname`). 저장은 원본(`''` 허용)·표시는 effective 로 분리.
 - post 삭제 시 그 post 의 schedules 도 삭제 (delete_post 경로에 추가).
 - `missed_at`: 스캐너가 "이전 발화 시각 < 지금인데 last_fired_at 이 그 이전" 을 감지하면 스탬프. 여러 주기 놓쳐도 **덮어쓰기 1건**(질문 접기). 사용자가 실행/건너뛰기를 고르면 NULL 로 클리어.
 
@@ -81,7 +83,7 @@ asyncio 백그라운드 태스크(app lifespan start/stop). **폴링이 아니�
 fire(s):
   1. url = await orchestrator.open(s.post_id)      # spawn-or-attach (--resume) — 요구 5
   2. 인스턴스 /api/input 에 POST (loopback, trust-local):
-       {kind:"chat", content: s.prompt}            # 닉네임 "⏰schedule" 로 귀속
+       {kind:"chat", content: s.prompt, nickname: s.nickname or "⏰ Scheduler"}
   3. last_fired_at = now, missed_at = NULL
   4. 실패(스폰 실패·주입 4xx) 시: missed_at 스탬프(사용자 질문으로 강등) + 로그
 ```
@@ -89,7 +91,7 @@ fire(s):
 - **rearm_event.set() 호출원**: ① API 변이(add/delete/toggle/run-now/dismiss) ② **live_events 스캐너가 에이전트 요청파일 변경을 감지·반영했을 때**(§7). 파일 계약은 이벤트로 도착하지 않으므로 이미 1s 로 도는 기존 스캐너에 stat 1개만 추가 — 새 폴링 루프 0개. (부수효과: 에이전트 `schedule` 도구 ack 이 1~2s 내 확정 — 도구가 state 파일을 짧게 폴링해 결과 반환 가능.)
 - **300s 상한이 필요한 이유**: `asyncio.sleep`/`wait_for` 타이머는 시스템 sleep 동안 정지 — Mac 이 자고 깨면 늦게 발화. 상한 덕에 깨어난 뒤 ≤5분 내 재평가되고, 자는 동안 지난 발화는 MISS_THRESHOLD 초과 → missed 질문으로 자연 수습. 5분당 1회 기상은 사실상 0 비용.
 - **exactly-once**: `last_fired_at` 비교가 유일 가드 — 단일 태스크라 락 불필요; fire 는 순차. (뮤테이션 테스트 대상)
-- **주입 귀속**: `/api/input` 의 `nickname` 경로를 이용해 트랜스크립트·팀뷰에 **⏰schedule** 로 표시(누가 시켰는지 명확).
+- **주입 귀속**: `/api/input` 의 `nickname` 경로를 이용해 트랜스크립트·팀뷰에 예약의 표시 이름으로 표시(누가 시켰는지 명확). 스케줄별 `nickname` 지정 가능, 비우면 기본값 **`⏰ Scheduler`**.
 - busy 인스턴스: `/api/input` chat 은 큐잉되므로(턴 경계 주입) 그대로 안전 — 게이트 불필요.
 
 ## 5. 놓친 실행 — 질문 플로우 (자동실행 없음)
@@ -103,8 +105,8 @@ fire(s):
 
 | 메서드 | 경로 | 동작 |
 |---|---|---|
-| GET | `/api/posts/{id}/schedules` | 그 글의 스케줄 목록 (source·label·cron·describe·next_fire·missed 포함) |
-| POST | `/api/posts/{id}/schedules` | `{cron, prompt, label?}` → source='user' 로 추가 (cron 검증, 400) |
+| GET | `/api/posts/{id}/schedules` | 그 글의 스케줄 목록 (source·label·cron·describe·next_fire·missed·nickname·effective_nickname 포함) |
+| POST | `/api/posts/{id}/schedules` | `{cron, prompt, label?, nickname?}` → source='user' 로 추가 (cron 검증, 400) |
 | DELETE | `/api/schedules/{sid}` | 삭제 (user/agent 소스 무관 — 사용자는 뭐든 삭제 가능) |
 | POST | `/api/schedules/{sid}/toggle` | enabled 토글 |
 | POST | `/api/schedules/{sid}/run-now` | 즉시 발화 (missed 클리어 겸용) |
@@ -112,7 +114,7 @@ fire(s):
 
 UI (post 카드 확장 또는 ⏰ 드로어):
 - 목록 행: `👤/🤖 배지 · label · "매주 월 09:00" · 다음 발화 시각 · [토글][지금 실행][삭제]`
-- 추가 폼: label / cron 입력(+ 대표 프리셋 버튼이 cron 식을 채워줌 — 문법은 cron 단일) / prompt textarea
+- 추가 폼: label / cron 입력(+ 대표 프리셋 버튼이 cron 식을 채워줌 — 문법은 cron 단일) / prompt textarea / 표시 이름(nickname, 선택 — 기본 `⏰ Scheduler`)
 - 놓친 발화 배지 (§5)
 - 에이전트 추가 개수 **캡(기본 5/post)** — 초과 시 파일 계약에서 거부(§7).
 
@@ -123,7 +125,7 @@ UI (post 카드 확장 또는 ⏰ 드로어):
 ### 7.1 파일
 - **요청**: `<workspace>/.agent-cli/schedule-requests.jsonl` — 에이전트가 append.
   ```jsonl
-  {"op":"add","cron":"0 9 * * 1","prompt":"주간 보고를 작성해줘","label":"주간 보고","req_id":"r1"}
+  {"op":"add","cron":"0 9 * * 1","prompt":"주간 보고를 작성해줘","label":"주간 보고","nickname":"주간봇","req_id":"r1"}
   {"op":"delete","schedule_id":"...","req_id":"r2"}
   {"op":"list","req_id":"r3"}
   ```

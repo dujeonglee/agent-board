@@ -309,6 +309,7 @@ dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
 .srow .src.agent { background: rgba(167,139,250,.22); color: var(--agent-work); }
 .srow .slabel { font-weight: 600; }
 .srow .scron { color: var(--text-2); }
+.srow .swho { color: var(--muted); font-size: 11px; font-style: italic; }
 .srow .snext { color: var(--muted); font-size: 11px; margin-left: auto; }
 .srow .sacts { display: flex; gap: 4px; }
 .srow .sacts button { padding: 4px 7px; font-size: 11.5px; }
@@ -336,6 +337,7 @@ dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
   font-family: ui-monospace, Menlo, monospace; width: 130px; flex: none;
 }
 .sform .f-human { font-size: 11.5px; }
+.sform .f-nick { grid-column: 1 / -1; }
 .sform .presets { grid-column: 1 / -1; display: flex; gap: 6px; flex-wrap: wrap; }
 .sform .presets button {
   font-size: 11px; padding: 3px 9px;

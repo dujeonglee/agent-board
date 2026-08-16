@@ -160,3 +160,34 @@ class TestRefreshState:
         store, post, ws = env
         sc.refresh_state(store, post.post_id, ws)
         assert not sc.state_path(ws).exists()  # 계약 미사용 워크스페이스 오염 금지
+
+
+class TestNickname:
+    def test_agent_add_with_nickname(self, env):
+        store, post, ws = env
+        _write_reqs(
+            ws,
+            {
+                "op": "add",
+                "cron": "* * * * *",
+                "prompt": "x",
+                "nickname": "봇",
+                "req_id": "r1",
+            },
+        )
+        sc.apply_requests(store, post.post_id, ws)
+        s = store.list_schedules(post.post_id)[0]
+        assert s.nickname == "봇"
+        st = _state(ws)
+        assert st["schedules"][0]["nickname"] == "봇"
+        assert st["schedules"][0]["effective_nickname"] == "봇"
+
+    def test_agent_add_without_nickname_effective_default(self, env):
+        store, post, ws = env
+        _write_reqs(
+            ws, {"op": "add", "cron": "* * * * *", "prompt": "x", "req_id": "r1"}
+        )
+        sc.apply_requests(store, post.post_id, ws)
+        st = _state(ws)
+        assert st["schedules"][0]["nickname"] == ""
+        assert st["schedules"][0]["effective_nickname"] == "⏰ Scheduler"
