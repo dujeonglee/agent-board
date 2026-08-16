@@ -14,69 +14,36 @@ from fastapi.testclient import TestClient
 
 from agent_board.app import (
     acquire_singleton_lock,
-    build_hypercorn_config,
     create_app,
+    enforce_bind_policy,
     gateway_banner,
-    resolve_auth_token,
 )
 from agent_board.config import Config
 from agent_board.store import Store
 
 
-def _cfg(tmp_path, **kw):
-    return Config(data_dir=tmp_path / "d", workspaces_root=tmp_path / "w", **kw)
-
-
-class TestResolveAuthToken:
-    """New model (docs/hypercorn-embed-plan.md §Auth): non-loopback bind
-    auto-enables auth (was refused); loopback stays auth-off; caddy /
-    allow_unauth_lan opt out; explicit env token wins."""
+class TestEnforceBindPolicy:
+    """AUDIT B-1: board-proxy has no auth, so a non-loopback bind exposes the
+    control plane unauthenticated. main() must refuse it unless opted in."""
 
     @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
-    def test_loopback_no_auth(self, tmp_path, host):
-        token, src = resolve_auth_token(_cfg(tmp_path), host)
-        assert token is None and src == "loopback"
+    def test_loopback_allowed(self, host):
+        enforce_bind_policy(host, "board-proxy")  # no raise
 
     @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "::"])
-    def test_non_loopback_autogenerates_and_persists(self, tmp_path, host):
-        cfg = _cfg(tmp_path)
-        token, src = resolve_auth_token(cfg, host)
-        assert token and src == "auto"
-        # persisted 0600 → restart keeps the SAME token (cookies stay valid)
-        again, _ = resolve_auth_token(cfg, host)
-        assert again == token
-        st = (cfg.data_dir / "auth-token").stat()
-        assert (st.st_mode & 0o777) == 0o600
+    def test_board_proxy_non_loopback_refused(self, host):
+        with pytest.raises(SystemExit) as ei:
+            enforce_bind_policy(host, "board-proxy")
+        assert ei.value.code == 1
 
-    def test_explicit_env_token_wins(self, tmp_path):
-        cfg = _cfg(tmp_path, auth_token="secret123")
-        token, src = resolve_auth_token(cfg, "0.0.0.0")
-        assert token == "secret123" and src == "env"
+    @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10"])
+    def test_opt_in_allows_non_loopback(self, host):
+        enforce_bind_policy(host, "board-proxy", allow_unauth_lan=True)  # no raise
 
-    def test_caddy_defers_to_caddy(self, tmp_path):
-        token, src = resolve_auth_token(_cfg(tmp_path, gateway="caddy"), "0.0.0.0")
-        assert token is None and src == "caddy"
-
-    def test_allow_unauth_lan_opts_out(self, tmp_path):
-        token, src = resolve_auth_token(
-            _cfg(tmp_path), "0.0.0.0", allow_unauth_lan=True
-        )
-        assert token is None and src == "unauth-lan"
-
-
-class TestBuildHypercornConfig:
-    def test_plaintext_when_no_cert(self, tmp_path):
-        hcfg = build_hypercorn_config(_cfg(tmp_path), "127.0.0.1", 51966)
-        assert hcfg.bind == ["127.0.0.1:51966"]
-        assert hcfg.certfile is None and hcfg.keyfile is None
-
-    def test_tls_when_cert_and_key(self, tmp_path):
-        cfg = _cfg(tmp_path, tls_cert="/c.pem", tls_key="/k.pem")
-        hcfg = build_hypercorn_config(cfg, "0.0.0.0", 8443)
-        assert hcfg.certfile == "/c.pem" and hcfg.keyfile == "/k.pem"
-        # ALPN advertises h2 → browser negotiates HTTP/2 over TLS
-        assert "h2" in hcfg.alpn_protocols
-        assert hcfg.logconfig_dict is not None  # access → rotating file
+    def test_caddy_non_loopback_not_refused_here(self):
+        # caddy embeds per-route auth; its non-loopback bind is a separate
+        # (warning-only) footgun handled in main(), not a hard refusal.
+        enforce_bind_policy("0.0.0.0", "caddy")  # no raise
 
 
 class FakeOrch:
@@ -770,8 +737,7 @@ class TestTabGuard:
         _, _, c = _client(tmp_path)
         r = c.get("/api/gateway")
         assert r.status_code == 200
-        # board-proxy plaintext → no h2 (frontend keeps the tab guard)
-        assert r.json() == {"gateway": "board-proxy", "h2": False}
+        assert r.json() == {"gateway": "board-proxy"}
 
     def test_gateway_endpoint_reports_caddy(self, tmp_path):
         cfg = Config(
@@ -784,22 +750,7 @@ class TestTabGuard:
             cfg, store=store, orchestrator=FakeOrch(), keepalive=FakeKeepalive()
         )
         r = TestClient(app).get("/api/gateway")
-        assert r.json() == {"gateway": "caddy", "h2": True}
-
-    def test_gateway_endpoint_reports_h2_on_board_tls(self, tmp_path):
-        # board-proxy + TLS (Hypercorn ALPN) → h2 true → tab guard releases
-        cfg = Config(
-            data_dir=tmp_path / "data",
-            workspaces_root=tmp_path / "ws",
-            tls_cert="/c.pem",
-            tls_key="/k.pem",
-        )
-        store = Store(cfg.db_path)
-        app = create_app(
-            cfg, store=store, orchestrator=FakeOrch(), keepalive=FakeKeepalive()
-        )
-        r = TestClient(app).get("/api/gateway")
-        assert r.json() == {"gateway": "board-proxy", "h2": True}
+        assert r.json() == {"gateway": "caddy"}
 
     def test_frontend_guard_wired(self, tmp_path):
         _, _, c = _client(tmp_path)

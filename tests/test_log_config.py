@@ -1,4 +1,4 @@
-"""build_log_config — route Hypercorn access logs to a rotating file."""
+"""build_log_config — route uvicorn access logs to a rotating file."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ def test_access_log_goes_to_file(tmp_path):
     assert cfg["handlers"]["access_file"]["filename"] == str(log)
     assert "RotatingFileHandler" in cfg["handlers"]["access_file"]["class"]
     # access logger uses ONLY the file handler (not the console)
-    assert cfg["loggers"]["hypercorn.access"]["handlers"] == ["access_file"]
+    assert cfg["loggers"]["uvicorn.access"]["handlers"] == ["access_file"]
     # startup/error still go to the console
-    assert cfg["loggers"]["hypercorn.error"]["handlers"] == ["default"]
+    assert cfg["loggers"]["uvicorn.error"]["handlers"] == ["default"]
 
 
 def test_config_is_dictconfig_loadable(tmp_path):
     # it must actually apply (formatters/handlers/loggers all resolve)
     logging.config.dictConfig(build_log_config(tmp_path / "board.log"))
-    logging.getLogger("hypercorn.access").info("test %s", "line")
+    logging.getLogger("uvicorn.access").info("test %s", "line")
     assert (tmp_path / "board.log").exists()

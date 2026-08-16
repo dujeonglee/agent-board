@@ -56,10 +56,8 @@ agent-board
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | **─ 네트워크 ─** | | |
-| `AGENT_BOARD_HOST` | `127.0.0.1` | 바인드 호스트. 비-loopback 바인드는 **자동으로 컨트롤플레인 인증을 켠다**(토큰 자동생성·영속화). `gateway=caddy`(Caddy 인증) 또는 `AGENT_BOARD_ALLOW_UNAUTH_LAN=1`(무인증 명시 감수)이면 board 인증은 끈다 |
+| `AGENT_BOARD_HOST` | `127.0.0.1` | 바인드 호스트. board-proxy(기본)는 인증이 없어 비-loopback 바인드를 거부한다 — LAN 노출은 `gateway=caddy`(인증) 또는 `AGENT_BOARD_ALLOW_UNAUTH_LAN=1`(명시 위험 감수) |
 | `AGENT_BOARD_PORT` | `51966` (0xCAFE) | 보드 포트 (생략 시 fallback 다이나믹·인스턴스 50000~60000·omlx 8000·cli 0xC0DE 회피) |
-| `AGENT_BOARD_TLS_CERT` / `AGENT_BOARD_TLS_KEY` | `""` | **둘 다 지정하면 board 가 직접 HTTPS + HTTP/2(Hypercorn ALPN)로 서빙** — Caddy 없이 TLS·h2·단일포트. 없으면 평문 h1(기존과 동일). 인증서는 직접 공급(자체서명 또는 외부 발급) |
-| `AGENT_BOARD_AUTH_TOKEN` | `""` | 컨트롤플레인(`/api/*`) default-deny 토큰. 지정하면 인증 ON(노출용 권장, 안정적). 미지정 + 비-loopback이면 자동생성. 접속: `https://host:port/?token=…`(1회) → `abt` 쿠키 설치 후 URL에서 사라짐 |
 | **─ 경로 · 저장 ─** | | |
 | `AGENT_BOARD_HOME` | `./data` | 데이터 루트 base (아래 DATA·WORKSPACES 의 기본값 base) |
 | `AGENT_BOARD_DATA` | `= HOME`(`./data`) | `board.db`·`board.log`·`board.lock` 위치 (data_dir) |
@@ -73,18 +71,12 @@ agent-board
 | `AGENT_BOARD_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API (`gateway=caddy` 일 때만) |
 | `AGENT_BOARD_CADDY_BASIC_AUTH` | `""` | Caddy 라우트 basic-auth `user:bcrypt` (`gateway=caddy` 일 때만) |
 
-> **Caddy 없이 TLS+HTTP/2 (v1.28.0)** — board 는 Hypercorn(순수 파이썬 ASGI) 위에서
-> 돈다. `AGENT_BOARD_TLS_CERT/KEY` 를 주면 board 자신이 **HTTPS + HTTP/2(ALPN)** 로 서빙 →
-> 브라우저 origin당 6-connection 한계가 사라져(h2 멀티플렉스) **동시에 여는 방 탭 제한도 자동
-> 해제**된다. 컨트롤플레인 인증(`AGENT_BOARD_AUTH_TOKEN`)까지 켜면 **Caddy를 따로 돌리지 않고**
-> LAN/인터넷에 안전하게 노출할 수 있다. 단 자동 인증서(ACME)·board 무중단 재시작(데이터경로
-> 밖)·멀티호스트 엣지가 필요하면 여전히 `gateway=caddy`. ⚠️ TLS는 암호화일 뿐 **인증이
-> 아니다** — 노출 시 반드시 auth 토큰(또는 caddy)을 함께 켤 것.
->
 > **두 게이트웨이는 동작 파리티가 맞춰져 있다** — idle-reap 된 방을 직접 URL 재접속만으로
-> 자동 재기동(revive)하는 것은 **양쪽 다** 된다(board-proxy 는 in-process, caddy 는 death
-> 엣지에 라우트 삭제→보드 revive 핸들러로 fall-through). `Router` ABC +
-> `tests/test_router_parity.py` 가 두 구현의 파리티를 강제한다. 자세히는 `docs/DESIGN.md` §9.
+> 자동 재기동(revive)하는 것은 이제 **양쪽 다** 된다(board-proxy 는 in-process,
+> caddy 는 death 엣지에 라우트 삭제→보드 revive 핸들러로 fall-through). 남는 차이는 전송 특성:
+> `caddy` 만 **TLS·단일포트·`/s/<id>` basic-auth** 를 준다. 기동 로그에 활성 게이트웨이가
+> 표시되고, `Router` ABC + `tests/test_router_parity.py` 가 두 구현의 파리티를 강제한다.
+> 자세히는 `docs/DESIGN.md` §9.
 
 > 로그는 콘솔이 아니라 파일로 빠집니다 — 콘솔엔 startup·에러만:
 > access 로그 → **`<DATA_DIR>/board.log`**(회전 5MB×3),
@@ -145,31 +137,11 @@ agent-board
 `AGENT_BOARD_GATEWAY` 로 라우팅 데이터 평면을 고른다:
 
 - **`board-proxy`(기본)** — 보드가 직접 `/s/<id>/*` 를 SSE 무버퍼로 프록시. 무의존,
-  로컬/소규모. 보드가 데이터 경로에 있음(재시작 시 연결 끊김→자동 재연결). **v1.28.0부터
-  Hypercorn 으로 TLS+HTTP/2·컨트롤플레인 인증을 직접 제공** → Caddy 없이 노출 가능(아래).
-- **`caddy`(프로덕션 엣지)** — 보드가 Caddy admin API 로 `/s/<id>` 라우트를 등록, **Caddy 가
-  인스턴스로 직접 프록시**. 보드는 데이터 경로 밖(재시작 견고)·자동 인증서(ACME)·멀티호스트.
+  로컬/소규모. 보드가 데이터 경로에 있음(재시작 시 연결 끊김→자동 재연결).
+- **`caddy`(프로덕션)** — 보드가 Caddy admin API 로 `/s/<id>` 라우트를 등록, **Caddy 가
+  인스턴스로 직접 프록시**. 보드는 데이터 경로 밖(TLS·단일포트·재시작 견고).
 
-### 프로덕션 배포 A — Caddy 없이 (board 자체 TLS+h2+auth, v1.28.0)
-```bash
-# 1) 인증서 준비 (실도메인이면 외부 발급, LAN/로컬이면 자체서명)
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
-  -days 365 -nodes -subj "/CN=$(hostname)"
-
-# 2) TLS + 인증 토큰으로 기동 (비-loopback 노출이면 토큰 필수)
-AGENT_BOARD_HOST=0.0.0.0 \
-AGENT_BOARD_TLS_CERT="$PWD/cert.pem" \
-AGENT_BOARD_TLS_KEY="$PWD/key.pem" \
-AGENT_BOARD_AUTH_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" \
-agent-board
-#  → 기동 로그의 bootstrap URL(https://host:port/?token=…)로 최초 1회 접속
-#  → h2 라 방 탭 동시 개수 제한 자동 해제 · abt 쿠키로 이후 자동 인증
-#  ※ AGENT_BOARD_AUTH_TOKEN 을 생략해도 비-loopback 이면 토큰이 자동생성·영속화된다
-#    (data_dir/auth-token). 자체서명 인증서는 브라우저가 1회 경고 → 신뢰 클릭.
-```
-- **TLS ≠ 인증**: HTTPS 는 도청만 막는다. 노출 시 auth 토큰을 반드시 함께(자동생성이 기본값).
-
-### 프로덕션 배포 B — Caddy 엣지 (자동 인증서·무중단·멀티호스트)
+### 프로덕션 배포 (caddy)
 ```bash
 # 1) 비밀번호 해시 생성
 caddy hash-password --plaintext 'secret'      # → $2a$14$...
