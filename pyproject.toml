@@ -9,7 +9,12 @@ description = "Forum-style board over agent-cli — each post is an agent-cli se
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
+    # Hypercorn (pure-Python ASGI) — serves the board itself with native TLS +
+    # HTTP/2 (ALPN), so an operator gets HTTPS + h2 (no browser 6-connection
+    # limit) WITHOUT running Caddy as a separate process. uvicorn was HTTP/1.1
+    # only; all Hypercorn transitive deps (h11/h2/priority/wsproto) are pure
+    # Python → on-prem friendly.
+    "hypercorn>=0.16",
     "httpx>=0.27",
     # SQLite fallback for Python builds without the stdlib ``sqlite3`` extension
     # (locked-down servers). The ``agent_board._sqlite`` shim prefers stdlib
@@ -19,7 +24,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "ruff", "playwright>=1.40"]
+# uvicorn is a TEST-ONLY ASGI runner here: test_router.py runs a fake upstream
+# for the proxy tests, and the browser harness runs the board. Production serves
+# on Hypercorn (see [project.dependencies]).
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "ruff", "playwright>=1.40", "uvicorn>=0.27"]
 
 [project.scripts]
 agent-board = "agent_board.app:main"

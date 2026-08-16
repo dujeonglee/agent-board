@@ -218,8 +218,10 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
 | `/s/<id>/*` 프록시 · SSE 무버퍼 · 업로드 | ✅ | ✅ (Caddy 네이티브) |
 | 라우트 등록/해제(`ensure_route`/`remove_route`) | ✅ | ✅ |
 | **idle-reap 인스턴스 접속 시 자동 재기동** | ✅ dead/reset upstream `httpx.TransportError`(ConnectError=idle-reap dead 포트, ReadError/RemoteProtocolError=kill 로 죽은 stale keep-alive 풀)→GET/HEAD revive (v1.23.1: 좁은 ConnectError-만 catch 가 stale-풀 ReadError 를 놓쳐 부하 시 run_asgi 500 크래시였던 것 수리) | ✅ **death 엣지에 라우트 삭제→Caddyfile catch-all fall-through→보드 revive 핸들러→reopen+302** |
-| **TLS 종단 · 단일 포트** | ❌ (평문 HTTP, 보드 포트) | ✅ |
-| **`/s/<id>` basic-auth** | ❌ (보드 앞단 네트워크 격리에 의존) | ✅ (라우트에 임베드) |
+| **TLS 종단 · 단일 포트** | ✅ (v1.28.0 — Hypercorn `AGENT_BOARD_TLS_CERT/KEY`, 단일포트) | ✅ |
+| **HTTP/2 (6-connection 한계 소멸)** | ✅ (TLS 시 ALPN h2) | ✅ |
+| **자동 인증서(ACME)·무중단 재시작·멀티호스트** | ❌ (인증서 직접 공급) | ✅ |
+| **인증** | ✅ (v1.28.0 — 컨트롤플레인 `/api/*` 토큰, `auth.py`) | ✅ (`/s/<id>` basic-auth 라우트 임베드) |
 | 보드가 data-path 안에 있나 | 예(중계) | 아니오(Caddy 직결; revive 시에만 잠깐) |
 
 - **revive 파리티 (양쪽 동일 의미론)**: 죽은 인스턴스의 `/s/<id>` GET/HEAD 재접속 시 자동
@@ -233,8 +235,26 @@ agent-cli 를 수정 안 하므로 **세션 파일을 직접 읽음**(통합 지
     브라우저를 Caddy origin 밖 보드 포트로 직접 튕겨 Caddy 를 우회 → 같은 핸들러로 돌아와 `__revive`
     503 루프가 된다. 상대 ref 는 브라우저를 현재 origin(Caddy)에 머물게 한다. **따라서 caddy 모드는
     보드를 loopback(127.0.0.1)에 바인드**해야 안전(비-loopback 바인드 시 기동 로그가 경고).
-- **잔여 차이는 전송 특성뿐**: TLS·단일포트·인증. board-proxy = 개발/무의존 단일박스,
-  caddy = 프로덕션 하드닝.
+- **잔여 차이(v1.28.0 이후)**: caddy 만의 이점은 자동 인증서(ACME)·board 무중단 재시작
+  (데이터경로 밖)·멀티호스트 엣지. TLS·h2·인증은 board-proxy 도 직접 제공하므로 단일박스
+  노출은 Caddy 없이 가능.
+
+### 서버 계층 — Hypercorn (v1.28.0, `app.py:main`)
+- board 는 **Hypercorn**(순수 파이썬 ASGI) 위에서 돈다. uvicorn(HTTP/1.1 전용)에서 전환한
+  이유는 **네이티브 HTTP/2** — h2 는 연결 1개에 스트림을 멀티플렉스하므로 브라우저 origin당
+  6-connection 한계가 사라지고, 그에 걸려 있던 프런트 탭 가드가 자동 해제된다.
+- `AGENT_BOARD_TLS_CERT`+`_KEY` 둘 다 있으면 `build_hypercorn_config` 가 `certfile/keyfile`
+  을 세팅 → ALPN(`['h2','http/1.1']`)으로 h2 협상. 없으면 평문 h1(기존 동작).
+- **로깅**: `logconfig_dict`(=`build_log_config`)가 `hypercorn.access`→회전 파일,
+  `hypercorn.error`→stderr 로 건다. `accesslog='-'`로 access 로거를 non-None 화한 뒤
+  dictConfig 가 그 placeholder 핸들러를 회전 파일 핸들러로 교체(콘솔 중복 없음).
+- **인증(`auth.py`)**: `AuthMiddleware` 는 `config.auth_token` 이 있을 때만 설치되는
+  순수-ASGI default-deny 초크포인트. `/api/*`(공개 경로 `/api/health` 제외)는 fail-closed —
+  유효 `abt` 쿠키 또는 `?token=` 없으면 엔드포인트 실행 전 401. `?token=` 성공은 쿠키를
+  설치(HttpOnly·SameSite=Strict·TLS면 Secure)해 이후 쿠키 인증(SSE는 헤더를 못 보내므로
+  쿠키 필수). 비-`/api`(`/`·`/static`·`/s/<id>`)는 게이트하지 않음 — 방은 인스턴스 자체
+  토큰이 지킨다. 토큰 결정은 `resolve_auth_token`(env > caddy > allow_unauth_lan >
+  non-loopback 자동생성·영속 > loopback=off).
 
 ### Router 계약 — 구조적 + 동작 파리티 (divergence 방지)
 두 라우터는 **메커니즘이 완전히 달라**(in-process 프록시 vs 외부 admin API) 공유 구현이 없다.

@@ -31,12 +31,17 @@
   // 보유 SSE 가 6개가 되는 순간 풀이 포화되므로 5개에서 차단(=열면 6),
   // 4개에서 경고(=열면 5, fetch 여유 1개).
   const MAX_HELD_TABS = 5;
-  let gatewayMode = "board-proxy"; // /api/gateway 로 갱신 (모르면 보수적으로 가드)
+  // h2(연결 1개 멀티플렉스)면 6-connection 한계가 없어 가드를 물린다. h2 는
+  // caddy 게이트웨이 또는 board 자체 TLS(Hypercorn) 로 활성 — 서버가 전송
+  // 사실로 알려준다(/api/gateway 의 h2). 모르면 보수적으로 가드(false).
+  let h2Capable = false;
 
   fetch("/api/gateway")
     .then((r) => r.json())
     .then((d) => {
-      if (d && d.gateway) gatewayMode = d.gateway;
+      if (!d) return;
+      // 신버전: h2 플래그. 구버전 폴백: gateway==="caddy".
+      h2Capable = d.h2 === true || d.gateway === "caddy";
     })
     .catch(() => {});
 
@@ -439,7 +444,7 @@
     // window.open 을 await(게이트~100ms + fetch~15ms) 뒤에 호출해도
     // Chrome 의 transient user activation(클릭 후 ~5초)이 살아 있어 팝업
     // 차단 없이 열린다(실측 확인) — 차단 시엔 현재 탭 이동으로 폴백.
-    if (gatewayMode !== "caddy") {
+    if (!h2Capable) {
       const held = await countHeldTabs();
       // 이 글의 탭이 이미 있으면(named-window 재사용 or sameTab 전환)
       // 연결이 늘지 않으므로 게이트 면제.

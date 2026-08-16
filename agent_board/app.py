@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import secrets
 import shutil
 import sys
 from contextlib import asynccontextmanager
@@ -30,6 +32,7 @@ from agent_board import (
     sessions,
 )
 from agent_board import clone as clone_mod
+from agent_board.auth import AuthMiddleware
 from agent_board.config import Config
 from agent_board.keepalive import (
     KeepAliveManager,
@@ -81,7 +84,7 @@ def pick_board_port(host: str, preferred: int) -> int:
             except OSError:
                 continue
             return s.getsockname()[1]
-    return preferred  # let uvicorn surface the error
+    return preferred  # let the ASGI server surface the bind error
 
 
 def _new_session_id() -> str:
@@ -92,47 +95,66 @@ def _new_session_id() -> str:
     return str(int(time.time()))
 
 
+def _h2_active(config: Config) -> bool:
+    """HTTP/2 in effect for browser clients: caddy (h2 at the edge) or the board
+    serving TLS itself (Hypercorn negotiates h2 via ALPN). Drives the frontend
+    tab-guard release (/api/gateway) — it's a TRANSPORT fact, not a gateway name."""
+    return config.gateway == "caddy" or config.tls_enabled
+
+
 def gateway_banner(config: Config) -> str:
-    """One-line description of the active routing data plane, for the startup
-    log — so an operator can see AT A GLANCE whether the board itself is
-    proxying (default) or Caddy is (and where its admin API is). The gateway
-    was previously silent, which made it easy to assume Caddy while actually
-    running the in-process proxy."""
+    """One-line description of the active routing data plane + transport, for the
+    startup log — so an operator sees AT A GLANCE whether the board itself is
+    proxying (default) or Caddy is, and whether TLS/h2 is on."""
     if config.gateway == "caddy":
         return f"caddy (admin {config.caddy_admin})"
-    return "board-proxy (in-process reverse proxy — default)"
+    transport = "TLS, h2" if config.tls_enabled else "plaintext, h1"
+    return f"board-proxy (in-process reverse proxy — default; {transport})"
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
-def enforce_bind_policy(
-    host: str, gateway: str, *, allow_unauth_lan: bool = False
-) -> None:
-    """Refuse an unsafe bind: ``board-proxy`` gateway has no auth of its own, so
-    binding it to a non-loopback address exposes the whole control plane
-    (spawn/kill/delete/admin) to the network unauthenticated (AUDIT B-1).
+def _load_or_create_auth_token(data_dir: Path) -> str:
+    """Persisted auto-generated board token, ``0600`` in the data dir. Persisting
+    (vs a fresh token per start) keeps open viewers' ``abt`` cookies valid across
+    a board restart."""
+    p = data_dir / "auth-token"
+    try:
+        existing = p.read_text(encoding="utf-8").strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(32)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # owner-only
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token + "\n")
+    return token
 
-    Raises ``SystemExit(1)`` for ``board-proxy`` + non-loopback host unless the
-    operator explicitly opts in (``AGENT_BOARD_ALLOW_UNAUTH_LAN=1``). ``caddy``
-    is unaffected here — it embeds auth per route; its non-loopback bind is a
-    separate footgun handled by a warning in ``main()``."""
-    if gateway == "board-proxy" and host not in _LOOPBACK_HOSTS:
-        if allow_unauth_lan:
-            print(
-                f"  ⚠️  board-proxy 를 {host} 로 바인드 — 인증 없는 컨트롤 플레인이 "
-                "네트워크에 노출됩니다 (AGENT_BOARD_ALLOW_UNAUTH_LAN=1 로 허용됨).",
-                file=sys.stderr,
-            )
-            return
-        print(
-            f"board-proxy 게이트웨이는 인증이 없어 {host} 바인드를 거부합니다 "
-            "(스폰/삭제/admin 무인증 노출). AGENT_BOARD_HOST=127.0.0.1 로 바인드하거나 "
-            "gateway=caddy 인증을 쓰세요. 위험을 감수하면 "
-            "AGENT_BOARD_ALLOW_UNAUTH_LAN=1 로 명시 허용.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
+
+def resolve_auth_token(
+    config: Config, host: str, *, allow_unauth_lan: bool = False
+) -> tuple[str | None, str]:
+    """Decide the board control-plane token — returns ``(token_or_None, source)``.
+    ``None`` = auth off (``AuthMiddleware`` not installed).
+
+    - explicit ``AGENT_BOARD_AUTH_TOKEN`` wins (stable; recommended for exposure)
+    - ``caddy`` gateway → None (Caddy's ``basic_auth`` guards the control plane)
+    - ``allow_unauth_lan`` → None (operator explicitly accepted unauth exposure)
+    - non-loopback bind → auto-generate + persist a token, so exposing the board
+      is safe-by-default (this bind was previously REFUSED with SystemExit)
+    - loopback (default) → None (zero-config local use, unchanged)"""
+    if config.auth_token:
+        return config.auth_token, "env"
+    if config.gateway == "caddy":
+        return None, "caddy"
+    if allow_unauth_lan:
+        return None, "unauth-lan"
+    if host not in _LOOPBACK_HOSTS:
+        return _load_or_create_auth_token(config.data_dir), "auto"
+    return None, "loopback"
 
 
 def acquire_singleton_lock(data_dir: Path) -> int | None:
@@ -162,20 +184,18 @@ def acquire_singleton_lock(data_dir: Path) -> int | None:
 
 
 def build_log_config(log_file: str | Path) -> dict:
-    """uvicorn logging config: access logs (the /api/posts polling) → a rotating
-    file so the console stays clean; startup + errors still print to stderr."""
+    """Hypercorn ``logconfig_dict``: access logs (the /api/posts polling) → a
+    rotating file so the console stays clean; startup + errors still print to
+    stderr. Hypercorn interpolates the access atoms into the log MESSAGE itself
+    (``%(h)s ... "%(r)s" %(s)s`` via ``access_log_format``), so the access
+    formatter just prefixes a timestamp around ``%(message)s``. Standard
+    ``logging`` formatters — no server-specific formatter dependency."""
     return {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "default": {
-                "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "%(levelprefix)s %(message)s",
-            },
-            "access": {
-                "()": "uvicorn.logging.AccessFormatter",
-                "fmt": '%(asctime)s %(client_addr)s - "%(request_line)s" %(status_code)s',
-            },
+            "default": {"format": "%(levelname)s %(message)s"},
+            "access": {"format": "%(asctime)s %(message)s"},
         },
         "handlers": {
             "default": {
@@ -192,19 +212,41 @@ def build_log_config(log_file: str | Path) -> dict:
             },
         },
         "loggers": {
-            "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
-            "uvicorn.error": {
+            "hypercorn.error": {
                 "handlers": ["default"],
                 "level": "INFO",
                 "propagate": False,
             },
-            "uvicorn.access": {
+            "hypercorn.access": {
                 "handlers": ["access_file"],
                 "level": "INFO",
                 "propagate": False,
             },
         },
     }
+
+
+def build_hypercorn_config(config: Config, host: str, port: int):
+    """Assemble the Hypercorn ``Config`` from the board config — kept separate so
+    the cert/key/bind/log mapping is unit-testable without ``serve()``.
+
+    TLS on (cert&key present) → Hypercorn negotiates HTTP/2 via ALPN (default
+    ``['h2','http/1.1']``); absent → plaintext HTTP/1.1 (unchanged). Access logs
+    go to the rotating file: ``accesslog='-'`` makes the access logger non-None
+    (else Hypercorn skips access logging entirely), then ``logconfig_dict`` runs
+    ``dictConfig`` which REPLACES that placeholder handler with our rotating file
+    handler on the same ``hypercorn.access`` logger — so no console duplication."""
+    from hypercorn.config import Config as HConfig
+
+    hcfg = HConfig()
+    hcfg.bind = [f"{host}:{port}"]
+    if config.tls_enabled:
+        hcfg.certfile = config.tls_cert
+        hcfg.keyfile = config.tls_key
+    hcfg.accesslog = "-"  # enable access logger; dictConfig re-homes its handler
+    hcfg.errorlog = "-"
+    hcfg.logconfig_dict = build_log_config(config.log_file)
+    return hcfg
 
 
 class NewPost(BaseModel):
@@ -417,6 +459,11 @@ def create_app(
                 await router.aclose()  # release the router's httpx client
 
     app = FastAPI(title="agent-board", lifespan=lifespan)
+    # 컨트롤플레인 default-deny (auth.py): 토큰이 설정된 경우에만 설치 —
+    # 미설정(로컬 기본)이면 미들웨어 자체가 없어 표면·성능 무변화. 설치되면
+    # /api/* 가 fail-closed 로 보호되고 /s/<id> 방은 인스턴스 토큰이 지킨다.
+    if config.auth_token:
+        app.add_middleware(AuthMiddleware, token=config.auth_token)
     # 테스트 표면 (v1.18.1): death-edge→라우트 제거 배선(on_death=
     # router.remove_route)을 합동 검증할 수 있게 노출 — 배선 누락은
     # 양쪽 반쪽 유닛만으로는 안 잡힌다.
@@ -530,9 +577,10 @@ def create_app(
     async def gateway_info():
         """프런트 탭 가드의 조건 스위치. 브라우저의 origin 당 6연결
         (HTTP/1.1) 풀 고갈은 board-proxy(모든 방=이 origin, 방/대시보드
-        탭마다 SSE 1개 점유)에서만 위험 — caddy(h2, 연결 1개 멀티플렉스)
-        모드면 가드가 스스로 물러난다."""
-        return {"gateway": config.gateway}
+        탭마다 SSE 1개 점유)에서만 위험 — h2(연결 1개 멀티플렉스)면 가드가
+        스스로 물러난다. h2 는 caddy 게이트웨이 또는 board 자체 TLS(Hypercorn
+        ALPN)로 활성 — 프런트는 gateway 이름이 아니라 이 h2 플래그를 본다."""
+        return {"gateway": config.gateway, "h2": _h2_active(config)}
 
     @app.get("/api/version")
     async def version_info():
@@ -776,9 +824,9 @@ def create_app(
 
 
 def main() -> None:  # pragma: no cover
-    import os
+    import asyncio as _asyncio
 
-    import uvicorn
+    from hypercorn.asyncio import serve
 
     config = Config.from_env()
     # Single-instance guard: refuse to start a second board on the same data_dir
@@ -797,44 +845,62 @@ def main() -> None:  # pragma: no cover
         )
         raise SystemExit(1)
     host = os.environ.get("AGENT_BOARD_HOST", "127.0.0.1")
-    # board-proxy has NO auth of its own — binding it to a non-loopback address
-    # exposes spawn/kill/delete/admin to the whole network unauthenticated
-    # (AUDIT B-1). Refuse to start in that configuration unless the operator
-    # explicitly opts in. Evaluated before port binding so we never open a
-    # socket in the unsafe config.
-    enforce_bind_policy(
-        host,
-        config.gateway,
-        allow_unauth_lan=os.environ.get("AGENT_BOARD_ALLOW_UNAUTH_LAN") == "1",
-    )
+    # Resolve the control-plane token BEFORE binding. Non-loopback bind now
+    # auto-enables auth (persisted token) instead of being refused — the board is
+    # safe to expose over its own TLS. caddy / ALLOW_UNAUTH_LAN keep auth off
+    # (Caddy guards it / explicit risk). Loopback default → no auth (unchanged).
+    allow_unauth_lan = os.environ.get("AGENT_BOARD_ALLOW_UNAUTH_LAN") == "1"
+    token, src = resolve_auth_token(config, host, allow_unauth_lan=allow_unauth_lan)
+    config.auth_token = token or ""
     # AGENT_BOARD_PORT set → bind it exactly (fail loudly on conflict). Omitted →
     # prefer 0xCAFE but dynamically fall back to a free port if it's taken.
     explicit = os.environ.get("AGENT_BOARD_PORT")
     port = int(explicit) if explicit else pick_board_port(host, DEFAULT_PORT)
     config.data_dir.mkdir(parents=True, exist_ok=True)  # so the log file can open
+    scheme = "https" if config.tls_enabled else "http"
     print(
-        f"agent-board → http://localhost:{port}  (workspaces: {config.workspaces_root})"
+        f"agent-board → {scheme}://localhost:{port}  "
+        f"(workspaces: {config.workspaces_root})"
     )
     print(f"  gateway    → {gateway_banner(config)}")
     print(f"  access log → {config.log_file}")
+    # Auth banner: default-deny on when a token is active. Print the one-time
+    # bootstrap URL so the operator (or an auto-generated token) can get in;
+    # the ?token= installs the abt cookie and drops out of the URL after one hop.
+    if config.auth_token:
+        origin = f"{scheme}://{host}:{port}"
+        note = {
+            "env": "AGENT_BOARD_AUTH_TOKEN",
+            "auto": f"자동생성·영속화({config.data_dir / 'auth-token'})",
+        }.get(src, src)
+        print(f"  auth       → ON (컨트롤플레인 default-deny; source={note})")
+        print(f"  bootstrap  → {origin}/?token={config.auth_token}")
+    elif host not in _LOOPBACK_HOSTS and config.gateway != "caddy":
+        # allow_unauth_lan path — exposed WITHOUT auth by explicit operator opt-in.
+        print(
+            f"  ⚠️  {host} 로 바인드되었으나 인증이 꺼져 있습니다 "
+            "(AGENT_BOARD_ALLOW_UNAUTH_LAN=1) — 컨트롤플레인이 무인증 노출됩니다.",
+            file=sys.stderr,
+        )
+    if not config.tls_enabled and host not in _LOOPBACK_HOSTS:
+        print(
+            "  ⚠️  TLS 미설정으로 평문(h1)입니다 — 토큰·트래픽이 평문 전송됩니다. "
+            "AGENT_BOARD_TLS_CERT/KEY 로 HTTPS(h2)를 켜세요.",
+            file=sys.stderr,
+        )
     # caddy mode + non-loopback bind = footgun: Caddy is meant to front the
     # board, but 0.0.0.0/external also exposes the board's own port directly.
     # Hitting THAT bypasses Caddy — /s/<id> lands on the revive fall-through,
     # which redirects to the same origin and loops to a 503. Behind Caddy the
     # board should bind loopback (deploy/agent-board.service uses 127.0.0.1).
-    if config.gateway == "caddy" and host not in ("127.0.0.1", "::1", "localhost"):
+    if config.gateway == "caddy" and host not in _LOOPBACK_HOSTS:
         print(
             f"  ⚠️  gateway=caddy 인데 {host} 로 바인드됨 — 보드 포트({port})에 직접 접속하면 "
             "Caddy 를 우회해 /s/<id> 가 503 루프가 됩니다. 브라우저는 Caddy 주소로 접속하고, "
             "보드는 AGENT_BOARD_HOST=127.0.0.1 로 바인드하세요.",
             file=sys.stderr,
         )
-    uvicorn.run(
-        create_app(config),
-        host=host,
-        port=port,
-        log_config=build_log_config(config.log_file),
-    )
+    _asyncio.run(serve(create_app(config), build_hypercorn_config(config, host, port)))
 
 
 if __name__ == "__main__":  # python -m agent_board.app

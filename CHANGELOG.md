@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.28.0] - 2026-08-16
+
+### Changed / Added
+
+- **Caddy 없이 TLS + HTTP/2 + 컨트롤플레인 인증 (ASGI 서버를 uvicorn → Hypercorn 전환)**
+  — `docs/hypercorn-embed-plan.md`. 라우팅은 이미 `board-proxy`가 in-process로 하므로,
+  Caddy가 유일하게 주던 TLS·h2를 board 자신이 네이티브로 흡수한다.
+  - **서버**: 순수 파이썬 Hypercorn(트랜지티브 h11/h2/priority/wsproto 전부 순수 파이썬 →
+    on-prem 부합). `uvicorn[standard]` 의존 제거(테스트 하네스용으로 dev-dep 강등).
+  - **TLS+h2**: `AGENT_BOARD_TLS_CERT`+`AGENT_BOARD_TLS_KEY` 둘 다 지정 시 board 가 직접
+    HTTPS 서빙, ALPN으로 HTTP/2 협상 → 브라우저 origin당 6-connection 한계 소멸 →
+    **동시 방 탭 가드 자동 해제**. 미지정 시 평문 h1(기존과 동일, 회귀 0).
+  - **컨트롤플레인 인증(`agent_board/auth.py`)**: `/api/*` default-deny 미들웨어(fail-closed).
+    `AGENT_BOARD_AUTH_TOKEN` 지정 또는 비-loopback 바인드 시 활성(후자는 토큰 자동생성·
+    `data_dir/auth-token`에 0600 영속 → 재시작해도 쿠키 유효). `?token=` 부트스트랩 →
+    HttpOnly·SameSite=Strict(·TLS면 Secure) `abt` 쿠키 설치, 모든 응답 `Referrer-Policy:
+    no-referrer`. **`/s/<id>` 방·UI 셸·static 은 비-`/api`라 면제** — 방은 인스턴스 자체
+    토큰이 지키므로 공유링크 무영향, "board 관리" vs "방 입장" 권한 분리.
+  - **바인드 정책 전환**: 비-loopback board-proxy 바인드는 이제 **거부(SystemExit) 대신
+    인증 자동활성**. `AGENT_BOARD_ALLOW_UNAUTH_LAN=1`(무인증)·`gateway=caddy`(Caddy 인증)는
+    기존대로. 즉 "노출하려면 안전하게" 가 기본값.
+  - **h2 탐지 = 전송 사실**: `/api/gateway` 가 `{gateway, h2}` 반환(h2 = caddy 또는 board
+    TLS). 프런트 탭 가드는 게이트웨이 이름이 아니라 이 `h2` 플래그로 해제(구버전 폴백 유지).
+  - **`caddy` 게이트웨이는 존치** — 자동 인증서(ACME)·board 무중단 재시작(데이터경로 밖)·
+    멀티호스트 엣지가 필요할 때의 선택지. 이번 작업은 additive(평문 h1 기본 동작 불변).
+  - 검증: 유닛(auth 매트릭스·resolve_auth_token 자동생성/영속/0600·build_hypercorn_config
+    TLS·`/api/gateway` h2·로그 라우팅) + 라이브 스모크(curl `--http2` 200/401·쿠키 핸드셰이크·
+    SSE over h2·access 로그 회전 파일). 전체 382 통과.
+
 ## [1.27.0] - 2026-08-16
 
 ### Added
