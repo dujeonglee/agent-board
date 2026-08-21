@@ -181,7 +181,6 @@
     $("ef-ctx").value = entry.context_window ?? 4096;
     $("ef-maxout").value = entry.max_output_tokens ?? 2048;
     $("ef-thinking").checked = !!entry.supports_thinking;
-    $("ef-budget").value = entry.thinking_budget ?? 0;
     // wire_format 바인딩 — 등록명 드롭다운만 (자유입력 금지: agent-cli 가
     // unknown 이름에 fail-fast). auto = 필드 미기록(해석 체인 위임).
     // agent_cli 미설치로 목록이 비어도 현재값은 옵션으로 보존.
@@ -212,7 +211,6 @@
       context_window: parseInt($("ef-ctx").value, 10) || 4096,
       max_output_tokens: parseInt($("ef-maxout").value, 10) || 2048,
       supports_thinking: $("ef-thinking").checked,
-      thinking_budget: parseInt($("ef-budget").value, 10) || 0,
     };
     // auto("") = 필드 미기록 — keep-sentinel 과 같은 "안 고르면 안 쓴다"
     // 패턴. 종전엔 저장이 entry 를 재조립하며 손으로 넣은 wire_format 을
