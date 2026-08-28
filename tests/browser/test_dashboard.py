@@ -182,3 +182,68 @@ class TestHeldFilterCounting:
         toast = page.query_selector("#toast.show")
         assert toast and "연결 한도" in (toast.inner_text() or "")
         ctx.close()
+
+
+class TestTabTargeting:
+    """열기 시 **탭 타깃 판정** (v1.29.0).
+
+    종전엔 항상 named target(``agentcli-<post_id>``)으로 열었는데,
+    ``window.name`` 은 사용자가 그 탭을 딴 주소로 옮겨도 남아 있어(같은
+    origin 이면 브라우저가 유지) **사용자가 다른 용도로 쓰던 탭을 빼앗아**
+    갔다 — 브라우저는 "이름표"만 볼 뿐 그 안에 룸이 떠 있는지 모른다.
+
+    이제 presence pong(살아있는 agent-cli 룸 탭만 자기 path 로 답한다)으로
+    판정한다: 룸 탭이 살아있으면 재사용, 없으면 새 탭(+이름 부여로 다음
+    재사용은 유지).
+    """
+
+    def _fake_room_tab(self, page, post_id):
+        """살아있는 룸 탭 흉내 — presence ping 에 그 글의 path 로 pong."""
+        page.evaluate(
+            "(pid)=>{const ch=new BroadcastChannel('agentcli_tab_presence');"
+            "ch.addEventListener('message',e=>{const d=e.data||{};"
+            "if(d.type==='ping')ch.postMessage({type:'pong',nonce:d.nonce,"
+            "path:'/s/'+pid+'/',held:true});});}",
+            post_id,
+        )
+
+    def _target_of_open_click(self, page):
+        """열기 클릭이 window.open 에 넘긴 target 을 잡아 반환."""
+        # 가짜 window 반환 — null 이면 코드가 location.href 폴백으로 페이지를
+        # 이동시켜(문서 교체) 기록해둔 target 이 사라진다.
+        page.evaluate(
+            "window.__t=null;"
+            "window.open=function(u,t){window.__t=t;"
+            "return {name:'',focus:function(){}};};"
+        )
+        page.click("button.open")
+        _wait(lambda: page.evaluate("window.__t") is not None, timeout=8)
+        return page.evaluate("window.__t")
+
+    def test_new_tab_when_no_live_room_tab(self, board, browser):
+        """룸 탭이 없으면(사용자가 그 탭을 딴 주소로 옮겼거나 닫았거나)
+        ``_blank`` — 즉 **새 탭**. 쓰던 탭을 빼앗지 않는다."""
+        board.seed_post(topic="target")
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.wait_for_selector("button.open", timeout=8000)
+
+        assert self._target_of_open_click(page) == "_blank"
+        ctx.close()
+
+    def test_reuses_named_tab_when_room_is_live(self, board, browser):
+        """룸을 실제로 띄운 탭이 살아있으면 named target 으로 재사용 —
+        탭이 무한정 늘지 않는다(연결 한도 보호)."""
+        post_id = board.seed_post(topic="target")
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.wait_for_selector("button.open", timeout=8000)
+
+        room = ctx.new_page()
+        room.goto(board.url, wait_until="load")
+        self._fake_room_tab(room, post_id)
+
+        assert self._target_of_open_click(page) == "agentcli-" + post_id
+        ctx.close()

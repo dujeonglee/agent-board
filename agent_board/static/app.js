@@ -431,6 +431,11 @@
 
   async function open(post_id) {
     const sameTab = $sameTab.checked;
+    // 이 글의 룸을 **실제로 띄우고 있는 탭**이 있는지 — presence pong(살아있는
+    // agent-cli 탭만 자기 path 로 답한다)이 유일한 진실원. 두 곳에 쓴다:
+    //   ① 연결-한도 게이트 면제(재사용이면 연결이 안 늘어난다)
+    //   ② 탭 타깃 결정 (아래)
+    let reusing = false;
     // 게이트·POST 를 먼저 끝내고, 완성된 방 URL 로 새 탭을 **바로** 연다.
     // ★예전엔 클릭 제스처 안에서 빈 탭(window.open(""))을 먼저 열고 나중에
     // win.location 으로 navigate 했는데, 그 about:blank→실URL 전환이
@@ -439,12 +444,12 @@
     // window.open 을 await(게이트~100ms + fetch~15ms) 뒤에 호출해도
     // Chrome 의 transient user activation(클릭 후 ~5초)이 살아 있어 팝업
     // 차단 없이 열린다(실측 확인) — 차단 시엔 현재 탭 이동으로 폴백.
-    if (gatewayMode !== "caddy") {
+    if (!sameTab) {
+      // ★caddy 모드에서도 샘플링한다: 연결 한도는 없어도 **탭 타깃 판정**에
+      // presence 가 필요하기 때문(아래). 비용은 HELD_SAMPLE_MS(100ms).
       const held = await countHeldTabs();
-      // 이 글의 탭이 이미 있으면(named-window 재사용 or sameTab 전환)
-      // 연결이 늘지 않으므로 게이트 면제.
-      const reusing = held.paths.some((p) => p.startsWith(`/s/${post_id}/`));
-      if (!reusing) {
+      reusing = held.paths.some((p) => p.startsWith(`/s/${post_id}/`));
+      if (gatewayMode !== "caddy" && !reusing) {
         if (held.count >= MAX_HELD_TABS) {
           toast(
             `연결 한도 — 이 브라우저에 연결을 잡은 탭이 ${held.count}개입니다. ` +
@@ -471,12 +476,26 @@
     if (sameTab) {
       location.href = url;
     } else {
-      // 완성된 URL 로 직접 — named target(post_id)은 같은 글을 다시 열면
-      // 새 탭 대신 그 글의 기존 창을 재사용(연결이 안 늘어 게이트 면제
-      // 대상). 팝업이 차단되면(null) 현재 탭 이동으로 폴백.
-      const win = window.open(url, "agentcli-" + post_id);
-      if (win) win.focus();
-      else location.href = url;
+      // 탭 타깃은 **presence 로 판정**한다 (v1.29.0):
+      //   · 이 글의 룸을 띄운 탭이 살아있다 → named target 으로 그 탭 재사용
+      //   · 없다 → "_blank" 로 **새 탭**. 종전엔 항상 named target 이었는데,
+      //     ``window.name`` 은 사용자가 그 탭을 딴 주소로 옮겨도 남아 있어서
+      //     (같은 origin 이면 유지) **사용자가 다른 용도로 쓰던 탭을 빼앗아**
+      //     갔다. 브라우저는 "이름표만" 볼 뿐 그 안에 룸이 떠 있는지 모른다.
+      //     반면 presence pong 은 살아있는 룸 탭만 답하므로 정확하다.
+      // 새 탭에도 이름을 붙여 다음 재열기의 재사용 대상이 되게 한다(보드와
+      // 룸은 같은 origin 이라 win.name 접근 가능). 팝업 차단(null)이면 현재
+      // 탭 이동으로 폴백 — 종전과 동일.
+      const winName = "agentcli-" + post_id;
+      const win = window.open(url, reusing ? winName : "_blank");
+      if (win) {
+        try {
+          win.name = winName;
+        } catch (e) {
+          /* 크로스 오리진 배치 등 — 이름 없이도 열기는 성공 */
+        }
+        win.focus();
+      } else location.href = url;
     }
   }
 

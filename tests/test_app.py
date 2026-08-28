@@ -798,8 +798,13 @@ class TestTabGuard:
         js = c.get("/static/app.js").text
         # 빈 창 먼저 열기 금지 — 이 패턴이 재열기 굼뜸의 주범
         assert 'window.open("", ' not in js
-        # 완성된 URL 로 직접 열어야(named target 재사용은 유지)
-        assert 'window.open(url, "agentcli-" + post_id)' in js
+        # 완성된 URL 로 직접 열어야 한다. 타깃은 v1.29.0 부터 presence 판정:
+        # 살아있는 룸 탭이 있으면 named 재사용, 없으면 _blank(새 탭) —
+        # window.name 이 딴 주소로 옮긴 탭에도 남아 사용자 탭을 빼앗던 문제
+        # 수리(계약은 tests/browser/test_dashboard.py::TestTabTargeting).
+        assert 'window.open(url, reusing ? winName : "_blank")' in js
+        assert 'const winName = "agentcli-" + post_id;' in js
+        assert "win.name = winName" in js  # 새 탭도 다음 재사용 대상이 되게
 
 
 class TestSingletonLock:
