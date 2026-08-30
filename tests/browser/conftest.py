@@ -12,6 +12,7 @@ per-item skip 은 pytest-asyncio 수집 단계 이벤트루프를 남긴다).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -124,7 +125,11 @@ class BoardStack:
 
 
 def int_from(s: str) -> int:
-    return int(s[:8], 16)
+    """A deterministic integer from a post id, used only to mint a fake
+    session id for the sidecar. Post ids are opaque strings (v1.30.0 dropped
+    the uuid4 hex for a short base32-ish id), so this must NOT assume hex —
+    ``int(s[:8], 16)`` used to, and raised ValueError on the new alphabet."""
+    return int.from_bytes(hashlib.sha1(s.encode()).digest()[:4], "big")
 
 
 @pytest.fixture

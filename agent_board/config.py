@@ -15,7 +15,7 @@ from pathlib import Path
 @dataclass
 class Config:
     data_dir: Path  # board.db + runtime state live here
-    workspaces_root: Path  # per-post workspaces: <root>/<post_id>
+    workspaces_root: Path  # per-post workspaces: <root>/<post_id> (default <home>/ws)
     agent_cli_bin: str = "agent-cli"  # spawn binary
     idle_timeout: int = 300  # --idle-timeout passed to spawned instances
     gateway: str = "board-proxy"  # board-proxy (v1) | caddy
@@ -57,7 +57,12 @@ class Config:
         return cls(
             data_dir=Path(os.environ.get("AGENT_BOARD_DATA", base)),
             workspaces_root=Path(
-                os.environ.get("AGENT_BOARD_WORKSPACES", base / "workspaces")
+                # "ws", not "workspaces": every file the agent touches carries
+                # this prefix into its context (an action_input path is re-fed
+                # each turn and accumulates in the compaction file list), so the
+                # 8 characters are worth more than the spelling. Override with
+                # AGENT_BOARD_WORKSPACES.
+                os.environ.get("AGENT_BOARD_WORKSPACES", base / "ws")
             ),
             agent_cli_bin=os.environ.get("AGENT_BOARD_CLI", "agent-cli"),
             idle_timeout=int(os.environ.get("AGENT_BOARD_IDLE_TIMEOUT", "300")),

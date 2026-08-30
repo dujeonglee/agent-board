@@ -19,6 +19,23 @@
 
 ### 식별자 — post_id vs session_id
 - **post_id**: 보드가 글 생성 시 발급(안정적, 라우트 `/s/<post_id>` 에 사용).
+  - **형식 (v1.30.0)**: `agent_board.ids` 의 6자 소문자 base32(Crockford에서 혼동
+    글자 `i`/`l`/`o`/`u` 제외), `secrets` 로 추첨. 종전 `uuid4().hex`(32자)에서 바꾼
+    이유는 post_id 가 **워크스페이스 디렉토리명이기도** 하기 때문 — 32자 hex 는
+    (a) 어느 글인지 전혀 알려주지 않고 (b) 절대경로가 파일 조작마다 에이전트
+    컨텍스트에 실려 들어가는데 hex 는 토큰 효율이 나쁘다. 소문자 전용은
+    대소문자 무시 파일시스템(macOS/Windows)에서 서로 다른 PK 가 **같은 디렉토리**가
+    되는 것을 막는다.
+  - **엔트로피**: 32^6 ≈ 1.07e9 (약 30비트, uuid4 의 122비트에서 감소). 보드가
+    localhost 이거나 `caddy_basic_auth` 뒤에 있다는 전제에서만 충분하다 — 기본
+    `board-proxy` 는 `/s/<id>` 에 인증이 없어 id 가 유일한 가드다. 직접 노출한다면
+    `ids.ID_LENGTH` 를 올릴 것(모든 소비자가 불투명 문자열로 취급하므로 그 상수만
+    바꾸면 된다).
+  - **할당**: `store.create_post` 가 PK 충돌(IntegrityError)과 **디렉토리 선점**
+    (`dir_taken` — 삭제가 덜 끝나 남은 고아 디렉토리) 양쪽을 확인하고 재추첨한다.
+  - **매핑**: 짧은 랜덤 id 는 그 자체로 글을 지목하지 못하므로 대시보드 카드가
+    id 칩(`.ws-id`, 클릭=복사)으로 노출한다 — 이게 없으면 디스크 → 글 역추적이
+    불가능해 이번 변경이 토큰만 줄이고 매핑 문제를 남긴 셈이 된다.
 - **session_id**: agent-cli 가 **첫 spawn 때** 만드는 세션 id. 생성 시점엔 없음 →
   첫 open 에서 발견해 글에 저장. 이후 open 은 `--resume <session_id>`.
 
@@ -56,7 +73,7 @@ workspace 를 둘이 잡을 수 있음.
 PRAGMA journal_mode=WAL;     -- 동시 읽기/쓰기
 PRAGMA user_version=1;       -- 향후 마이그레이션 훅
 CREATE TABLE posts (
-  post_id         TEXT PRIMARY KEY,      -- 보드 발급 (uuid) — workspace 가 여기서 파생
+  post_id         TEXT PRIMARY KEY,      -- 보드 발급 (6자 base32) — workspace 가 여기서 파생
   topic           TEXT NOT NULL,
   session_id      TEXT UNIQUE,           -- NULL until first open; 한 세션=한 글
   force_active    INTEGER NOT NULL DEFAULT 0,

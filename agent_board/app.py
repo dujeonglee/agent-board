@@ -592,7 +592,13 @@ def create_app(
         if body.clone_from and store.get(body.clone_from) is None:
             raise HTTPException(status_code=404, detail="clone source not found")
 
-        post = store.create_post(topic=body.topic, model_id=body.model_id)
+        post = store.create_post(
+            topic=body.topic,
+            model_id=body.model_id,
+            # the id is also the workspace directory name — never reuse one
+            # an orphaned directory (half-finished delete) already holds.
+            dir_taken=lambda pid: config.workspace_for(pid).exists(),
+        )
         ws = config.workspace_for(post.post_id)
         try:
             ws.mkdir(parents=True, exist_ok=True)

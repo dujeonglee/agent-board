@@ -207,7 +207,12 @@
       `<div class="post-main">` +
       `<div class="post-topic">${esc(p.topic)}</div>` +
       `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— 아직 질문 없음</span>"}</div>` +
-      `<div class="post-meta">생성 ${fmtDate(p.created_at)}` +
+      // 워크스페이스 id — 디스크의 `<workspaces_root>/<id>` 와 이 카드를 잇는
+      // 유일한 표식이라 반드시 보여야 한다(짧은 랜덤 id 는 그 자체로는 어떤
+      // 글인지 말해주지 않는다). 클릭하면 복사 → 터미널에 바로 붙여넣기.
+      `<div class="post-meta">` +
+      `<button type="button" class="ws-id" data-id="${esc(p.post_id)}" title="워크스페이스 id — 클릭하면 복사">${esc(p.post_id)}</button>` +
+      ` · 생성 ${fmtDate(p.created_at)}` +
       (p.last_query_at ? ` · 마지막 ${fmtDate(p.last_query_at)}` : "") +
       `</div>` +
       `</div>` +
@@ -238,6 +243,40 @@
       `<div class="sched-panel" hidden></div>`;
 
     wireSchedule(el, p);
+    const wsId = el.querySelector(".ws-id");
+    if (wsId)
+      wsId.addEventListener("click", () => {
+        // navigator.clipboard 는 secure context 전용 → LAN http 에선 미정의라
+        // execCommand 폴백이 필수 (agent-cli 쪽 copyToClipboard 와 같은 이유).
+        const done = () => {
+          const orig = wsId.dataset.id;
+          wsId.textContent = "✓ 복사됨";
+          setTimeout(() => (wsId.textContent = orig), 1200);
+        };
+        // execCommand 폴백은 clipboard API 가 *없을* 때뿐 아니라 **거부될 때**도
+        // 필요하다: 권한이 없으면 writeText 는 존재하지만 reject 하므로,
+        // 거부를 무시하면 클릭이 조용히 아무 일도 안 한 것처럼 보인다.
+        const fallback = () => {
+          const ta = document.createElement("textarea");
+          ta.value = p.post_id;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand("copy");
+            done();
+          } catch (e) {
+            /* no-op */
+          }
+          document.body.removeChild(ta);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(p.post_id).then(done, fallback);
+        } else {
+          fallback();
+        }
+      });
     el.querySelector(".open").addEventListener("click", () => open(p.post_id));
     el.querySelector(".clone").addEventListener("click", () =>
       openCloneDialog(p)

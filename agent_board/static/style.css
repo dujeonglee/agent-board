@@ -135,6 +135,11 @@ header h1 { margin: 0; font-size: 18px; }
 .post-last { color: var(--text-2); font-size: 12.5px; margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .post-meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+/* 워크스페이스 id 칩 — 디스크 디렉토리명과 카드를 잇는 표식(클릭=복사) */
+.ws-id { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px;
+  color: var(--muted); background: none; border: none; padding: 0; cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 2px; }
+.ws-id:hover { color: var(--text, inherit); }
 .muted { color: var(--muted); }
 .post-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;

@@ -247,3 +247,47 @@ class TestTabTargeting:
 
         assert self._target_of_open_click(page) == "agentcli-" + post_id
         ctx.close()
+
+
+class TestWorkspaceIdChip:
+    """디스크 ↔ 카드 매핑 (v1.30.0).
+
+    post_id 가 32자 uuid hex 에서 6자 랜덤으로 짧아지면서 워크스페이스 경로가
+    크게 줄었지만, 짧은 랜덤 id 는 그 자체로는 어떤 글인지 말해주지 않는다.
+    그래서 대시보드가 id 를 노출해야 `<workspaces_root>/<id>` 디렉토리를 보고
+    어느 글인지 되짚을 수 있다 — 이게 없으면 이번 변경은 매핑 문제를 해결하지
+    못하고 토큰만 줄인 것이 된다.
+    """
+
+    def test_card_shows_the_workspace_id(self, board, browser):
+        pid = board.seed_post(topic="gomoku")
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.wait_for_selector(".ws-id", timeout=8000)
+        assert page.inner_text(".ws-id").strip() == pid
+        ctx.close()
+
+    def test_id_matches_the_directory_on_disk(self, board, browser):
+        board.seed_post(topic="gomoku")
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.wait_for_selector(".ws-id", timeout=8000)
+        shown = page.inner_text(".ws-id").strip()
+        assert (board.cfg.workspaces_root / shown).is_dir(), (
+            "카드에 보이는 id 로 워크스페이스를 찾을 수 없다 — 매핑 실패"
+        )
+        ctx.close()
+
+    def test_clicking_the_chip_flashes_copied(self, board, browser):
+        board.seed_post(topic="gomoku")
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.wait_for_selector(".ws-id", timeout=8000)
+        page.click(".ws-id")
+        assert _wait(lambda: "복사" in page.inner_text(".ws-id")), (
+            f"복사 피드백 없음: {page.inner_text('.ws-id')!r}"
+        )
+        ctx.close()

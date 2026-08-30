@@ -12,11 +12,16 @@ The sqlite3 calls are synchronous; the FastAPI layer wraps them in
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_board._sqlite import sqlite3  # stdlib sqlite3, or pysqlite3 fallback
+from agent_board.ids import new_post_id
 from agent_board.models import Post, Schedule
+
+# Draws before giving up on finding a free post id (see create_post).
+_ID_ALLOC_ATTEMPTS = 16
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS posts (
@@ -127,20 +132,45 @@ class Store:
         *,
         topic: str,
         model_id: str | None = None,
+        dir_taken: Callable[[str], bool] | None = None,
     ) -> Post:
-        post = Post(
-            post_id=uuid.uuid4().hex,
-            topic=topic,
-            model_id=model_id,
-            created_at=_now(),
+        """Allocate a post with a fresh short id (:mod:`agent_board.ids`).
+
+        The id must be unique against TWO namespaces, because it is both the
+        primary key and the workspace directory name: the ``posts`` table (the
+        PK enforces it — a duplicate raises ``IntegrityError``) and the
+        workspaces directory. ``dir_taken`` is how the caller supplies the
+        second check (``lambda pid: config.workspace_for(pid).exists()``); the
+        store must not import Config, and an orphaned directory left by a
+        half-finished delete must never be handed to a new post.
+
+        With a 6-character id a collision is ~1 in 10^9 per draw, so the retry
+        loop realistically never runs twice — it exists so that a shortened
+        ``ID_LENGTH``, or a board with a very large number of posts, degrades
+        into a retry instead of a 500."""
+        for _ in range(_ID_ALLOC_ATTEMPTS):
+            post = Post(
+                post_id=new_post_id(),
+                topic=topic,
+                model_id=model_id,
+                created_at=_now(),
+            )
+            if dir_taken is not None and dir_taken(post.post_id):
+                continue
+            try:
+                self._conn.execute(
+                    "INSERT INTO posts (post_id, topic, model_id, force_active, "
+                    "created_at) VALUES (?, ?, ?, 0, ?)",
+                    (post.post_id, post.topic, post.model_id, post.created_at),
+                )
+            except sqlite3.IntegrityError:
+                continue  # PK collision — draw again
+            self._conn.commit()
+            return post
+        raise RuntimeError(
+            f"could not allocate a free post id in {_ID_ALLOC_ATTEMPTS} attempts "
+            "— raise agent_board.ids.ID_LENGTH"
         )
-        self._conn.execute(
-            "INSERT INTO posts (post_id, topic, model_id, force_active, "
-            "created_at) VALUES (?, ?, ?, 0, ?)",
-            (post.post_id, post.topic, post.model_id, post.created_at),
-        )
-        self._conn.commit()
-        return post
 
     def set_session_id(self, post_id: str, session_id: str) -> None:
         # session_id UNIQUE → raises sqlite3.IntegrityError if already claimed

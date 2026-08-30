@@ -61,7 +61,7 @@ agent-board
 | **─ 경로 · 저장 ─** | | |
 | `AGENT_BOARD_HOME` | `./data` | 데이터 루트 base (아래 DATA·WORKSPACES 의 기본값 base) |
 | `AGENT_BOARD_DATA` | `= HOME`(`./data`) | `board.db`·`board.log`·`board.lock` 위치 (data_dir) |
-| `AGENT_BOARD_WORKSPACES` | `<base>/workspaces` | 글별 워크스페이스 루트 (`<root>/<post_id>`) |
+| `AGENT_BOARD_WORKSPACES` | `<base>/ws` | 글별 워크스페이스 루트 (`<root>/<post_id>`) |
 | `AGENT_BOARD_MODELS_JSON` | `~/.agent-cli/models.json` | 모델 드롭다운 목록 소스(agent-cli 레지스트리) |
 | **─ 인스턴스 spawn ─** | | |
 | `AGENT_BOARD_CLI` | `agent-cli` | spawn 바이너리 (PATH 또는 절대경로) |

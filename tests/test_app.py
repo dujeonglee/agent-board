@@ -115,6 +115,49 @@ class TestPostsApi:
         assert posts[0]["last_query_at"] is None  # no query yet
         assert posts[0]["awaiting_input"] is False  # not waiting on input
 
+    def test_created_id_is_short_and_workspace_derived_from_it(self, tmp_path):
+        """v1.30.0: the id is short + random, and the workspace is still a pure
+        function of it (nothing new stored)."""
+        from agent_board.ids import ALPHABET, ID_LENGTH
+
+        cfg, _, c = _client(tmp_path)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        assert len(pid) == ID_LENGTH
+        assert set(pid) <= set(ALPHABET)
+        assert cfg.workspace_for(pid) == cfg.workspaces_root / pid
+        assert cfg.workspace_for(pid).is_dir()
+
+    def test_create_never_reuses_an_orphaned_workspace_directory(self, tmp_path):
+        """A directory left behind by a half-finished delete must not be handed
+        to a new post — it would inherit someone else's files."""
+        cfg, _, c = _client(tmp_path)
+        import agent_board.store as store_mod
+        from agent_board.ids import new_post_id
+
+        orphan = new_post_id()
+        (cfg.workspaces_root / orphan).mkdir(parents=True)
+        (cfg.workspaces_root / orphan / "secret.txt").write_text("old post files")
+
+        real = new_post_id()
+        seq = iter([orphan, real])
+        orig = store_mod.new_post_id
+        store_mod.new_post_id = lambda: next(seq, orig())
+        try:
+            pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        finally:
+            store_mod.new_post_id = orig
+        assert pid == real
+        assert (cfg.workspaces_root / orphan / "secret.txt").read_text() == (
+            "old post files"
+        )
+
+    def test_post_id_is_listed_so_the_ui_can_show_it(self, tmp_path):
+        """Short random ids say nothing about which post they belong to, so the
+        dashboard has to surface the id to make disk ↔ card mapping possible."""
+        _, _, c = _client(tmp_path)
+        pid = c.post("/api/posts", json={"topic": "t"}).json()["post_id"]
+        assert c.get("/api/posts").json()[0]["post_id"] == pid
+
     def test_create_ignores_directive_and_writes_no_file(self, tmp_path):
         # The board no longer writes DIRECTIVE.md — a stray ``directive`` key is
         # ignored (extra field) and nothing is written to the workspace.
