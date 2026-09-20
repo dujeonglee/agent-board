@@ -624,17 +624,45 @@
     load();
   }
 
+  // 같은 제목의 글이 **둘** 생기던 버그 (사용자 제보). 두 경로가 겹쳤다:
+  //   ① IME — 한글 조합을 Enter 로 확정하면 `keydown` 이 한 번
+  //      (`isComposing=true`), 실제 제출로 또 한 번. 둘 다 같은 제목을 읽는다.
+  //   ② 가드 부재 — 입력을 `await` **뒤에** 비워서, 그 사이 두 번째 호출이
+  //      같은 값을 그대로 통과시킨다. 더블클릭·Enter+클릭도 같다.
+  // 막는 것은 **둘**: 조합 중 Enter 무시(아래 keydown) + 진행 중 가드.
+  //
+  // 한때 "요청 전에 입력 비우기"도 같이 뒀는데 뺐다 — 증상은 같이 막지만
+  // 두 방어가 **서로를 가려** 어느 쪽도 사보타주에 안 걸렸다(둘 중 하나를
+  // 없애도 나머지가 통과시킨다). 기계가 하나면 그게 무엇을 지키는지도
+  // 테스트가 말할 수 있다. 입력은 **성공한 뒤에만** 비운다 — 실패하면
+  // 사용자가 친 제목이 남아 다시 칠 필요가 없다.
+  let creating = false;
   async function create() {
+    if (creating) return;
     const topic = $topic.value.trim();
     if (!topic) {
       $topic.focus();
       return;
     }
-    await fetch("/api/posts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: topic, model_id: $model.value || null }),
-    });
+    creating = true;
+    $create.disabled = true;
+    try {
+      const r = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic, model_id: $model.value || null }),
+      });
+      if (!r.ok) {
+        $topic.focus();
+        return;
+      }
+    } catch (_e) {
+      $topic.focus();
+      return;
+    } finally {
+      creating = false;
+      $create.disabled = false;
+    }
     $topic.value = "";
     load();
   }
@@ -709,12 +737,17 @@
     );
   }
 
+  let cloning = false;
   async function submitClone() {
+    // `$cloneGo.disabled` 는 **버튼 클릭만** 막는다 — Enter 경로는 그대로
+    // 들어오므로 플래그가 따로 있어야 한다 (create 와 같은 사고).
+    if (cloning) return;
     const topic = $cloneTopic.value.trim();
     if (!topic) {
       $cloneTopic.focus();
       return;
     }
+    cloning = true;
     $cloneGo.disabled = true;
     $cloneMsg.textContent = "복제 중…";
     const r = await fetch("/api/posts", {
@@ -731,8 +764,10 @@
       const detail = await r.json().catch(() => ({}));
       $cloneMsg.textContent = "실패: " + (detail.detail || r.status);
       $cloneGo.disabled = false;
+      cloning = false;
       return;
     }
+    cloning = false;
     closeCloneDialog();
     load();
   }
@@ -808,11 +843,13 @@
     cloneFrom = null;
     cloneChecked.clear();
   });
+  // `isComposing` — 한글/일어 입력에서 조합 확정 Enter 와 제출 Enter 가
+  // **각각** keydown 을 낸다. 확정 쪽을 걸러야 한 번만 제출된다.
   $cloneTopic.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submitClone();
+    if (e.key === "Enter" && !e.isComposing) submitClone();
   });
   $topic.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") create();
+    if (e.key === "Enter" && !e.isComposing) create();
   });
 
   // ── Live push over SSE (replaces the old 5s /api/posts poll) ──────────
