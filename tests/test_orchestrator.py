@@ -56,8 +56,13 @@ class FakeBackend:
         self.already_up = True  # instance is now running (info will see it)
         return self.session_id  # discovered session_id
 
-    def pick_free_port(self):
-        return self.port
+    def pick_free_port(self, exclude=frozenset()):
+        # 실제 backend 처럼: 예약된 포트는 건너뛰고 다음 번호를 준다
+        port = self.port
+        while port in exclude:
+            port += 1
+        self.pick_exclude_seen = set(exclude)
+        return port
 
     def live_state(self, post):
         st = self.status or (
@@ -335,3 +340,63 @@ class TestRestart:
         orch = Orchestrator(cfg, store, backend=FakeBackend())
         with pytest.raises(KeyError):
             await orch.restart("nope")
+
+
+class TestPortReservation:
+    """v1.31.0: 스폰 중인 포트는 다른 글의 스폰에 다시 나오지 않는다 — 인스턴스가
+    bind 하기 전 몇 초 창에서 두 글을 열면 같은 포트가 두 번 나와 두 번째가
+    EADDRINUSE 로 죽던 것(2026-09-26 08:23, y9cs76 ↔ yg8q18 둘 다 50000)."""
+
+    def test_concurrent_opens_get_distinct_ports(self, tmp_path):
+        import asyncio
+        import threading
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+        a = store.create_post(topic="A")
+        b = store.create_post(topic="B")
+        started = threading.Event()
+        release = threading.Event()
+
+        class SlowBackend(FakeBackend):
+            """spawn 이 executor 안에서 오래 걸리는 동안 다른 open 이 들어온다."""
+
+            def spawn_and_wait(self, post, *, port, token):
+                self.ports = getattr(self, "ports", []) + [port]
+                started.set()
+                release.wait(5)
+                super().spawn_and_wait(post, port=port, token=token)
+                return f"S-{port}"  # 글마다 다른 세션(UNIQUE) — 인스턴스 값 공유 금지
+
+        be = SlowBackend()
+        orch = Orchestrator(cfg, store, backend=be)
+
+        async def run():
+            t1 = asyncio.create_task(orch.open(a.post_id))
+            await asyncio.get_event_loop().run_in_executor(None, started.wait, 5)
+            # 첫 스폰이 bind 전 — 예약 집합에 50001 이 들어 있어야 한다
+            assert 50001 in orch._ports_in_flight
+            t2 = asyncio.create_task(orch.open(b.post_id))
+            await asyncio.sleep(0.05)
+            release.set()
+            await asyncio.gather(t1, t2)
+
+        asyncio.new_event_loop().run_until_complete(run())
+        assert sorted(be.ports) == [50001, 50002]
+        assert orch._ports_in_flight == set()  # 끝나면 전부 풀린다
+
+    def test_reservation_released_on_failed_spawn(self, tmp_path):
+        import asyncio
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+        p = store.create_post(topic="A")
+
+        class DeadBackend(FakeBackend):
+            def spawn_and_wait(self, post, *, port, token):
+                return None  # ready 실패
+
+        orch = Orchestrator(cfg, store, backend=DeadBackend())
+        with pytest.raises(RuntimeError):
+            asyncio.new_event_loop().run_until_complete(orch.open(p.post_id))
+        assert orch._ports_in_flight == set()

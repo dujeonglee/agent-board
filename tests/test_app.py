@@ -1051,3 +1051,53 @@ class TestSchedulesApi:
         c.post(f"/api/posts/{pid}/schedules", json={"cron": "* * * * *", "prompt": "x"})
         c.delete(f"/api/posts/{pid}")
         assert store.list_schedules() == []
+
+
+class TestGrammarBadge:
+    """v1.31.0: 📐 문법 제약 세션 — status.json/health 의 additive `grammar` 가
+    post 로 나오고(구버전은 None), 카드가 켜진 것만 배지로 그린다."""
+
+    def test_live_state_passes_grammar_through(self, tmp_path, monkeypatch):
+        from agent_board import instances, sessions
+
+        monkeypatch.setattr(
+            instances, "read_web_json", lambda ws, sid: {"pid": 1, "port": 9}
+        )
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            instances,
+            "read_status_json",
+            lambda ws, sid: {
+                "busy": False,
+                "awaiting_input": False,
+                "viewers": 0,
+                "grammar": True,
+            },
+        )
+        assert sessions.live_state(tmp_path, "s")["grammar"] is True
+        monkeypatch.setattr(
+            instances,
+            "read_status_json",
+            lambda ws, sid: {"busy": False, "awaiting_input": False, "viewers": 0},
+        )
+        assert "grammar" not in sessions.live_state(tmp_path, "s")  # 구버전 인스턴스
+
+    def test_post_and_card_wiring(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "running",
+                "awaiting_input": False,
+                "viewers": 0,
+                "grammar": True,
+            },
+        )
+        (p,) = c.get("/api/posts").json()
+        assert p["grammar"] is True
+        js = c.get("/static/app.js").text
+        assert "grammar-chip" in js and "p.grammar" in js

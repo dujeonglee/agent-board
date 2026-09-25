@@ -352,3 +352,6 @@ dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
 .sform .f-prompt { grid-column: 1 / -1; resize: vertical; }
 .sform .sfoot { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 @media (max-width: 720px) { .sform { grid-template-columns: 1fr; } }
+
+/* 📐 문법 제약 세션 배지 (v1.31.0) — agents-chip 과 같은 자리·크기 */
+.grammar-chip { font-size: 11px; opacity: .85; margin-left: 4px; }

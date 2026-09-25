@@ -63,6 +63,8 @@
       "<td>" + (entry.context_window ?? "—") + "</td>" +
       "<td>" + (entry.max_output_tokens ?? "—") + "</td>" +
       "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>" +
+      // 📐 3값 — 모름(키 없음)은 ? 로, false 로 뭉개지 않는다
+      "<td>" + (entry.supports_grammar === true ? "✓" : entry.supports_grammar === false ? "✗" : "?") + "</td>" +
       "<td>" + (entry.wire_format || "auto") + "</td>"
     );
   }
@@ -181,6 +183,8 @@
     $("ef-ctx").value = entry.context_window ?? 4096;
     $("ef-maxout").value = entry.max_output_tokens ?? 2048;
     $("ef-thinking").checked = !!entry.supports_thinking;
+    $("ef-grammar").value =
+      entry.supports_grammar === true ? "true" : entry.supports_grammar === false ? "false" : "";
     // wire_format 바인딩 — 등록명 드롭다운만 (자유입력 금지: agent-cli 가
     // unknown 이름에 fail-fast). auto = 필드 미기록(해석 체인 위임).
     // agent_cli 미설치로 목록이 비어도 현재값은 옵션으로 보존.
@@ -217,6 +221,9 @@
     // 조용히 떨궜다(클로버) — 명시 필드로 승격해 봉합.
     const wf = $("ef-wire").value;
     if (wf) entry.wire_format = wf;
+    // auto("") = 필드 미기록 → 인스턴스가 프로브. true/false 만 적는다.
+    const sg = $("ef-grammar").value;
+    if (sg) entry.supports_grammar = sg === "true";
     try {
       await api("PUT", "/api/admin/models/" + encodeURIComponent(dlgModelId), entry);
       $("entry-dlg").close();

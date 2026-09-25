@@ -106,6 +106,7 @@ agent-board
    - **config.json**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
      화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 외 키는 보존.
      변경은 **새로 여는 인스턴스부터** 적용(떠 있는 방은 🔄 재실행).
+   - **models.json**: 표에 `문법` 열(`supports_grammar` ✓/✗/`?`=키 없음), 편집 폼에 3값 선택(auto=미기록 → 인스턴스가 첫 요청 전 프로브 / true / false) — v1.31.0. 글 카드에는 문법 제약이 실리는 세션에 📐 배지(status.json·health 의 `grammar`, agent-cli ≥ 9.24.0).
    - **models.json**: config 의 endpoint 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
      `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 "missing 전체 정리") /
      `NEW`(서버에만 있음 — **🔍 탐지** 버튼이 agent-cli 의 capability 자동 탐지를 돌려

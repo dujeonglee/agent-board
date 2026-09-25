@@ -250,6 +250,8 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "model_changeable": model_changeable,
         # 상주 에이전트 요약 (없으면 None — 프런트가 칩/상태 숨김)
         "agents": state.get("agents"),
+        # 📐 문법 제약 세션 (None = 구버전 인스턴스/다운 — 배지 숨김)
+        "grammar": state.get("grammar"),
         # ⏰ 예약 요약 — 카드 배지(개수)와 놓친 발화 배너용. 전체 목록은
         # 패널이 열릴 때 /api/posts/{id}/schedules 로 가져온다.
         "schedules": _schedules_summary(store, post.post_id),

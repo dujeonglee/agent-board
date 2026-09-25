@@ -71,9 +71,17 @@ def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> lis
     return cmd
 
 
-def pick_free_port(low: int, high: int) -> int:
+def pick_free_port(
+    low: int, high: int, *, exclude: frozenset[int] = frozenset()
+) -> int:
     """An OS-assigned free port. The range is advisory — we let the OS pick a
-    free ephemeral port and just sanity-check it falls in range, retrying."""
+    free ephemeral port and just sanity-check it falls in range, retrying.
+
+    ``exclude`` (v1.31.0): ports the caller has handed out but whose instance
+    has not bound yet. A bind probe only says "free *now*"; ``agent-cli web``
+    takes seconds to reach its bind, and two opens inside that window got the
+    same port (the second died with EADDRINUSE). The orchestrator keeps the
+    in-flight set and passes it here."""
     for _ in range(50):
         s = socket.socket()
         try:
@@ -82,10 +90,12 @@ def pick_free_port(low: int, high: int) -> int:
             port = s.getsockname()[1]
         finally:
             s.close()
-        if low <= port <= high:
+        if low <= port <= high and port not in exclude:
             return port
     # fall back to an explicit scan if the ephemeral range sits outside [low,high]
     for port in range(low, high + 1):
+        if port in exclude:
+            continue
         s = socket.socket()
         try:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

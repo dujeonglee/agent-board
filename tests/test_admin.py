@@ -473,3 +473,39 @@ class TestBaseUrlIsRemote:
         monkeypatch.setattr(admin.httpx, "get", lambda *a, **k: _Resp())
         admin.list_served_models(cfg)
         assert "원격 호스트" not in capsys.readouterr().err
+
+
+class TestSupportsGrammarField:
+    """v1.31.0: models.json 의 `supports_grammar` 는 3값(없음/true/false) — 편집
+    폼은 auto 를 '미기록' 으로 저장해 인스턴스의 프로브에 맡긴다."""
+
+    def test_entry_round_trips_true_false_and_absent(self, tmp_path):
+        mp = tmp_path / "models.json"
+        admin.save_model_entry(
+            "m",
+            {
+                "context_window": 1,
+                "max_output_tokens": 1,
+                "supports_thinking": False,
+                "supports_grammar": True,
+            },
+            mp,
+        )
+        assert admin._read_json(mp)["models"]["m"]["supports_grammar"] is True
+        admin.save_model_entry(
+            "m",
+            {"context_window": 1, "max_output_tokens": 1, "supports_thinking": False},
+            mp,
+        )
+        assert "supports_grammar" not in admin._read_json(mp)["models"]["m"]
+
+    def test_admin_ui_wiring(self):
+        from pathlib import Path
+
+        static = Path(admin.__file__).parent / "static"
+        html = (static / "admin.html").read_text(encoding="utf-8")
+        js = (static / "admin.js").read_text(encoding="utf-8")
+        assert 'id="ef-grammar"' in html and "<th>문법</th>" in html
+        assert (
+            "supports_grammar" in js and 'entry.supports_grammar = sg === "true"' in js
+        )

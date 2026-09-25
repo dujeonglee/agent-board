@@ -122,6 +122,12 @@ class TestPickFreePort:
         s.bind(("127.0.0.1", port))
         s.close()
 
+    def test_exclude_skips_reserved_ports(self):
+        """스캔 경로·OS 경로 모두 예약 포트를 건너뛴다 — 좁은 범위로 스캔을 강제."""
+        first = instances.pick_free_port(50000, 50003)
+        second = instances.pick_free_port(50000, 50003, exclude=frozenset({first}))
+        assert second != first and 50000 <= second <= 50003
+
 
 class TestPidAlive:
     def test_own_pid_alive(self):

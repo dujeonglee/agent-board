@@ -88,6 +88,10 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     # 구버전 인스턴스는 미기록 → 키 생략, 프런트가 칩 숨김).
     if isinstance(live.get("agents"), dict):
         out["agents"] = live["agents"]
+    # v1.31.0: 📐 문법 제약이 실리는 세션 (agent-cli ≥9.24.0 additive 필드 —
+    # status.json 과 /api/health 둘 다 같은 키). 구버전은 미기록 → 키 생략.
+    if isinstance(live.get("grammar"), bool):
+        out["grammar"] = live["grammar"]
     return out
 
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.31.0] - 2026-09-26
+
+### Added — 📐 문법 제약 표시 (agent-cli 9.24.0 짝)
+
+- 글 카드: 문법 제약 디코딩이 실리는 세션에 📐 배지. 소스는 인스턴스의
+  `status.json`(폴백 `/api/health`)의 additive `grammar` — 구버전 인스턴스는
+  키가 없어 배지도 없다.
+- admin models.json: 표에 `문법` 열(✓/✗/`?`), 편집 폼에 `supports_grammar`
+  3값(auto/true/false). auto 는 필드를 **적지 않아** 인스턴스가 첫 요청 전에
+  프로브하도록 둔다 — 모름을 false 로 뭉개지 않는다.
+
+### Fixed — 두 글을 연달아 열면 두 번째 인스턴스가 포트 충돌로 죽던 것
+
+사용자 제보(2026-09-26 08:23): `RuntimeError: instance for y9cs76 did not
+become ready`. 인스턴스 로그엔 `[Errno 48] address already in use (50000)`.
+5초 전에 연 다른 글(yg8q18)도 50000 을 받았습니다.
+
+- **원인.** `pick_free_port` 는 "지금 bind 되는가"만 봅니다. `agent-cli web`
+  은 스폰 후 실제로 bind 하기까지 몇 초가 걸려(임포트·세션 복원·프로브), 그
+  창 안에서 다른 글을 열면 같은 포트가 다시 나왔습니다. 보드가 나눠 준 포트를
+  어디에도 기억하지 않는 게 빈틈이었습니다.
+- **수정.** 오케스트레이터가 스폰 중인 포트 집합(`_ports_in_flight`)을 들고
+  `pick_free_port(exclude=…)` 로 건너뛰게 합니다. 스폰이 끝나면(ready 든 실패든)
+  풉니다. agent-cli 쪽 변경 없음 — cli 는 받은 포트를 bind 할 뿐입니다.
+- 테스트: 스폰이 진행 중인 동안 들어온 두 번째 open 이 다른 포트를 받는지,
+  실패한 스폰의 예약이 풀리는지, 좁은 범위 스캔에서 예약 포트를 건너뛰는지.
+
 ## [1.30.1] - 2026-09-22
 
 ### Fixed — 제목 엔터 시 같은 글이 두 개 생기던 것

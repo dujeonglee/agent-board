@@ -40,8 +40,10 @@ class RealBackend:
             return {"port": wj.get("port"), "token": wj.get("token")}
         return None
 
-    def pick_free_port(self) -> int:
-        return instances.pick_free_port(self._config.port_min, self._config.port_max)
+    def pick_free_port(self, exclude: frozenset[int] = frozenset()) -> int:
+        return instances.pick_free_port(
+            self._config.port_min, self._config.port_max, exclude=exclude
+        )
 
     def spawn_and_wait(self, post: Post, *, port: int, token: str) -> str | None:
         proc = instances.spawn(self._config, post, port=port, token=token)
@@ -74,6 +76,11 @@ class Orchestrator:
         self.store = store
         self.backend = backend
         self._locks: dict[str, asyncio.Lock] = {}
+        # 나눠 줬지만 아직 ready 가 아닌 포트 (v1.31.0). 포트 선택은 "지금 bind
+        # 되는가"만 보는데 인스턴스가 실제로 bind 하기까지 몇 초가 걸려, 그
+        # 사이에 다른 글을 열면 같은 포트가 또 나왔다(두 번째가 EADDRINUSE 로
+        # 죽어 "did not become ready"). 스폰이 끝나면(성공이든 실패든) 푼다.
+        self._ports_in_flight: set[int] = set()
 
     def _lock(self, post_id: str) -> asyncio.Lock:
         return self._locks.setdefault(post_id, asyncio.Lock())
@@ -94,12 +101,16 @@ class Orchestrator:
         # 이 open 만 기다리게 하고 루프는 계속 돌게 한다(_await_dead 와 동형).
         info = await loop.run_in_executor(None, self.backend.info, post)
         if info is None:  # not up → spawn
-            port = self.backend.pick_free_port()
+            port = self.backend.pick_free_port(frozenset(self._ports_in_flight))
             token = reuse_token or secrets.token_urlsafe(16)
-            sid = await loop.run_in_executor(
-                None,
-                lambda: self.backend.spawn_and_wait(post, port=port, token=token),
-            )
+            self._ports_in_flight.add(port)
+            try:
+                sid = await loop.run_in_executor(
+                    None,
+                    lambda: self.backend.spawn_and_wait(post, port=port, token=token),
+                )
+            finally:
+                self._ports_in_flight.discard(port)
             if sid is None:
                 raise RuntimeError(f"instance for {post.post_id} did not become ready")
             if post.session_id is None:  # first open → persist new session

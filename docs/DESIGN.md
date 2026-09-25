@@ -133,9 +133,11 @@ post = store.get(id)
 async with lock[id]:
   info = backend.info(post)                    # 떠 있으면 {port, token}, 아니면 None
   if info is None:                             # 없으면 spawn
-     port  = backend.pick_free_port()
+     port  = backend.pick_free_port(exclude=ports_in_flight)  # 스폰 중인 포트 제외(1.31.0)
      token = secrets.token_urlsafe(16)         # 보드가 토큰 생성
-     sid   = backend.spawn_and_wait(post, port, token)   # 아래 6
+     ports_in_flight.add(port)                 # 인스턴스가 bind 하기까지 몇 초 — 그 창에서
+     sid   = backend.spawn_and_wait(post, port, token)   # 아래 6   다른 글이 같은 포트를 받지 않게
+     ports_in_flight.discard(port)             # 성공·실패 모두 해제
      if post.session_id is None:               # 첫 spawn = 새 세션
         store.set_session_id(id, sid)
   else:

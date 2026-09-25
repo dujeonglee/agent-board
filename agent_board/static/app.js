@@ -220,6 +220,8 @@
       `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}` +
       (up ? ` <span class="viewers" title="접속자 수">👁 ${p.viewers}</span>` : "") +
       (up ? agentsChip(p) : "") +
+      // 📐 문법 제약이 실리는 세션 — 인스턴스의 칩과 같은 값(status.json)
+      (up && p.grammar ? ` <span class="grammar-chip" title="디코딩 문법 제약 켬 — 도구 호출 형식을 서버가 강제">📐</span>` : "") +
       `</span>` +
       modelSelect(p) +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
