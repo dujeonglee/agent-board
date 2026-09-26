@@ -221,7 +221,8 @@
     // 조용히 떨궜다(클로버) — 명시 필드로 승격해 봉합.
     const wf = $("ef-wire").value;
     if (wf) entry.wire_format = wf;
-    // auto("") = 필드 미기록 → 인스턴스가 프로브. true/false 만 적는다.
+    // "" = 필드 미기록 → 인스턴스에선 미확인(잠김), 감지(프로브)가 판정해 적는다.
+    // 여기서는 true/false 만 적는다.
     const sg = $("ef-grammar").value;
     if (sg) entry.supports_grammar = sg === "true";
     try {
