@@ -295,6 +295,10 @@ dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
 
 .sched-panel {
   flex-basis: 100%;
+  /* flex 항목의 기본 min-width:auto 는 내용의 최소 폭 — 줄바꿈 없는 긴
+     프롬프트 한 줄만큼 패널이 카드 밖으로 자랐다(v1.31.2). 0 으로 두어야
+     카드 폭에 갇히고 아래 줄바꿈·말줄임이 동작한다. */
+  min-width: 0;
   border-top: 1px solid var(--border); padding-top: 10px;
 }
 .sched-head { font-size: 12.5px; font-weight: 700; color: var(--text-2); margin-bottom: 8px; }
@@ -322,8 +326,13 @@ dialog#clone-dlg::backdrop { background: rgba(0, 0, 0, 0.5); }
 .sprompt {
   color: var(--muted); font-size: 11.5px; margin: 0 0 8px 2px;
   padding-left: 10px; border-left: 2px solid var(--border-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  /* 프롬프트는 예약의 본문 — 한 줄 말줄임 대신 줄바꿈해 3줄까지 보이고,
+     클릭하면 전부 편다(v1.31.2). */
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden; cursor: pointer;
 }
+.sprompt.open { -webkit-line-clamp: unset; display: block; }
 
 .sform {
   margin-top: 8px; padding: 10px 12px;

@@ -400,19 +400,21 @@
           badge +
           `<span class="slabel">${esc(s.label) || "(무제)"}</span>` +
           `<span class="scron" title="${esc(s.cron)}">${esc(s.human)}</span>` +
-          `<span class="swho" title="주입 메시지 표시 이름">as ${esc(who)}</span>` +
+          // 목적지는 언제나 이 글의 main — 발화 시 채팅 메시지로 주입된다.
+          // 표시 이름만 보이면 어느 에이전트가 받는지 알 수 없었다(v1.31.2).
+          `<span class="swho" title="발화 시 이 글의 main 에 채팅으로 주입 — 표시 이름 ${esc(who)}">→ main as ${esc(who)}</span>` +
           `<span class="snext">${next}</span>` +
           `<span class="sacts">` +
           `<button class="s-tgl btn-ghost ${s.enabled ? "tgl-on" : ""}" type="button" title="켜기/끄기">${s.enabled ? "ON" : "OFF"}</button>` +
           `<button class="s-run btn-ghost" type="button" title="지금 즉시 1회 실행">▶</button>` +
           `<button class="s-del btn-danger" type="button" title="삭제">🗑</button>` +
           `</span></div>` +
-          `<div class="sprompt">${esc(s.prompt)}</div>`
+          `<div class="sprompt" title="클릭하면 전체를 펼치거나 접습니다">${esc(s.prompt)}</div>`
         );
       })
       .join("");
     panel.innerHTML =
-      `<div class="sched-head">⏰ 예약 <span class="sub">발화 시 인스턴스가 꺼져 있으면 자동 재시작 후 주입</span></div>` +
+      `<div class="sched-head">⏰ 예약 <span class="sub">발화 시 이 글의 main 에 채팅으로 주입 · 인스턴스가 꺼져 있으면 자동 재시작</span></div>` +
       (list || '<div class="muted" style="font-size:12px">아직 예약이 없습니다.</div>') +
       `<div class="sform">` +
       `<input class="f-label" type="text" placeholder="이름 (예: 주간 보고)" maxlength="60">` +
@@ -435,6 +437,10 @@
         await schedApi(`/api/schedules/${sid}`, { method: "DELETE" });
       });
       row.querySelector(".s-run").addEventListener("click", () => schedRunNow(sid));
+      // 프롬프트 클릭 → 3줄 클램프 펴기/접기 (v1.31.2)
+      const prompt = row.nextElementSibling;
+      if (prompt && prompt.classList.contains("sprompt"))
+        prompt.addEventListener("click", () => prompt.classList.toggle("open"));
       row.querySelector(".s-tgl").addEventListener("click", async (e) => {
         const on = e.target.classList.contains("tgl-on");
         await schedApi(`/api/schedules/${sid}/toggle`, {
