@@ -12,7 +12,7 @@ file, so a line is never applied twice (append-only requests, no truncation).
 Request lines::
 
     {"op":"add","cron":"0 9 * * 1","prompt":"...","label":"주간 보고","req_id":"r1"}
-    {"op":"delete","schedule_id":"...","req_id":"r2"}
+    {"op":"delete","id":"...","req_id":"r2"}
     {"op":"list","req_id":"r3"}
 
 Safety: agent-sourced schedules are capped per post; a delete may only target a
@@ -72,7 +72,7 @@ def _write_state_atomic(workspace: Path, state: dict) -> None:
 
 def _schedule_state_view(s) -> dict:
     view = {
-        "schedule_id": s.schedule_id,
+        "id": s.schedule_id,
         "source": s.source,
         "cron": s.cron,
         "human": cron.describe(s.cron),
@@ -116,9 +116,9 @@ def _apply_one(store, post_id: str, req: dict, *, agent_cap: int) -> dict:
             label=(req.get("label") or "").strip(),
             nickname=(req.get("nickname") or "").strip(),
         )
-        return {"ok": True, "schedule_id": s.schedule_id}
+        return {"ok": True, "id": s.schedule_id}
     if op == "delete":
-        sid = req.get("schedule_id") or ""
+        sid = req.get("id") or ""
         s = store.get_schedule(sid)
         if s is None or s.post_id != post_id:
             # 남의 post 스케줄은 존재 여부조차 노출하지 않음 (자연 격리)

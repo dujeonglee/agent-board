@@ -126,10 +126,10 @@ UI (post 카드 확장 또는 ⏰ 드로어):
 - **요청**: `<workspace>/.agent-cli/schedule-requests.jsonl` — 에이전트가 append.
   ```jsonl
   {"op":"add","cron":"0 9 * * 1","prompt":"주간 보고를 작성해줘","label":"주간 보고","nickname":"주간봇","req_id":"r1"}
-  {"op":"delete","schedule_id":"...","req_id":"r2"}
+  {"op":"delete","id":"...","req_id":"r2"}
   {"op":"list","req_id":"r3"}
   ```
-- **상태(회신)**: `<workspace>/.agent-cli/schedule-state.json` — board 가 원자적(mkstemp+replace)으로 재기록. 현재 스케줄 전체 + 각 req_id 의 처리 결과(`ok`/`error:...`). 에이전트는 이 파일을 read_file 로 확인.
+- **상태(회신)**: `<workspace>/.agent-cli/schedule-state.json` — board 가 원자적(mkstemp+replace)으로 재기록. 현재 스케줄 전체 + 각 req_id 의 처리 결과(`ok`/`error:...`). 에이전트는 이 파일을 read_file 로 확인. 스케줄 행과 `add` 결과의 식별자 키는 **`id`** (v1.31.3 — cli 9.25.4 짝; 종전 `schedule_id`, 호환 없음: 다른 도구가 전부 `id` 라 모델이 `schedule_id` 를 끝내 쓰지 못한 실측 뒤 도구·파일 모두 한 철자로). DB 열·REST 경로의 `schedule_id` 는 보드 내부라 그대로.
 - board 스캐너가 요청 파일을 tick 마다 확인(mtime 게이트), 처리한 라인 수를 오프셋으로 기억(state 에 `consumed` 기록) — 재처리 없음. 처리 후 요청 파일은 truncate 하지 않고 오프셋 방식(단순·안전) 또는 처리분 제거 중 택1 — **구현 시 오프셋 방식 채택**.
 
 ### 7.2 에이전트가 계약을 "아는" 방법 (agent-cli 측 소규모 변경)

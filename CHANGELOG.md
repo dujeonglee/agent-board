@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.31.3] - 2026-09-30
+
+### Changed — 파일 계약의 식별자 키 `schedule_id` → `id` (agent-cli 9.25.4 짝, 호환 없음)
+
+`schedule-requests.jsonl` 의 `delete` 요청, `schedule-state.json` 의 스케줄
+행과 `add` 결과가 식별자를 `id` 로 부릅니다. agent-cli 의 `schedule` 도구가
+`id` 하나로 통일되면서(다른 도구가 전부 `id` 라 모델이 `schedule_id` 를 끝내
+쓰지 못했다) 파일 계약도 같은 철자로 맞췄습니다. 옛 cli 의 `schedule_id`
+삭제 요청은 "no such schedule" 로 거절됩니다 — cli 9.25.4 이상과 짝지어
+쓰세요. DB 열·REST 경로(`/api/schedules/{schedule_id}`)는 보드 내부라 그대로.
+
 ## [1.31.2] - 2026-09-30
 
 ### Fixed — ⏰ 예약 패널이 카드 밖으로 넘치던 것

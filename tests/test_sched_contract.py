@@ -65,7 +65,7 @@ class TestApply:
         s = store.add_schedule(
             post_id=post.post_id, source="agent", cron="* * * * *", prompt="x"
         )
-        _write_reqs(ws, {"op": "delete", "schedule_id": s.schedule_id, "req_id": "r1"})
+        _write_reqs(ws, {"op": "delete", "id": s.schedule_id, "req_id": "r1"})
         assert sc.apply_requests(store, post.post_id, ws) is True
         assert store.list_schedules(post.post_id) == []
 
@@ -76,7 +76,7 @@ class TestApply:
         s = store.add_schedule(
             post_id=other.post_id, source="user", cron="* * * * *", prompt="x"
         )
-        _write_reqs(ws, {"op": "delete", "schedule_id": s.schedule_id, "req_id": "r1"})
+        _write_reqs(ws, {"op": "delete", "id": s.schedule_id, "req_id": "r1"})
         assert sc.apply_requests(store, post.post_id, ws) is False
         assert store.get_schedule(s.schedule_id) is not None
         assert "no such schedule" in _state(ws)["results"]["r1"]["error"]
@@ -153,7 +153,7 @@ class TestRefreshState:
         )
         sc.refresh_state(store, post.post_id, ws)
         st = _state(ws)
-        assert [x["schedule_id"] for x in st["schedules"]] == [s.schedule_id]
+        assert [x["id"] for x in st["schedules"]] == [s.schedule_id]
         assert st["consumed"] == 1  # 오프셋 보존 (요청 미소비)
 
     def test_refresh_skips_untouched_workspace(self, env):
