@@ -486,8 +486,8 @@ def create_app(
             )
         except admin.AdminError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        # wire format 바인딩 드롭다운 옵션 (예외 없음 — 미설치면 빈 목록)
-        view["wire_formats"] = await _admin_call(admin.list_wire_format_names)
+        # 방언(dialect) 바인딩 드롭다운 옵션 (예외 없음 — 미설치면 빈 목록)
+        view["dialects"] = await _admin_call(admin.list_dialect_names)
         return view
 
     @app.post("/api/admin/models/detect")

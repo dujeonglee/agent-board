@@ -65,7 +65,8 @@
       "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>" +
       // 📐 3값 — 모름(키 없음)은 ? 로, false 로 뭉개지 않는다
       "<td>" + (entry.supports_grammar === true ? "✓" : entry.supports_grammar === false ? "✗" : "?") + "</td>" +
-      "<td>" + (entry.wire_format || "auto") + "</td>"
+      // dialect(agent-cli ≥ 10) — 옛 키 wire_format 으로 저장된 엔트리도 보여 준다
+      "<td>" + (entry.dialect || entry.wire_format || "auto") + "</td>"
     );
   }
 
@@ -185,12 +186,13 @@
     $("ef-thinking").checked = !!entry.supports_thinking;
     $("ef-grammar").value =
       entry.supports_grammar === true ? "true" : entry.supports_grammar === false ? "false" : "";
-    // wire_format 바인딩 — 등록명 드롭다운만 (자유입력 금지: agent-cli 가
+    // dialect 바인딩 — 등록명 드롭다운만 (자유입력 금지: agent-cli 가
     // unknown 이름에 fail-fast). auto = 필드 미기록(해석 체인 위임).
-    // agent_cli 미설치로 목록이 비어도 현재값은 옵션으로 보존.
+    // 옛 키 wire_format(agent-cli < 10 시절 저장분)도 현재값으로 읽는다 —
+    // 저장하면 새 키 dialect 로 옮겨진다. 미설치로 목록이 비어도 현재값은 보존.
     const sel = $("ef-wire");
-    const current = entry.wire_format || "";
-    const names = [...(modelsView.wire_formats || [])];
+    const current = entry.dialect || entry.wire_format || "";
+    const names = [...(modelsView.dialects || [])];
     if (current && !names.includes(current)) names.push(current);
     sel.innerHTML = "";
     const auto = document.createElement("option");
@@ -217,10 +219,11 @@
       supports_thinking: $("ef-thinking").checked,
     };
     // auto("") = 필드 미기록 — keep-sentinel 과 같은 "안 고르면 안 쓴다"
-    // 패턴. 종전엔 저장이 entry 를 재조립하며 손으로 넣은 wire_format 을
-    // 조용히 떨궜다(클로버) — 명시 필드로 승격해 봉합.
-    const wf = $("ef-wire").value;
-    if (wf) entry.wire_format = wf;
+    // 패턴. 종전엔 저장이 entry 를 재조립하며 손으로 넣은 바인딩을
+    // 조용히 떨궜다(클로버) — 명시 필드로 승격해 봉합. 키는 dialect
+    // (agent-cli v10.0.0); 옛 wire_format 은 재조립에서 자연히 빠진다.
+    const dialect = $("ef-wire").value;
+    if (dialect) entry.dialect = dialect;
     // "" = 필드 미기록 → 인스턴스에선 미확인(잠김), 감지(프로브)가 판정해 적는다.
     // 여기서는 true/false 만 적는다.
     const sg = $("ef-grammar").value;
