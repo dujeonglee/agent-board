@@ -446,7 +446,9 @@ class TestDialectBinding:
         assert "방언을 고르세요" in js  # 빈 값은 프론트에서도 멈춘다
         assert "DIALECT_GUIDE" in js and "json_fc:" in js and "native_fc:" in js
         assert "#model=" in js  # /admin#model=<id> 딥링크
-        assert 'addEventListener("hashchange", openModelFromHash)' in js  # 열린 탭도 반응
+        assert (
+            'addEventListener("hashchange", openModelFromHash)' in js
+        )  # 열린 탭도 반응
 
     def test_put_entry_without_dialect_is_400(self, tmp_path):
         _, models_json, c = _admin_client(tmp_path)
