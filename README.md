@@ -83,10 +83,19 @@ agent-board
 > spawn 된 인스턴스 출력(배너 등) → **`<workspace>/.agent-cli/instance.log`**.
 
 ## 사용
-1. **새 글**: 주제 + (선택) **모델** → 빈 워크스페이스 자동 생성.
+1. **새 글**: 주제 + **모델(필수)** → 빈 워크스페이스 자동 생성.
    모델 드롭다운은 agent-cli 레지스트리(`~/.agent-cli/models.json`,
    `AGENT_BOARD_MODELS_JSON` 로 변경)에서 채워지며, 고른 id 가 spawn 시 `--model` 로
    전달됨(키/정의는 agent-cli 가 자기 레지스트리에서 해석 — 보드에 안 흩어짐).
+   **v1.33.0 (agent-cli ≥ 10.4.0 짝)**: 드롭다운에는 **방언(dialect) 바인딩이 있는 모델만**
+   보인다 — agent-cli v10.3.0 부터 바인딩 없는 모델은 부트에서 거부되므로, 보드는 같은
+   판정으로 선택지에서 빼고(하나뿐이면 미리 고름, 없으면 "⚙ 어드민에서 설정" 안내로
+   만들기 비활성), 서버도 생성·모델 변경(400)과 열기·🔄 재실행(409)을 사유와 함께 거절한다.
+   "(기본)" 선택지는 없다 — agent-cli `config.json` 의 `default_model` 에 기대지 않는다.
+   모델이 없거나(v1.33.0 전 "(기본)" 글) 바인딩이 빠진 글은 카드에 ⚠ 경고 줄과
+   **⚙ 설정** 링크(`/admin#model=<id>` — 그 모델의 편집 창이 바로 열림)가 뜨고 열기가
+   비활성이다. 인스턴스가 준비되지 못하면(부트 fail-fast) 열기 실패 토스트에
+   `instance.log` 꼬리의 사유가 실린다(502).
    기존 코드는 글을 연 뒤 📁 업로드 또는 에이전트에게 `git clone` 으로 투입.
 2. **열기**: spawn-or-attach 후 `/s/<post_id>/` 로 접속 → agent-cli UI.
 3. **모델 변경**: 게시글 행의 모델 드롭다운으로 언제든 바꿀 수 있다 — 단 **아무도 보고 있지
@@ -112,11 +121,13 @@ agent-board
      `NEW`(서버에만 있음 — **🔍 탐지** 버튼이 agent-cli 의 capability 자동 탐지를 돌려
      entry 초안을 채우고, 검토·수정 후 저장; 탐지 실패 시 수동 입력). 편집은 ✎ 다이얼로그
      (context_window/max_output_tokens/thinking/budget/format +
-     **dialect(방언) 바인딩 드롭다운** — 이 모델의 응답 tool-call 모양(agent-cli
-     모델별 바인딩, v10.0.0 부터 키 `dialect`; 옛 키 `wire_format` 으로 저장된 엔트리는
-     그대로 보이고 저장하면 새 키로 옮겨짐 — v1.32.0); `auto` 는 필드 미기록 = 해석 체인
-     위임(기본 json_fc). 옵션은 agent-cli 등록 방언명만(자유입력 금지 — 오타는 agent-cli
-     부트 fail-fast 대상).
+     **dialect(방언) 바인딩 드롭다운 — 필수(v1.33.0)** — 이 모델의 응답 tool-call 모양
+     (agent-cli 모델별 바인딩, 키 `dialect`). 없으면 agent-cli 가 그 모델을 실행하지 않으므로
+     저장이 거절되고(400), 표에는 ⚠ 미설정 배지가, 편집 창에는 선택지별 한 줄 가이드
+     (`json_fc` 일반 권장 / `native_fc` 서버가 tool_calls 를 직접 파싱할 때 / `xml_fc` 태그
+     모양 선호 모델 …)가 보인다. `auto` 선택지와 옛 키 `wire_format` 읽기는 없다(agent-cli
+     v10.4.0 과 같은 판정). 옵션은 agent-cli 등록 방언명만(자유입력 금지 — 오타는
+     agent-cli 부트 fail-fast 대상).
    - 자동 삭제는 없음 — 모든 파괴적 동작은 confirm 클릭으로. 쓰기는 원자적(temp+replace)이라
      agent-cli 인스턴스의 auto-detect 저장과 겹쳐도 안전.
 8. **⏰ 예약** (v1.26.0): 게시글 카드의 ⏰ 버튼 → 패널에서 **주기 실행**을 등록 —

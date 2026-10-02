@@ -164,16 +164,47 @@ class TestModelStatus:
 class TestModelEntryEdit:
     def test_save_preserves_other_models_and_top_keys(self, tmp_path):
         models = _models_file(tmp_path)
-        admin.save_model_entry("m1", {"context_window": 9999}, models)
+        admin.save_model_entry(
+            "m1", {"context_window": 9999, "dialect": "json_fc"}, models
+        )
         saved = json.loads(models.read_text())
-        assert saved["models"]["m1"] == {"context_window": 9999}
+        assert saved["models"]["m1"] == {"context_window": 9999, "dialect": "json_fc"}
         assert saved["models"]["gone"]["context_window"] == 2000
         assert saved["provider_defaults"] == {"keep": True}
 
     def test_save_new_model(self, tmp_path):
         models = _models_file(tmp_path)
-        admin.save_model_entry("fresh", {"context_window": 8192}, models)
+        admin.save_model_entry(
+            "fresh", {"context_window": 8192, "dialect": "xml_fc"}, models
+        )
         assert "fresh" in json.loads(models.read_text())["models"]
+
+    def test_save_without_dialect_is_refused(self, tmp_path):
+        # v1.33.0: 바인딩 필수 — 없으면 agent-cli 가 실행하지 않는 모델이 된다
+        models = _models_file(tmp_path)
+        for entry in ({"context_window": 1}, {"dialect": ""}, {"dialect": None}):
+            with pytest.raises(admin.AdminError, match="dialect"):
+                admin.save_model_entry("m1", entry, models)
+        assert json.loads(models.read_text())["models"]["m1"] == {
+            "context_window": 1000
+        }  # 그대로
+
+    def test_save_with_unknown_dialect_is_refused(self, tmp_path, monkeypatch):
+        models = _models_file(tmp_path)
+        monkeypatch.setattr(admin, "list_dialect_names", lambda: ["json_fc"])
+        with pytest.raises(admin.AdminError, match="알 수 없는 dialect 'nope'"):
+            admin.save_model_entry("m1", {"dialect": "nope"}, models)
+
+    def test_save_skips_name_check_when_agent_cli_missing(self, tmp_path, monkeypatch):
+        models = _models_file(tmp_path)
+        monkeypatch.setattr(admin, "list_dialect_names", list)
+        admin.save_model_entry("m1", {"dialect": "whatever"}, models)
+        assert json.loads(models.read_text())["models"]["m1"]["dialect"] == "whatever"
+
+    def test_old_wire_format_key_does_not_count_as_binding(self, tmp_path):
+        models = _models_file(tmp_path)
+        with pytest.raises(admin.AdminError, match="dialect"):
+            admin.save_model_entry("m1", {"wire_format": "xml_fc"}, models)
 
     def test_delete_removes_and_reports(self, tmp_path):
         models = _models_file(tmp_path)
@@ -278,7 +309,10 @@ class TestAdminApi:
 
     def test_put_and_delete_model(self, tmp_path):
         _, models_json, c = _admin_client(tmp_path)
-        r = c.put("/api/admin/models/fresh", json={"context_window": 4096})
+        r = c.put(
+            "/api/admin/models/fresh",
+            json={"context_window": 4096, "dialect": "json_fc"},
+        )
         assert r.status_code == 200
         assert "fresh" in json.loads(models_json.read_text())["models"]
         assert c.delete("/api/admin/models/fresh").status_code == 200
@@ -358,22 +392,21 @@ class TestDialectBinding:
         assert "md_array" not in names  # v6.0.0 리네임
         assert "react" not in names  # v7.0.0 제거
 
-    def test_list_dialect_names_falls_back_to_old_package(self, monkeypatch):
-        # agent-cli < 10: dialects 패키지가 없으면 wire_formats 로
-        import sys
-        import types
-
-        legacy = types.ModuleType("agent_cli.wire_formats")
-        legacy.list_names = lambda: ["json_fc", "legacy_only"]
-        monkeypatch.setitem(sys.modules, "agent_cli.dialects", None)
-        monkeypatch.setitem(sys.modules, "agent_cli.wire_formats", legacy)
-        assert admin.list_dialect_names() == ["json_fc", "legacy_only"]
-
     def test_list_dialect_names_missing_agent_cli(self, monkeypatch):
         import sys
 
         monkeypatch.setitem(sys.modules, "agent_cli.dialects", None)
-        monkeypatch.setitem(sys.modules, "agent_cli.wire_formats", None)
+        assert admin.list_dialect_names() == []
+
+    def test_no_fallback_to_old_package(self, monkeypatch):
+        # agent-cli v10.4.0 이 wire_formats shim 을 지웠다 — 보드도 보지 않는다
+        import sys
+        import types
+
+        legacy = types.ModuleType("agent_cli.wire_formats")
+        legacy.list_names = lambda: ["legacy_only"]
+        monkeypatch.setitem(sys.modules, "agent_cli.dialects", None)
+        monkeypatch.setitem(sys.modules, "agent_cli.wire_formats", legacy)
         assert admin.list_dialect_names() == []
 
     def test_models_view_includes_dialects(self, tmp_path, monkeypatch):
@@ -397,21 +430,40 @@ class TestDialectBinding:
 
     def test_static_wiring_dropdown(self, tmp_path):
         # 정적 배선 계약 (agent-cli test_web_server 동형): 셀렉트 id·옵션
-        # 채움·auto=미기록 저장 로직이 프론트에 실재하는지 고정.
+        # 채움·필수 저장 로직·가이드·딥링크가 프론트에 실재하는지 고정.
         _, _, c = _admin_client(tmp_path)
         html = c.get("/admin").text
         assert 'id="ef-wire"' in html
+        assert 'id="ef-wire-guide"' in html  # 방언 선택 가이드 한 줄
         assert "<th>dialect</th>" in html
+        assert "badge unbound" in html  # 범례의 ⚠ 미설정
         js = c.get("/static/admin.js").text
         assert "modelsView.dialects" in js  # 옵션 소스
-        assert "entry.dialect = dialect" in js  # 선택 시에만 필드 기록 (새 키)
-        assert "entry.wire_format = " not in js  # 옛 키는 더 쓰지 않는다
-        assert (
-            'entry.dialect || entry.wire_format || "auto"' in js
-        )  # 행 셀: 옛 키도 표시
-        assert (
-            'entry.dialect || entry.wire_format || ""' in js
-        )  # 편집 현재값: 옛 키도 읽음
+        assert "entry.dialect = dialect" in js  # 저장 시 새 키
+        assert "wire_format" not in js  # 옛 키는 읽지도 쓰지도 않는다
+        assert "auto (기본 체인)" not in js  # auto 선택지 없음 — 바인딩 필수
+        assert 'auto.value = ""' not in js
+        assert "방언을 고르세요" in js  # 빈 값은 프론트에서도 멈춘다
+        assert "DIALECT_GUIDE" in js and "json_fc:" in js and "native_fc:" in js
+        assert "#model=" in js  # /admin#model=<id> 딥링크
+
+    def test_put_entry_without_dialect_is_400(self, tmp_path):
+        _, models_json, c = _admin_client(tmp_path)
+        r = c.put("/api/admin/models/qwen-x", json={"context_window": 8192})
+        assert r.status_code == 400
+        assert "dialect" in r.json()["detail"]
+        import json as _json
+
+        assert "qwen-x" not in _json.loads(models_json.read_text())["models"]
+
+    def test_models_view_rows_carry_dialect(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(admin, "list_served_models", lambda cfg: ["m1"])
+        _, _, c = _admin_client(tmp_path)
+        c.put("/api/admin/models/m1", json={"context_window": 1, "dialect": "xml_fc"})
+        rows = {
+            r["id"]: r["dialect"] for r in c.get("/api/admin/models").json()["models"]
+        }
+        assert rows == {"m1": "xml_fc", "gone": None}
 
 
 class TestBaseUrlIsRemote:
@@ -507,13 +559,19 @@ class TestSupportsGrammarField:
                 "max_output_tokens": 1,
                 "supports_thinking": False,
                 "supports_grammar": True,
+                "dialect": "json_fc",
             },
             mp,
         )
         assert admin._read_json(mp)["models"]["m"]["supports_grammar"] is True
         admin.save_model_entry(
             "m",
-            {"context_window": 1, "max_output_tokens": 1, "supports_thinking": False},
+            {
+                "context_window": 1,
+                "max_output_tokens": 1,
+                "supports_thinking": False,
+                "dialect": "json_fc",
+            },
             mp,
         )
         assert "supports_grammar" not in admin._read_json(mp)["models"]["m"]

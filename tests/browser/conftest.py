@@ -67,7 +67,13 @@ class BoardStack:
         from agent_board.config import Config
         from agent_board.store import Store
 
-        self.cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        reg = tmp_path / "models.json"
+        reg.write_text(json.dumps({"models": {"m": {"dialect": "json_fc"}}}))
+        self.cfg = Config(
+            data_dir=tmp_path / "data",
+            workspaces_root=tmp_path / "ws",
+            models_json=reg,
+        )
         self.store = Store(self.cfg.db_path)
         app = create_app(
             self.cfg,
@@ -100,7 +106,7 @@ class BoardStack:
         """게시글 + 라이브 인스턴스 사이드카. ``agents``=status.json 의
         상주 에이전트 요약, ``alive_pid``=pid_alive 통과용(기본 이 프로세스).
         반환: post_id."""
-        post = self.store.create_post(topic=topic)
+        post = self.store.create_post(topic=topic, model_id="m")
         sid = str(int_from(post.post_id))
         self.store.set_session_id(post.post_id, sid)
         sdir = self.cfg.workspace_for(post.post_id) / ".agent-cli" / "sessions" / sid

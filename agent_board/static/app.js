@@ -14,7 +14,21 @@
     localStorage.setItem("agentboard_same_tab", $sameTab.checked ? "1" : "0")
   );
 
-  let MODELS = []; // registry, shared by the new-post form + per-post dropdowns
+  let MODELS = []; // registry (전부), shared by the new-post form + per-post dropdowns
+  // 방언(dialect) 바인딩이 있는 모델만 — 방 쪽 선택지는 이것뿐이다 (v1.33.0,
+  // agent-cli v10.3.0 짝: 바인딩 없는 모델은 agent-cli 가 부트에서 거부한다).
+  // 어드민(⚙)은 설정하는 곳이라 전부 보여 준다.
+  let BOUND = [];
+  const adminLink = (mid) =>
+    `<a href="/admin#model=${encodeURIComponent(mid)}" title="어드민에서 이 모델의 방언을 설정">⚙ 설정</a>`;
+  // 서버 게이트의 사유(detail.reason) → 사람 문장. 400(생성·변경)/409(열기·재실행) 공용.
+  function modelProblemText(detail) {
+    if (!detail || typeof detail !== "object") return null;
+    if (detail.reason === "model_required") return "이 방에 모델이 없습니다 — 모델을 고르세요";
+    if (detail.reason === "dialect_unbound")
+      return `모델 '${detail.model}' 에 방언(dialect) 바인딩이 없습니다 — ⚙ 어드민에서 설정하세요`;
+    return null;
+  }
 
   // ── 탭 가드 (v1.14.0) ─────────────────────
   // board-proxy 게이트웨이에서는 모든 방이 이 origin 으로 프록시되고,
@@ -115,25 +129,56 @@
     });
   }
 
-  async function loadModels() {
-    MODELS = await fetch("/api/models").then((r) => r.json());
-    MODELS.forEach((m) => {
+  // 새 글·복제 폼의 모델 <select> 채우기 — 바인딩 있는 모델만, "(기본)" 없음.
+  // 하나뿐이면 미리 고르고, 없으면 안내 한 줄 + 비활성(만들기 불가).
+  function fillModelPicker(sel, preferred) {
+    sel.innerHTML = "";
+    if (!BOUND.length) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "⚠ 방언이 설정된 모델 없음 — ⚙ 어드민에서 설정";
+      sel.appendChild(o);
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    if (BOUND.length > 1) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "— 모델 선택 —";
+      sel.appendChild(o);
+    }
+    BOUND.forEach((m) => {
       const o = document.createElement("option");
       o.value = m.id;
       o.textContent = m.provider ? `${m.id} (${m.provider})` : m.id;
-      $model.appendChild(o);
+      sel.appendChild(o);
     });
+    sel.value = preferred && BOUND.some((m) => m.id === preferred) ? preferred : BOUND.length === 1 ? BOUND[0].id : "";
   }
 
-  // per-post model <select>: current model selected, disabled when the gate
-  // (busy / someone watching) forbids a change — with a reason in the tooltip.
+  async function loadModels() {
+    MODELS = await fetch("/api/models").then((r) => r.json());
+    BOUND = MODELS.filter((m) => m.dialect);
+    fillModelPicker($model, $model.value);
+    $create.disabled = !BOUND.length;
+  }
+
+  // per-post model <select>: bound models only; the current model is selected
+  // even when it is no longer bound (shown as ⚠ so the user sees why the room
+  // cannot open), and a room without a model gets a "choose" placeholder.
+  // Disabled when the gate (busy / someone watching) forbids a change — with a
+  // reason in the tooltip.
   function modelSelect(p) {
-    const opts = ['<option value="">(기본)</option>'].concat(
-      MODELS.map(
-        (m) =>
-          `<option value="${esc(m.id)}"${m.id === p.model_id ? " selected" : ""}>${esc(m.id)}</option>`
-      )
+    const opts = BOUND.map(
+      (m) =>
+        `<option value="${esc(m.id)}"${m.id === p.model_id ? " selected" : ""}>${esc(m.id)}</option>`
     );
+    if (!p.model_id) {
+      opts.unshift('<option value="" selected>⚠ 모델을 고르세요</option>');
+    } else if (!BOUND.some((m) => m.id === p.model_id)) {
+      opts.unshift(`<option value="${esc(p.model_id)}" selected>⚠ ${esc(p.model_id)} 미설정</option>`);
+    }
     let reason = "모델 변경";
     if (!p.model_changeable) {
       reason =
@@ -148,6 +193,18 @@
 
   const esc = (s) =>
     (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // 카드 경고 줄 — 모델 없음 / 방언 미설정 (model_bound=false 일 때만).
+  function modelWarning(p) {
+    if (p.model_bound) return "";
+    if (!p.model_id)
+      return `<div class="model-warn">⚠ 이 방에 모델이 없습니다 — 위 드롭다운에서 모델을 고르세요.</div>`;
+    return (
+      `<div class="model-warn">⚠ 모델 '${esc(p.model_id)}' 에 방언(dialect) 바인딩이 없어 열 수 없습니다 — ` +
+      adminLink(p.model_id) +
+      `</div>`
+    );
+  }
 
   // ISO → "MM-DD HH:MM" local (empty for missing)
   function fmtDate(iso) {
@@ -238,9 +295,12 @@
         : "") +
       `</button>` +
       `<button class="clone btn-ghost" type="button" title="이 글의 파일/대화를 복사해 새 글 시작">📋 복제</button>` +
-      `<button class="open btn-primary" type="button">열기</button>` +
+      // 모델이 없거나 방언 미설정이면 열 수 없다 — 서버(409)와 같은 판정을
+      // 버튼에 먼저 반영하고, 아래 경고 줄이 사유와 ⚙ 링크를 보여 준다.
+      `<button class="open btn-primary" type="button"${p.model_bound ? "" : ' disabled title="모델/방언 설정 전에는 열 수 없습니다"'}>열기</button>` +
       `<button class="del btn-danger" type="button" title="삭제(영구)">🗑</button>` +
       `</div>` +
+      modelWarning(p) +
       missedBanner(p) +
       `<div class="sched-panel" hidden></div>`;
 
@@ -516,7 +576,10 @@
     }
     const r = await fetch(`/api/posts/${post_id}/open`, { method: "POST" });
     if (!r.ok) {
-      alert("열기 실패: " + r.status);
+      // 409 = 모델/방언 게이트, 502 = 인스턴스 부트 실패(사유 = instance.log 꼬리)
+      const d = (await r.json().catch(() => ({}))).detail;
+      toast("열기 실패: " + (modelProblemText(d) || (typeof d === "string" ? d : r.status)), true);
+      load();
       return;
     }
     const url = (await r.json()).url; // → /s/<post_id>/
@@ -582,7 +645,8 @@
     try {
       const r = await fetch(`/api/posts/${post_id}/restart`, { method: "POST" });
       if (!r.ok) {
-        toast("재실행 실패: " + r.status, true);
+        const d = (await r.json().catch(() => ({}))).detail;
+        toast("재실행 실패: " + (modelProblemText(d) || (typeof d === "string" ? d : r.status)), true);
         return;
       }
       toast("🔄 재실행되었습니다" + (topic ? " — " + topic : ""));
@@ -613,13 +677,16 @@
       body: JSON.stringify({ model_id: model_id || null }),
     });
     if (!r.ok) {
-      // 409 = gate refused (state changed between render and click); revert + explain
+      // 409 = gate refused (state changed between render and click); 400 = the
+      // model itself cannot run (unbound). Revert + explain.
       let why = "변경 실패";
+      const d = (await r.json().catch(() => ({}))).detail;
       if (r.status === 409) {
-        const d = (await r.json()).detail;
         why = d === "busy" ? "응답 중" : d === "viewers" ? "접속자 있음" : "변경 불가";
+      } else if (r.status === 400) {
+        why = modelProblemText(d) || "변경 불가";
       }
-      alert("모델 변경 실패: " + why);
+      toast("모델 변경 실패: " + why, true);
       selectEl.value = p.model_id || "";
       return;
     }
@@ -652,15 +719,22 @@
       $topic.focus();
       return;
     }
+    if (!$model.value) {
+      toast(BOUND.length ? "모델을 고르세요" : "방언이 설정된 모델이 없습니다 — ⚙ 어드민에서 설정하세요", true);
+      $model.focus();
+      return;
+    }
     creating = true;
     $create.disabled = true;
     try {
       const r = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: topic, model_id: $model.value || null }),
+        body: JSON.stringify({ topic: topic, model_id: $model.value }),
       });
       if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))).detail;
+        toast("생성 실패: " + (modelProblemText(d) || r.status), true);
         $topic.focus();
         return;
       }
@@ -700,15 +774,8 @@
     $cloneTopic.value = p.topic + " (복제)";
     $cloneMsg.textContent = "";
     $cloneGo.disabled = false;
-    // 모델 옵션 채우기 (new-model 과 동일 소스)
-    $cloneModel.innerHTML = '<option value="">기본 모델</option>';
-    MODELS.forEach((m) => {
-      const o = document.createElement("option");
-      o.value = m.id;
-      o.textContent = m.provider ? `${m.id} (${m.provider})` : m.id;
-      $cloneModel.appendChild(o);
-    });
-    $cloneModel.value = p.model_id || "";
+    // 모델 옵션 채우기 (new-model 과 동일 소스 — 바인딩 있는 모델만)
+    fillModelPicker($cloneModel, p.model_id);
     $cloneDlg.showModal();
     // 트리 로드
     $cloneTree.textContent = "불러오는 중…";
@@ -755,6 +822,11 @@
       $cloneTopic.focus();
       return;
     }
+    if (!$cloneModel.value) {
+      $cloneMsg.textContent = BOUND.length ? "모델을 고르세요" : "방언이 설정된 모델이 없습니다 — ⚙ 어드민에서 설정하세요";
+      $cloneModel.focus();
+      return;
+    }
     cloning = true;
     $cloneGo.disabled = true;
     $cloneMsg.textContent = "복제 중…";
@@ -763,14 +835,14 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: topic,
-        model_id: $cloneModel.value || null,
+        model_id: $cloneModel.value,
         clone_from: cloneFrom,
         clone_paths: cloneSelection(),
       }),
     });
     if (!r.ok) {
       const detail = await r.json().catch(() => ({}));
-      $cloneMsg.textContent = "실패: " + (detail.detail || r.status);
+      $cloneMsg.textContent = "실패: " + (modelProblemText(detail.detail) || detail.detail || r.status);
       $cloneGo.disabled = false;
       cloning = false;
       return;

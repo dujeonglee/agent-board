@@ -273,3 +273,36 @@ class TestPidAlivePsBranches:
             lambda *a, **k: SimpleNamespace(stdout="\n"),
         )
         assert instances.pid_alive(os.getpid()) is False
+
+
+class TestLastLogLines:
+    """v1.33.0: 준비 실패 사유 = instance.log 의 꼬리 (agent-cli 부트
+    fail-fast 는 한두 줄을 찍고 Exit 2 한다)."""
+
+    def test_tail_of_non_empty_lines(self, tmp_path):
+        ws = tmp_path / "ws"
+        (ws / ".agent-cli").mkdir(parents=True)
+        (ws / ".agent-cli" / "instance.log").write_text(
+            "old run line\n\nstarting\n\n"
+            "No dialect for model 'm'. Set \"dialect\" on its entry.\n\n"
+        )
+        assert instances.last_log_lines(ws) == (
+            "old run line | starting | "
+            "No dialect for model 'm'. Set \"dialect\" on its entry."
+        )
+        assert instances.last_log_lines(ws, n=1) == (
+            "No dialect for model 'm'. Set \"dialect\" on its entry."
+        )
+
+    def test_missing_log_is_empty(self, tmp_path):
+        assert instances.last_log_lines(tmp_path / "nowhere") == ""
+
+    def test_real_backend_uses_the_workspace_log(self, tmp_path):
+        from agent_board.orchestrator import RealBackend
+
+        cfg = _cfg(tmp_path)
+        post = Post(post_id="p1", topic="t", session_id=None, model_id="m")
+        ws = cfg.workspace_for(post.post_id)
+        (ws / ".agent-cli").mkdir(parents=True)
+        (ws / ".agent-cli" / "instance.log").write_text("boom\n")
+        assert RealBackend(cfg, router=None).boot_failure_hint(post) == "boom"

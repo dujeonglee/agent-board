@@ -50,6 +50,9 @@ class RealBackend:
         ws = self._config.workspace_for(post.post_id)
         return instances.await_ready(ws, proc.pid, port)
 
+    def boot_failure_hint(self, post: Post) -> str:
+        return instances.last_log_lines(self._config.workspace_for(post.post_id))
+
     def ensure_route(self, post_id: str, port: int) -> None:
         self._router.ensure_route(post_id, port)
 
@@ -112,7 +115,13 @@ class Orchestrator:
             finally:
                 self._ports_in_flight.discard(port)
             if sid is None:
-                raise RuntimeError(f"instance for {post.post_id} did not become ready")
+                # 사유를 같이 올린다 — 부트 fail-fast(예: 방언 미설정)의 한 줄은
+                # 인스턴스 로그 꼬리에만 남는다 (v1.33.0).
+                hint = self.backend.boot_failure_hint(post)
+                raise RuntimeError(
+                    f"instance for {post.post_id} did not become ready"
+                    + (f": {hint}" if hint else "")
+                )
             if post.session_id is None:  # first open → persist new session
                 self.store.set_session_id(post.post_id, sid)
         else:
