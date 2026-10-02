@@ -243,6 +243,8 @@
     const row = modelsView.models.find((r) => r.id === mid);
     openEntryDialog(mid, row ? row.entry : {});
   }
+  // 같은 문서에서 해시만 바뀌어도(어드민 탭이 이미 열려 있을 때) 연다.
+  window.addEventListener("hashchange", openModelFromHash);
 
   $("entry-cancel").addEventListener("click", () => $("entry-dlg").close());
 
