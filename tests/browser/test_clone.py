@@ -59,11 +59,14 @@ class TestCloneModal:
     def test_clone_conversation_via_agent_cli(self, board, browser):
         src = board.seed_post(topic="대화 원본")
         ws = board.cfg.workspace_for(src)
-        sdir = ws / ".agent-cli" / "sessions" / "1111111111"
-        sdir.mkdir(parents=True)
+        # 대화는 **글의 세션**(seed_post 가 심은 사이드카 세션)에 쓴다. 종전엔
+        # 두 번째 세션 dir("1111111111")을 따로 만들었는데, 복제의 세션 재부여는
+        # 정렬 순서상 첫 dir 을 집으므로 랜덤 post id 에서 나온 사이드카 sid 가
+        # 앞서면 history 없는 dir 이 선택돼 간헐 실패했다(CI 플레이크).
+        src_sid = board.store.get(src).session_id
+        sdir = ws / ".agent-cli" / "sessions" / src_sid
         sdir.joinpath("session.jsonl").write_text(
-            json.dumps({"_meta": {"session_id": "1111111111", "workspace": str(ws)}})
-            + "\n"
+            json.dumps({"_meta": {"session_id": src_sid, "workspace": str(ws)}}) + "\n"
         )
         sdir.joinpath("history.jsonl").write_text('{"role":"user"}\n')
 
