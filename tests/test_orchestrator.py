@@ -56,6 +56,10 @@ class FakeBackend:
         self.already_up = True  # instance is now running (info will see it)
         return self.session_id  # discovered session_id
 
+    def boot_failure_hint(self, post):
+        # 실 backend 는 instance.log 꼬리 — 준비 실패 사유 (v1.33.0)
+        return getattr(self, "hint", "")
+
     def pick_free_port(self, exclude=frozenset()):
         # 실제 backend 처럼: 예약된 포트는 건너뛰고 다음 번호를 준다
         port = self.port
@@ -400,3 +404,42 @@ class TestPortReservation:
         with pytest.raises(RuntimeError):
             asyncio.new_event_loop().run_until_complete(orch.open(p.post_id))
         assert orch._ports_in_flight == set()
+
+    def test_failed_spawn_carries_the_boot_failure_hint(self, tmp_path):
+        """v1.33.0: 준비 실패의 RuntimeError 에 backend 의 사유(instance.log
+        꼬리)가 실린다 — 방언 미설정 같은 부트 fail-fast 가 화면까지 온다."""
+        import asyncio
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+        p = store.create_post(topic="A")
+
+        class DeadBackend(FakeBackend):
+            hint = "No dialect for model 'm'. Set \"dialect\" …"
+
+            def spawn_and_wait(self, post, *, port, token):
+                return None
+
+        orch = Orchestrator(cfg, store, backend=DeadBackend())
+        with pytest.raises(RuntimeError) as ei:
+            asyncio.new_event_loop().run_until_complete(orch.open(p.post_id))
+        assert str(ei.value) == (
+            f"instance for {p.post_id} did not become ready: "
+            "No dialect for model 'm'. Set \"dialect\" …"
+        )
+
+    def test_failed_spawn_without_hint_keeps_plain_message(self, tmp_path):
+        import asyncio
+
+        cfg = Config(data_dir=tmp_path / "data", workspaces_root=tmp_path / "ws")
+        store = Store(cfg.db_path)
+        p = store.create_post(topic="A")
+
+        class DeadBackend(FakeBackend):
+            def spawn_and_wait(self, post, *, port, token):
+                return None
+
+        orch = Orchestrator(cfg, store, backend=DeadBackend())
+        with pytest.raises(RuntimeError) as ei:
+            asyncio.new_event_loop().run_until_complete(orch.open(p.post_id))
+        assert str(ei.value) == f"instance for {p.post_id} did not become ready"

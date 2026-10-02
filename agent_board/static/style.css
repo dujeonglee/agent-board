@@ -141,6 +141,9 @@ header h1 { margin: 0; font-size: 18px; }
   text-decoration: underline dotted; text-underline-offset: 2px; }
 .ws-id:hover { color: var(--text, inherit); }
 .muted { color: var(--muted); }
+/* 카드 경고 줄 — 모델 없음 / 방언 미설정 (v1.33.0). 열기 버튼이 비활성인 이유. */
+.model-warn { flex-basis: 100%; color: var(--fail); font-size: 12.5px; }
+.model-warn a { color: inherit; text-decoration: underline; }
 .post-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
   color: var(--text-2); min-width: 56px; }

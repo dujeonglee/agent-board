@@ -57,6 +57,24 @@
 
   // ── models.json ─────────────────────────────────────────────
   let modelsView = { models: [], new: [], probe_error: "" };
+  const esc = (s) =>
+    String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // 방언 선택 가이드 — 어떤 모양으로 돌릴지 모르는 사용자용 한 줄. 이름은
+  // agent-cli 등록명(옵션 소스)이고, 사전에 없는 이름은 이름만 보인다.
+  const DIALECT_GUIDE = {
+    json_fc: "일반 권장 — 산문 reasoning + JSON 배열 tool-call. 모르면 이것.",
+    native_fc: "서버가 함수 호출(tools/tool_calls)을 직접 파싱할 때 — OpenAI 호환 서버 전용.",
+    xml_fc: "<tool_call><function=…> 태그 모양을 선호하는 모델용 (값에 JSON escaping 없음).",
+    hermes_json: "<tool_call>{\"name\",\"arguments\"}</tool_call> — Hermes·Qwen 계열 네이티브 모양.",
+    glm_argkey: "<tool_call>NAME<arg_key>…</arg_key><arg_value>…</arg_value> — GLM 계열.",
+  };
+  function showDialectGuide() {
+    const v = $("ef-wire").value;
+    $("ef-wire-guide").textContent = v
+      ? DIALECT_GUIDE[v] || v
+      : "필수 — 이 모델이 어떤 응답 모양(방언)으로 돌지 고르세요. 없으면 agent-cli 가 이 모델을 실행하지 않습니다.";
+  }
 
   function entryCells(entry) {
     return (
@@ -65,8 +83,8 @@
       "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>" +
       // 📐 3값 — 모름(키 없음)은 ? 로, false 로 뭉개지 않는다
       "<td>" + (entry.supports_grammar === true ? "✓" : entry.supports_grammar === false ? "✗" : "?") + "</td>" +
-      // dialect(agent-cli ≥ 10) — 옛 키 wire_format 으로 저장된 엔트리도 보여 준다
-      "<td>" + (entry.dialect || entry.wire_format || "auto") + "</td>"
+      // dialect — 없으면 미설정: agent-cli(≥ 10.3.0)가 이 모델을 실행하지 않는다
+      "<td>" + (entry.dialect ? esc(entry.dialect) : "<span class='badge unbound'>⚠ 미설정</span>") + "</td>"
     );
   }
 
@@ -152,6 +170,7 @@
       modelsView = await api("GET", "/api/admin/models");
       if (!modelsView.probe_error) status($("models-status"), "", true);
       render();
+      openModelFromHash();
     } catch (e) {
       status($("models-status"), "목록 실패: " + e.message, false);
     }
@@ -186,19 +205,19 @@
     $("ef-thinking").checked = !!entry.supports_thinking;
     $("ef-grammar").value =
       entry.supports_grammar === true ? "true" : entry.supports_grammar === false ? "false" : "";
-    // dialect 바인딩 — 등록명 드롭다운만 (자유입력 금지: agent-cli 가
-    // unknown 이름에 fail-fast). auto = 필드 미기록(해석 체인 위임).
-    // 옛 키 wire_format(agent-cli < 10 시절 저장분)도 현재값으로 읽는다 —
-    // 저장하면 새 키 dialect 로 옮겨진다. 미설치로 목록이 비어도 현재값은 보존.
+    // dialect 바인딩 — 필수, 등록명 드롭다운만 (자유입력 금지: agent-cli 가
+    // unknown 이름에 fail-fast). auto 없음 (v1.33.0): 빈 값은 저장이 거절된다.
+    // 미설치로 목록이 비어도 현재값은 보존.
     const sel = $("ef-wire");
-    const current = entry.dialect || entry.wire_format || "";
+    const current = entry.dialect || "";
     const names = [...(modelsView.dialects || [])];
     if (current && !names.includes(current)) names.push(current);
     sel.innerHTML = "";
-    const auto = document.createElement("option");
-    auto.value = "";
-    auto.textContent = "auto (기본 체인)";
-    sel.appendChild(auto);
+    const pick = document.createElement("option");
+    pick.value = "";
+    pick.textContent = "— 방언을 고르세요 —";
+    pick.disabled = true;
+    sel.appendChild(pick);
     for (const n of names) {
       const o = document.createElement("option");
       o.value = n;
@@ -206,8 +225,23 @@
       sel.appendChild(o);
     }
     sel.value = current;
-    status($("entry-status"), "", true);
+    showDialectGuide();
+    status($("entry-status"), current ? "" : "방언 바인딩이 없으면 이 모델은 실행되지 않습니다", !!current);
     $("entry-dlg").showModal();
+    if (!current) sel.focus();
+  }
+
+  $("ef-wire").addEventListener("change", showDialectGuide);
+
+  // 딥링크 ``/admin#model=<id>`` — 방 카드의 "⚙ 설정" 이 그 모델의 편집
+  // 창을 바로 연다 (등록된 모델이면 현재 entry, NEW 면 빈 entry).
+  function openModelFromHash() {
+    const m = /^#model=(.+)$/.exec(location.hash || "");
+    if (!m) return;
+    const mid = decodeURIComponent(m[1]);
+    history.replaceState(null, "", location.pathname); // 한 번만
+    const row = modelsView.models.find((r) => r.id === mid);
+    openEntryDialog(mid, row ? row.entry : {});
   }
 
   $("entry-cancel").addEventListener("click", () => $("entry-dlg").close());
@@ -218,12 +252,14 @@
       max_output_tokens: parseInt($("ef-maxout").value, 10) || 2048,
       supports_thinking: $("ef-thinking").checked,
     };
-    // auto("") = 필드 미기록 — keep-sentinel 과 같은 "안 고르면 안 쓴다"
-    // 패턴. 종전엔 저장이 entry 를 재조립하며 손으로 넣은 바인딩을
-    // 조용히 떨궜다(클로버) — 명시 필드로 승격해 봉합. 키는 dialect
-    // (agent-cli v10.0.0); 옛 wire_format 은 재조립에서 자연히 빠진다.
+    // 방언은 필수 (v1.33.0) — 서버도 거절하지만 여기서 먼저 멈춘다.
     const dialect = $("ef-wire").value;
-    if (dialect) entry.dialect = dialect;
+    if (!dialect) {
+      status($("entry-status"), "방언을 고르세요 — 없으면 이 모델은 실행되지 않습니다", false);
+      $("ef-wire").focus();
+      return;
+    }
+    entry.dialect = dialect;
     // "" = 필드 미기록 → 인스턴스에선 미확인(잠김), 감지(프로브)가 판정해 적는다.
     // 여기서는 true/false 만 적는다.
     const sg = $("ef-grammar").value;

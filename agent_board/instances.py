@@ -327,6 +327,21 @@ def spawn(config: Config, post: Post, *, port: int, token: str) -> subprocess.Po
         logf.close()  # the child has its own dup of the fd; the parent's isn't needed
 
 
+def last_log_lines(workspace: Path, n: int = 3) -> str:
+    """``instance.log`` 의 마지막 ``n`` 개 비어 있지 않은 줄 (없으면 "").
+
+    준비 대기가 실패했을 때 사유를 사용자에게 올리기 위한 것 — agent-cli 의
+    부트 fail-fast(방언 미설정, unknown 모델 등)는 한두 줄을 찍고 Exit 2 한다.
+    로그는 재실행마다 이어 쓰므로 꼬리가 곧 마지막 실행이다."""
+    log_path = workspace / ".agent-cli" / "instance.log"
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    tail = [ln.strip() for ln in lines if ln.strip()][-n:]
+    return " | ".join(tail)
+
+
 def await_ready(
     workspace: Path, pid: int, port: int, *, timeout: float = 20.0
 ) -> str | None:

@@ -30,6 +30,8 @@ from pathlib import Path
 
 import httpx
 
+from agent_board import models_registry
+
 DEFAULT_CONFIG_JSON = Path.home() / ".agent-cli" / "config.json"
 
 # 폼 편집 대상 — 이 외 키는 PUT 에서 무조건 보존.
@@ -211,15 +213,36 @@ def list_models_with_status(
             status = "unknown"
         else:
             status = "served" if mid in served_set else "missing"
-        rows.append({"id": mid, "entry": entry or {}, "status": status})
+        rows.append(
+            {
+                "id": mid,
+                "entry": entry or {},
+                "status": status,
+                "dialect": models_registry.binding_of(entry),
+            }
+        )
     new = [] if probe_error else [m for m in served if m not in models]
     return {"models": rows, "new": new, "probe_error": probe_error}
 
 
 def save_model_entry(model_id: str, entry: dict, models_path: Path) -> None:
-    """entry 생성/교체 — 나머지 모델·최상위 키(provider_defaults 등) 보존."""
+    """entry 생성/교체 — 나머지 모델·최상위 키(provider_defaults 등) 보존.
+
+    v1.33.0: ``dialect`` 바인딩은 필수 — 없으면 agent-cli 가 그 모델을
+    실행하지 않으므로(v10.3.0) 저장 단계에서 막는다. 이름은 agent-cli 등록
+    방언이어야 한다(목록을 못 얻는 환경 — 미설치 — 에서만 이름 검증 생략).
+    """
     if not model_id or not isinstance(entry, dict):
         raise AdminError("model id 와 entry(object)가 필요합니다")
+    dialect = entry.get("dialect")
+    if not (isinstance(dialect, str) and dialect):
+        raise AdminError(
+            "dialect 바인딩이 필요합니다 — 이 모델이 어떤 응답 모양(방언)으로 "
+            "돌지 고르세요 (모르면 json_fc)"
+        )
+    names = list_dialect_names()
+    if names and dialect not in names:
+        raise AdminError(f"알 수 없는 dialect '{dialect}' (가능: {', '.join(names)})")
     registry = _read_json(models_path)
     models = registry.setdefault("models", {})
     if not isinstance(models, dict):
@@ -245,21 +268,16 @@ def delete_model_entry(model_id: str, models_path: Path) -> bool:
 def list_dialect_names() -> list[str]:
     """agent-cli 의 등록 방언(dialect) 이름 목록 — 바인딩 드롭다운 옵션.
 
-    바인딩(models.json entry 의 선택 필드 ``dialect``; agent-cli v10.0.0 전의
-    ``wire_format`` 도 agent-cli 가 계속 읽는다)은 agent-cli 해석 체인의
-    소스: 그 모델(main·서브에이전트)이 어떤 응답 모양으로 돌지 정한다.
-    드롭다운은 **등록명만** 제공 (자유입력 금지 — agent-cli 부트가 unknown
-    이름에 fail-fast 하므로 오타를 UI 에서 원천 차단). lazy import 는
-    ``detect_model_entry`` 동형; agent-cli < 10 이면 옛 패키지로, 미설치면
-    빈 목록 — UI 는 auto + 현재값 보존만 제공한다.
+    바인딩(models.json entry 의 **필수** 필드 ``dialect``, v1.33.0)은 agent-cli
+    해석 체인의 소스: 그 모델(main·서브에이전트)이 어떤 응답 모양으로 돌지
+    정한다. 드롭다운은 **등록명만** 제공 (자유입력 금지 — agent-cli 부트가
+    unknown 이름에 fail-fast 하므로 오타를 UI 에서 원천 차단). lazy import 는
+    ``detect_model_entry`` 동형; 미설치면 빈 목록.
     """
     try:
         from agent_cli.dialects import list_names
     except ImportError:
-        try:
-            from agent_cli.wire_formats import list_names  # agent-cli < 10
-        except ImportError:
-            return []
+        return []
     return list_names()
 
 

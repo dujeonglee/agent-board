@@ -37,9 +37,7 @@
 
   <section id="new">
     <input id="new-topic" type="text" placeholder="주제 - 예: 라이브러리 만들기" maxlength="200">
-    <select id="new-model" title="모델 (선택 안 하면 기본)">
-      <option value="">기본 모델</option>
-    </select>
+    <select id="new-model" title="모델 — 방언(dialect)이 설정된 모델만 보입니다 (⚙ 어드민에서 설정)"></select>
     <button id="new-create" type="button" class="btn-primary">+ 새 글</button>
   </section>
 
@@ -56,9 +54,7 @@
     <div id="clone-src-label" class="clone-src-label"></div>
     <div class="clone-fields">
       <input id="clone-topic" type="text" placeholder="새 주제" maxlength="200">
-      <select id="clone-model" title="모델 (선택 안 하면 기본)">
-        <option value="">기본 모델</option>
-      </select>
+      <select id="clone-model" title="모델 — 방언(dialect)이 설정된 모델만 보입니다 (⚙ 어드민에서 설정)"></select>
     </div>
     <div id="clone-hint" class="clone-hint">복사할 파일/폴더를 체크하세요. <code>.agent-cli</code> 를 포함하면 대화까지 이어집니다.</div>
     <div id="clone-tree" class="clone-tree"></div>

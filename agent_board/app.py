@@ -209,7 +209,9 @@ def build_log_config(log_file: str | Path) -> dict:
 
 class NewPost(BaseModel):
     topic: str
-    model_id: str | None = None
+    # v1.33.0: 필수 — "(기본)" 은 없다. agent-cli config.json 의 default_model
+    # 에 몰래 기대지 않는다(바인딩 판정을 보드가 할 수 없게 되므로).
+    model_id: str
     # 대화방 clone (v1.20.0): 원본 post + 그 워크스페이스에서 복사할
     # 상대경로들. clone_from 만 주고 paths 를 비우면 아무것도 안 옮김
     # (fresh). `.agent-cli/sessions/<sid>` 가 포함되면 대화까지 이어받음.
@@ -222,7 +224,25 @@ class ForceActive(BaseModel):
 
 
 class SetModel(BaseModel):
-    model_id: str | None = None
+    model_id: str
+
+
+def model_problem(config: Config, model_id: str | None) -> dict | None:
+    """실행 가능한 모델이면 None, 아니면 ``{"reason", "model"?}``.
+
+    v1.33.0 (agent-cli v10.3.0 짝): agent-cli 는 방언 바인딩 없는 모델을
+    부트에서 거부하므로, 보드가 먼저 같은 판정으로 생성·변경(400)과
+    열기·재실행(409)을 막고 사유를 돌려준다 — 방 쪽 드롭다운이 바인딩
+    있는 모델만 보여 주지만, 고른 뒤 어드민에서 바인딩이 빠지거나 모델이
+    지워진 방은 이 게이트가 잡는다.
+    - ``model_required``: 방에 모델이 없다 (v1.33.0 전 "(기본)" 방).
+    - ``dialect_unbound``: 모델이 레지스트리에 없거나 ``dialect`` 가 없다.
+    """
+    if not model_id:
+        return {"reason": "model_required"}
+    if models_registry.model_binding(config.models_json, model_id) is None:
+        return {"reason": "dialect_unbound", "model": model_id}
+    return None
 
 
 def _post_view(config: Config, store: Store, post) -> dict:
@@ -240,6 +260,8 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "post_id": post.post_id,
         "topic": post.topic,
         "model_id": post.model_id,
+        # False 면 열기/재실행이 409 — 카드가 사유와 ⚙ 링크를 보여 준다.
+        "model_bound": model_problem(config, post.model_id) is None,
         "force_active": post.force_active,
         "created_at": post.created_at,
         "last_query": lq["text"] if lq else None,
@@ -593,6 +615,9 @@ def create_app(
             )
         if body.clone_from and store.get(body.clone_from) is None:
             raise HTTPException(status_code=404, detail="clone source not found")
+        problem = model_problem(config, body.model_id)
+        if problem is not None:
+            raise HTTPException(status_code=400, detail=problem)
 
         post = store.create_post(
             topic=body.topic,
@@ -663,14 +688,25 @@ def create_app(
         store.delete(post_id)
         return JSONResponse({"deleted": post_id})
 
+    def _require_runnable(post_id: str):
+        post = store.get(post_id)
+        if post is None:
+            raise HTTPException(status_code=404, detail="no such post")
+        problem = model_problem(config, post.model_id)
+        if problem is not None:
+            raise HTTPException(status_code=409, detail=problem)
+
     @app.post("/api/posts/{post_id}/open")
     async def open_post(post_id: str):
-        if store.get(post_id) is None:
-            raise HTTPException(status_code=404, detail="no such post")
+        _require_runnable(post_id)
         try:
             url = await orchestrator.open(post_id)
         except KeyError as e:  # belt-and-suspenders (race: deleted mid-open)
             raise HTTPException(status_code=404, detail="no such post") from e
+        except RuntimeError as e:
+            # 인스턴스가 준비되지 않음 — 부트 실패 사유(instance.log 꼬리)를
+            # 그대로 올린다 (v1.33.0; 종전엔 500 스택만 남아 사유가 로그에만 있었다)
+            raise HTTPException(status_code=502, detail=str(e)) from e
         return JSONResponse({"url": url})
 
     @app.post("/api/posts/{post_id}/restart")
@@ -678,18 +714,22 @@ def create_app(
         # Force-restart the instance (stop + respawn) so a freshly installed
         # agent-cli is picked up. Always allowed (no busy/viewer gate); the same
         # token is reused so open viewers reconnect without re-opening.
-        if store.get(post_id) is None:
-            raise HTTPException(status_code=404, detail="no such post")
+        _require_runnable(post_id)
         try:
             url = await orchestrator.restart(post_id)
         except KeyError as e:
             raise HTTPException(status_code=404, detail="no such post") from e
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
         return JSONResponse({"url": url})
 
     @app.post("/api/posts/{post_id}/model")
     async def change_model(post_id: str, body: SetModel):
         if store.get(post_id) is None:
             raise HTTPException(status_code=404, detail="no such post")
+        problem = model_problem(config, body.model_id)
+        if problem is not None:
+            raise HTTPException(status_code=400, detail=problem)
         try:
             result = await orchestrator.change_model(post_id, body.model_id)
         except KeyError as e:
