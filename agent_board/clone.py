@@ -90,13 +90,18 @@ def clone_paths(
     paths: list[str],
     *,
     new_session_id: str,
+    src_session_id: str | None = None,
 ) -> str | None:
     """선택 ``paths`` 를 ``src_ws`` → ``dst_ws`` 로 복사.
 
-    복사된 것 중 `.agent-cli/sessions/<sid>/` 가 있으면 그 세션 dir 을
-    ``new_session_id`` 로 rename + `_meta` 재작성 + 사이드카 제외하고,
-    새 sid 를 반환한다(호출부가 store.set_session_id 로 --resume 배선).
-    세션 dir 이 없으면 ``None`` (파일만 복사한 fresh 방).
+    복사된 것 중 **원본 글의 세션**(``src_session_id`` — 보드가 저장해 둔
+    것) dir 이 있으면 그것을 ``new_session_id`` 로 rename + `_meta` 재작성 +
+    사이드카 제외하고, 새 sid 를 반환한다(호출부가 store.set_session_id 로
+    --resume 배선). 원본 글에 세션이 없으면(한 번도 안 연 글) 복사된 세션
+    dir 이 **정확히 하나**일 때만 그것을 쓴다 — 여럿이면 어느 것이 대화인지
+    보드가 알 수 없으므로 고르지 않고 ``None`` (v1.33.1: 종전엔 정렬상 첫
+    dir 을 집어, 터미널에서 따로 돌린 세션이 섞인 워크스페이스에서 엉뚱한
+    세션을 이어받을 수 있었다). 세션 dir 이 없으면 ``None`` (fresh 방).
 
     한 post = 한 세션 불변식: 여러 세션 dir 이 복사되면 첫(정렬상) 것만
     remap 하고 나머지는 그대로 둔다(실사용상 원본이 하나뿐이라 미발생).
@@ -127,7 +132,7 @@ def clone_paths(
                 continue
             shutil.copy2(s, d)
 
-    new_sid = _remap_session(dst_ws, new_session_id)
+    new_sid = _remap_session(dst_ws, new_session_id, src_session_id)
     _rewrite_workspace_paths(dst_ws, str(src_ws), str(dst_ws))
     return new_sid
 
@@ -154,16 +159,21 @@ def _rewrite_workspace_paths(dst_ws: Path, old_ws: str, new_ws: str) -> None:
         f.write_text(text.replace(old_ws, new_ws), encoding="utf-8")
 
 
-def _remap_session(dst_ws: Path, new_sid: str) -> str | None:
-    """복사된 `.agent-cli/sessions/<old>/` 를 새 sid 로 rename + _meta
-    재작성. 세션 dir 없으면 None."""
+def _remap_session(dst_ws: Path, new_sid: str, src_sid: str | None) -> str | None:
+    """복사된 `.agent-cli/sessions/<src_sid>/` 를 새 sid 로 rename + _meta
+    재작성. 원본 세션이 안 넘어왔으면(또는 모르면서 dir 이 여럿이면) None."""
     sessions_dir = dst_ws / ".agent-cli" / "sessions"
     if not sessions_dir.is_dir():
         return None
-    session_dirs = sorted(p for p in sessions_dir.iterdir() if p.is_dir())
-    if not session_dirs:
+    session_dirs = [p for p in sessions_dir.iterdir() if p.is_dir()]
+    if src_sid:
+        old = sessions_dir / src_sid
+        if not old.is_dir():
+            return None
+    elif len(session_dirs) == 1:
+        old = session_dirs[0]
+    else:
         return None
-    old = session_dirs[0]
     new = sessions_dir / new_sid
     if old.name != new_sid:
         old.rename(new)
