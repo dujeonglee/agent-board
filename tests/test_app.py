@@ -1193,6 +1193,50 @@ class TestGrammarBadge:
         assert "grammar-chip" in js and "p.grammar" in js
 
 
+class TestCloneUsesSourceSessionId:
+    def test_clone_remaps_the_source_posts_session_not_the_first_dir(self, tmp_path):
+        """v1.33.1: 원본 워크스페이스에 세션 dir 이 둘(터미널에서 따로 돌린 것 등)
+        이어도 복제는 보드가 저장한 원본 글의 session_id 를 이어받는다."""
+        import json as _json
+
+        cfg, store, c = _client(tmp_path)
+        src = c.post("/api/posts", json={"model_id": "m", "topic": "src"}).json()[
+            "post_id"
+        ]
+        store.set_session_id(src, "2000000000")
+        ws = cfg.workspace_for(src)
+        for sid, marker in (("1000000000", "stray"), ("2000000000", "mine")):
+            d = ws / ".agent-cli" / "sessions" / sid
+            d.mkdir(parents=True)
+            (d / "session.jsonl").write_text(
+                _json.dumps({"_meta": {"session_id": sid, "workspace": str(ws)}}) + "\n"
+            )
+            (d / "history.jsonl").write_text(
+                _json.dumps({"role": "user", "content": marker}) + "\n"
+            )
+        r = c.post(
+            "/api/posts",
+            json={
+                "model_id": "m",
+                "topic": "clone",
+                "clone_from": src,
+                "clone_paths": [".agent-cli"],
+            },
+        )
+        assert r.status_code == 200
+        new_id = r.json()["post_id"]
+        new_sid = store.get(new_id).session_id
+        assert new_sid is not None
+        hist = (
+            cfg.workspace_for(new_id)
+            / ".agent-cli"
+            / "sessions"
+            / new_sid
+            / "history.jsonl"
+        ).read_text()
+        assert "mine" in hist and "stray" not in hist
+
+
 class TestModelGate:
     """v1.33.0 (agent-cli v10.3.0 짝): 방언 바인딩 없는 모델은 agent-cli 가
     부트에서 거부한다 — 보드가 먼저 같은 판정으로 막고 사유를 돌려준다.

@@ -643,7 +643,11 @@ def create_app(
                 sid = await loop.run_in_executor(
                     None,
                     lambda: clone_mod.clone_paths(
-                        src_ws, ws, body.clone_paths, new_session_id=new_sid
+                        src_ws,
+                        ws,
+                        body.clone_paths,
+                        new_session_id=new_sid,
+                        src_session_id=store.get(body.clone_from).session_id,
                     ),
                 )
             except ValueError as e:

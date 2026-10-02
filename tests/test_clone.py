@@ -279,19 +279,74 @@ class TestRemapSessionEdges:
         newdir = dst / ".agent-cli" / "sessions" / "7777777777"
         assert newdir.is_dir() and (newdir / "history.jsonl").exists()
 
-    def test_multiple_session_dirs_only_first_remapped(self, tmp_path):
-        """한 post=한 세션 불변식: 여러 세션 dir 이면 정렬상 첫 것만 remap,
-        나머지는 그대로(docstring 계약 고정)."""
+    def test_source_session_id_picks_the_right_dir(self, tmp_path):
+        """v1.33.1: 여러 세션 dir 이면 **원본 글의 세션**(보드가 저장한 id)을
+        remap 한다 — 정렬 순서가 아니라. 나머지는 그대로."""
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        _mk_session(src, "1111111111", sidecars=False)
+        _mk_session(src, "2222222222", sidecars=False)
+        sid = clone.clone_paths(
+            src,
+            dst,
+            [".agent-cli"],
+            new_session_id="9999999999",
+            src_session_id="2222222222",
+        )
+        sessions = sorted(p.name for p in (dst / ".agent-cli" / "sessions").iterdir())
+        assert sid == "9999999999"
+        assert sessions == ["1111111111", "9999999999"]
+        header = json.loads(
+            (dst / ".agent-cli" / "sessions" / "9999999999" / "session.jsonl")
+            .read_text()
+            .splitlines()[0]
+        )
+        assert header["_meta"]["session_id"] == "9999999999"
+
+    def test_source_session_not_copied_means_fresh(self, tmp_path):
+        """원본 글의 세션 dir 이 선택에 안 들어왔으면 다른 dir 을 대신 집지 않는다."""
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        _mk_session(src, "1111111111", sidecars=False)
+        _mk_session(src, "2222222222", sidecars=False)
+        sid = clone.clone_paths(
+            src,
+            dst,
+            [".agent-cli/sessions/1111111111"],
+            new_session_id="9999999999",
+            src_session_id="2222222222",
+        )
+        assert sid is None
+        assert sorted(p.name for p in (dst / ".agent-cli" / "sessions").iterdir()) == [
+            "1111111111"
+        ]
+
+    def test_unknown_source_with_several_dirs_does_not_guess(self, tmp_path):
+        """원본 글에 세션이 없는데(한 번도 안 연 글) dir 이 여럿이면 고르지 않는다."""
         src, dst = tmp_path / "src", tmp_path / "dst"
         src.mkdir()
         dst.mkdir()
         _mk_session(src, "1111111111", sidecars=False)
         _mk_session(src, "2222222222", sidecars=False)
         sid = clone.clone_paths(src, dst, [".agent-cli"], new_session_id="9999999999")
-        sessions = sorted(p.name for p in (dst / ".agent-cli" / "sessions").iterdir())
-        # 첫(정렬) 것만 새 sid 로, 나머지는 원래 이름 유지
+        assert sid is None
+        assert sorted(p.name for p in (dst / ".agent-cli" / "sessions").iterdir()) == [
+            "1111111111",
+            "2222222222",
+        ]
+
+    def test_unknown_source_with_one_dir_uses_it(self, tmp_path):
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        _mk_session(src, "1111111111", sidecars=False)
+        sid = clone.clone_paths(src, dst, [".agent-cli"], new_session_id="9999999999")
         assert sid == "9999999999"
-        assert sessions == ["2222222222", "9999999999"]
+        assert [p.name for p in (dst / ".agent-cli" / "sessions").iterdir()] == [
+            "9999999999"
+        ]
 
 
 class TestClonePathsSafety:
