@@ -109,9 +109,16 @@ def main() -> int:
                 conn.execute(
                     "UPDATE posts SET post_id = ? WHERE post_id = ?", (new, old)
                 )
-                conn.execute(
-                    "UPDATE schedules SET post_id = ? WHERE post_id = ?", (new, old)
-                )
+                # v1.33 까지의 DB 에만 있다 — v1.34.0 부터 예약은 세션 폴더에
+                # 살고 보드는 기동 때 이 테이블을 옮긴 뒤 지운다.
+                if conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type='table' AND name='schedules'"
+                ).fetchone():
+                    conn.execute(
+                        "UPDATE schedules SET post_id = ? WHERE post_id = ?",
+                        (new, old),
+                    )
         except Exception:
             if new_ws.is_dir():  # roll the rename back so state stays consistent
                 new_ws.rename(old_ws)

@@ -31,7 +31,6 @@ class LiveEvents:
         view_fn,
         *,
         on_death=None,
-        on_sched_requests=None,
         interval: float = 1.0,
     ):
         self._config = config
@@ -42,12 +41,6 @@ class LiveEvents:
         # routing — the app wires it to the gateway's route removal, which lets
         # Caddy fall through to the board's revive handler on the next hit.
         self._on_death = on_death
-        # on_sched_requests(post): the workspace's ⏰ schedule-requests.jsonl
-        # changed — the app wires it to the file-contract apply + scheduler
-        # rearm (docs/schedule-design.md §7). Piggybacks on this scanner so the
-        # contract needs NO polling loop of its own. Runs on the executor
-        # thread (like the rest of _scan).
-        self._on_sched_requests = on_sched_requests
         self._interval = interval
         self._subscribers: set[asyncio.Queue] = set()
         self._sigs: dict[str, tuple] = {}
@@ -73,8 +66,9 @@ class LiveEvents:
     # ── change detection ────────────────────────────────────
     def _sig(self, post) -> tuple:
         """A post's cheap change signature: (status.json mtime, history.jsonl
-        mtime, pid-alive, ⏰ schedule-requests mtime). Any field flip ⇒ the row
-        may have changed."""
+        mtime, pid-alive, ⏰ schedules.json mtime). Any field flip ⇒ the row may
+        have changed. The schedules file belongs to the session's agent-cli
+        process (v1.34.0) — the board only reads it for the card badge."""
         ws = self._config.workspace_for(post.post_id)
 
         def _mt(p: Path):
@@ -83,15 +77,19 @@ class LiveEvents:
             except OSError:
                 return None
 
-        req_m = _mt(Path(ws) / ".agent-cli" / "schedule-requests.jsonl")
         sid = post.session_id
         if not sid:
-            return (None, None, False, req_m)
+            return (None, None, False, None)
         sdir = Path(ws) / ".agent-cli" / "sessions" / sid
         info = instances.read_web_json(ws, sid)
         pid = info.get("pid") if info else None
         alive = bool(pid and instances.pid_alive(pid))
-        return (_mt(sdir / "status.json"), _mt(sdir / "history.jsonl"), alive, req_m)
+        return (
+            _mt(sdir / "status.json"),
+            _mt(sdir / "history.jsonl"),
+            alive,
+            _mt(sdir / "schedules.json"),
+        )
 
     def _scan(self) -> list[dict]:
         """Sync (runs in an executor): diff current signatures vs the last scan,
@@ -109,13 +107,6 @@ class LiveEvents:
                 # never on a post's first observation (prev is None).
                 if self._on_death and prev is not None and prev[2] and not sig[2]:
                     self._on_death(post.post_id)
-                # ⏰ 요청파일 변경 edge — view 계산 전에 계약을 반영해 이번
-                # post_update 가 이미 새 스케줄 요약을 싣도록 한다.
-                if self._on_sched_requests and prev is not None and prev[3] != sig[3]:
-                    try:
-                        self._on_sched_requests(post)
-                    except Exception:
-                        pass  # 계약 오류가 스캐너를 죽이면 안 됨
                 self._sigs[post.post_id] = sig
                 events.append({"type": "post_update", "post": self._view_fn(post)})
         for gone in set(self._sigs) - seen:
@@ -125,19 +116,9 @@ class LiveEvents:
 
     def _prime(self) -> None:
         """Seed the baseline WITHOUT emitting — a client gets the initial state
-        from its own ``load()`` on connect; the scanner only pushes DELTAS.
-
-        ⏰ catch-up: requests appended while the board was DOWN have no future
-        mtime edge, so apply the contract once at startup (offset-idempotent —
-        already-consumed lines are skipped)."""
+        from its own ``load()`` on connect; the scanner only pushes DELTAS."""
         for post in self._store.list_posts():
-            sig = self._sig(post)
-            if self._on_sched_requests and sig[3] is not None:
-                try:
-                    self._on_sched_requests(post)
-                except Exception:
-                    pass
-            self._sigs[post.post_id] = sig
+            self._sigs[post.post_id] = self._sig(post)
 
     async def run(self) -> None:
         """The scan loop. Cancelled on app shutdown."""

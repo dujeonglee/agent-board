@@ -11,14 +11,13 @@ The sqlite3 calls are synchronous; the FastAPI layer wraps them in
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_board._sqlite import sqlite3  # stdlib sqlite3, or pysqlite3 fallback
 from agent_board.ids import new_post_id
-from agent_board.models import Post, Schedule
+from agent_board.models import Post
 
 # Draws before giving up on finding a free post id (see create_post).
 _ID_ALLOC_ATTEMPTS = 16
@@ -35,20 +34,6 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_recent
   ON posts(last_opened_at DESC, created_at DESC);
-CREATE TABLE IF NOT EXISTS schedules (
-  schedule_id   TEXT PRIMARY KEY,
-  post_id       TEXT NOT NULL,
-  source        TEXT NOT NULL,
-  cron          TEXT NOT NULL,
-  prompt        TEXT NOT NULL,
-  label         TEXT NOT NULL DEFAULT '',
-  nickname      TEXT NOT NULL DEFAULT '',
-  enabled       INTEGER NOT NULL DEFAULT 1,
-  created_at    TEXT NOT NULL,
-  last_fired_at TEXT,
-  missed_at     TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_schedules_post ON schedules(post_id);
 """
 
 # additive migrations for DBs created before a column existed — old rows get the
@@ -57,34 +42,9 @@ CREATE INDEX IF NOT EXISTS idx_schedules_post ON schedules(post_id);
 # is simply left unqueried on old DBs — no migration needed.)
 _MIGRATIONS = {
     "posts": {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"},
-    "schedules": {
-        # 1.26.0 DB (nickname 이전) 재열기 → 기본값 '' 로 컬럼 추가
-        "nickname": "ALTER TABLE schedules ADD COLUMN nickname TEXT NOT NULL DEFAULT ''",
-    },
 }
 
 _COLS = "post_id, topic, session_id, model_id, force_active, created_at, last_opened_at"
-
-_SCHED_COLS = (
-    "schedule_id, post_id, source, cron, prompt, label, nickname, enabled, "
-    "created_at, last_fired_at, missed_at"
-)
-
-
-def _row_to_schedule(row: sqlite3.Row) -> Schedule:
-    return Schedule(
-        schedule_id=row["schedule_id"],
-        post_id=row["post_id"],
-        source=row["source"],
-        cron=row["cron"],
-        prompt=row["prompt"],
-        label=row["label"],
-        nickname=row["nickname"],
-        enabled=bool(row["enabled"]),
-        created_at=row["created_at"],
-        last_fired_at=row["last_fired_at"],
-        missed_at=row["missed_at"],
-    )
 
 
 def _now() -> str:
@@ -202,8 +162,6 @@ class Store:
         self._conn.commit()
 
     def delete(self, post_id: str) -> None:
-        # cascade: a deleted post's schedules must never fire again
-        self._conn.execute("DELETE FROM schedules WHERE post_id = ?", (post_id,))
         self._conn.execute("DELETE FROM posts WHERE post_id = ?", (post_id,))
         self._conn.commit()
 
@@ -226,105 +184,23 @@ class Store:
         ).fetchall()
         return [_row_to_post(r) for r in rows]
 
-    # ── schedules (docs/schedule-design.md §2) ──────────────
-    def add_schedule(
-        self,
-        *,
-        post_id: str,
-        source: str,
-        cron: str,
-        prompt: str,
-        label: str = "",
-        nickname: str = "",
-    ) -> Schedule:
-        sched = Schedule(
-            schedule_id=uuid.uuid4().hex,
-            post_id=post_id,
-            source=source,
-            cron=cron,
-            prompt=prompt,
-            label=label,
-            nickname=nickname,
-            created_at=_now(),
-        )
-        self._conn.execute(
-            "INSERT INTO schedules (schedule_id, post_id, source, cron, prompt, "
-            "label, nickname, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
-            (
-                sched.schedule_id,
-                sched.post_id,
-                sched.source,
-                sched.cron,
-                sched.prompt,
-                sched.label,
-                sched.nickname,
-                sched.created_at,
-            ),
-        )
-        self._conn.commit()
-        return sched
+    # ── v1.33 예약 테이블의 일회성 이전 ─────────────────────
+    def drain_legacy_schedules(self) -> list[dict]:
+        """v1.33 까지의 ``schedules`` 테이블 행을 전부 돌려주고 테이블을 지운다.
 
-    def get_schedule(self, schedule_id: str) -> Schedule | None:
-        row = self._conn.execute(
-            f"SELECT {_SCHED_COLS} FROM schedules WHERE schedule_id = ?",
-            (schedule_id,),
+        v1.34.0 부터 예약은 agent-cli 세션의 것이다 — 보드는 저장하지 않는다.
+        테이블이 없으면(새 DB, 또는 이미 옮김) 빈 목록.
+        """
+        exists = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedules'"
         ).fetchone()
-        return _row_to_schedule(row) if row else None
-
-    def list_schedules(self, post_id: str | None = None) -> list[Schedule]:
-        if post_id is None:
-            rows = self._conn.execute(
-                f"SELECT {_SCHED_COLS} FROM schedules ORDER BY created_at"
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                f"SELECT {_SCHED_COLS} FROM schedules WHERE post_id = ? "
-                "ORDER BY created_at",
-                (post_id,),
-            ).fetchall()
-        return [_row_to_schedule(r) for r in rows]
-
-    def count_agent_schedules(self, post_id: str) -> int:
-        """에이전트 등록분 캡 판정용 (source='agent' 만)."""
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM schedules WHERE post_id = ? AND source = 'agent'",
-            (post_id,),
-        ).fetchone()
-        return int(row["n"])
-
-    def delete_schedule(self, schedule_id: str) -> None:
-        self._conn.execute(
-            "DELETE FROM schedules WHERE schedule_id = ?", (schedule_id,)
-        )
+        if not exists:
+            return []
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(schedules)")}
+        rows = [dict(r) for r in self._conn.execute("SELECT * FROM schedules")]
+        for r in rows:
+            if "nickname" not in cols:  # 1.26.0 이전 DB
+                r["nickname"] = ""
+        self._conn.execute("DROP TABLE schedules")
         self._conn.commit()
-
-    def set_schedule_enabled(self, schedule_id: str, enabled: bool) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET enabled = ? WHERE schedule_id = ?",
-            (1 if enabled else 0, schedule_id),
-        )
-        self._conn.commit()
-
-    def mark_fired(self, schedule_id: str, fired_at: str) -> None:
-        """정상 발화 기록 — missed 상태도 함께 해소 (run-now 겸용)."""
-        self._conn.execute(
-            "UPDATE schedules SET last_fired_at = ?, missed_at = NULL "
-            "WHERE schedule_id = ?",
-            (fired_at, schedule_id),
-        )
-        self._conn.commit()
-
-    def mark_missed(self, schedule_id: str, missed_at: str) -> None:
-        """놓친 발화 스탬프 — 여러 주기 놓쳐도 최신 1건으로 덮어씀(질문 접기)."""
-        self._conn.execute(
-            "UPDATE schedules SET missed_at = ? WHERE schedule_id = ?",
-            (missed_at, schedule_id),
-        )
-        self._conn.commit()
-
-    def clear_missed(self, schedule_id: str) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET missed_at = NULL WHERE schedule_id = ?",
-            (schedule_id,),
-        )
-        self._conn.commit()
+        return rows

@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 import sys
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -23,10 +24,9 @@ from pydantic import BaseModel
 from agent_board import (
     __version__,
     admin,
-    cron,
     instances,
     models_registry,
-    sched_contract,
+    session_schedules,
     sessions,
 )
 from agent_board import clone as clone_mod
@@ -37,11 +37,11 @@ from agent_board.keepalive import (
     make_sse_connect,
 )
 from agent_board.live_events import LiveEvents
-from agent_board.models import DEFAULT_SCHEDULE_NICKNAME
 from agent_board.orchestrator import Orchestrator, RealBackend
 from agent_board.router import BoardProxyRouter, CaddyRouter, Router
-from agent_board.scheduler import Scheduler
 from agent_board.store import Store
+
+log = logging.getLogger("agent_board.app")
 
 
 class _NoCacheStaticFiles(StaticFiles):
@@ -274,63 +274,24 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "agents": state.get("agents"),
         # 📐 문법 제약 세션 (None = 구버전 인스턴스/다운 — 배지 숨김)
         "grammar": state.get("grammar"),
-        # ⏰ 예약 요약 — 카드 배지(개수)와 놓친 발화 배너용. 전체 목록은
-        # 패널이 열릴 때 /api/posts/{id}/schedules 로 가져온다.
-        "schedules": _schedules_summary(store, post.post_id),
+        # ⏰ 예약 요약 — 카드 배지(개수)와 놓친 예약 표시용. 예약은 그 세션을
+        # 연 agent-cli 프로세스의 것이고(v1.34.0) 보드는 세션 폴더의 파일을
+        # 읽기만 한다. 목록·추가·답하기는 방 화면의 ⏰ 서랍에서 한다.
+        "schedules": session_schedules.summary(ws, post.session_id),
     }
 
 
-def _schedules_summary(store: Store, post_id: str) -> dict:
-    scheds = store.list_schedules(post_id)
-    return {
-        "count": len(scheds),
-        "missed": [
-            {
-                "schedule_id": s.schedule_id,
-                "label": s.label or cron.describe(s.cron),
-                "missed_at": s.missed_at,
-            }
-            for s in scheds
-            if s.missed_at
-        ],
-    }
-
-
-def _schedule_view(s) -> dict:
-    """A schedule row for the API/UI — cron + human label + next fire."""
-    next_fire = None
-    human = s.cron
-    try:
-        spec = cron.parse(s.cron)
-        human = cron.describe(s.cron)
-        if s.enabled:
-            next_fire = cron.next_fire(spec, datetime.now()).isoformat()
-    except ValueError:
-        pass  # corrupt cron → 원문 표기, next 없음
-    return {
-        "schedule_id": s.schedule_id,
-        "post_id": s.post_id,
-        "source": s.source,
-        "cron": s.cron,
-        "human": human,
-        "prompt": s.prompt,
-        "label": s.label,
-        "nickname": s.nickname,
-        # 발화 시 실제 쓰일 이름(미지정이면 기본값) — UI 표시·확인용
-        "effective_nickname": s.nickname or DEFAULT_SCHEDULE_NICKNAME,
-        "enabled": s.enabled,
-        "created_at": s.created_at,
-        "last_fired_at": s.last_fired_at,
-        "missed_at": s.missed_at,
-        "next_fire": next_fire,
-    }
-
-
-async def restore_state(config: Config, store: Store, router, keepalive) -> None:
+async def restore_state(
+    config: Config, store: Store, router, keepalive, revive=None
+) -> None:
     """After a board restart the in-memory route map + keepalive tasks are gone,
     but detached instances may still be alive (start_new_session). Re-register a
     route for each live instance and restore force-active keepalives so an
-    already-open browser keeps working without a manual re-open."""
+    already-open browser keeps working without a manual re-open.
+
+    ``revive(post_id)``: a post whose session owns enabled schedules but whose
+    instance is down (machine reboot, crash) is started again — its schedules
+    fire from inside that process, so a dead instance means silent schedules."""
     loop = asyncio.get_event_loop()
     posts = await loop.run_in_executor(None, store.list_posts)
     for post in posts:
@@ -341,8 +302,66 @@ async def restore_state(config: Config, store: Store, router, keepalive) -> None
             )
             if info and await loop.run_in_executor(None, instances.alive, info):
                 router.ensure_route(post.post_id, info["port"])
+            elif revive is not None and session_schedules.has_enabled(
+                ws, post.session_id
+            ):
+                revive(post.post_id)
         if post.force_active:
             await keepalive.enable(post.post_id)
+
+
+class ScheduleReviver:
+    """켜진 예약이 있는 방의 인스턴스가 죽으면 다시 띄운다 (v1.34.0).
+
+    예약은 그 세션을 연 agent-cli 프로세스 안에서 발화한다. 켜진 예약이 있으면
+    그 프로세스는 스스로 꺼지지 않으므로, 죽었다면 크래시·재부팅·강제 종료다 —
+    그대로 두면 예약이 조용히 멈춘다. 꺼져 있던 동안 지난 발화는 다시 뜬
+    프로세스가 "놓친 예약" 으로 묻는다(자동 실행 없음).
+
+    ``min_interval`` 은 기동하자마자 죽는 인스턴스를 스캔마다(1s) 되살리는
+    루프를 막는다 — 방 하나당 그 간격에 한 번만 시도한다.
+    """
+
+    def __init__(
+        self, config, store, open_fn, *, min_interval: float = 60.0, clock=None
+    ):
+        self._config = config
+        self._store = store
+        self._open = open_fn
+        self._min_interval = min_interval
+        self._clock = clock or time.monotonic
+        self._last: dict[str, float] = {}
+        self._tasks: set[asyncio.Task] = set()
+
+    def due(self, post_id: str) -> bool:
+        """Should this post be revived now? (pure decision — unit-tested)"""
+        post = self._store.get(post_id)
+        if post is None or not post.session_id:
+            return False
+        if not session_schedules.has_enabled(
+            self._config.workspace_for(post_id), post.session_id
+        ):
+            return False
+        now = self._clock()
+        last = self._last.get(post_id)
+        if last is not None and now - last < self._min_interval:
+            return False
+        self._last[post_id] = now
+        return True
+
+    def revive(self, post_id: str) -> None:
+        """Start the instance in the background if :meth:`due`. Loop thread."""
+        if not self.due(post_id):
+            return
+        task = asyncio.ensure_future(self._run(post_id))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _run(self, post_id: str) -> None:
+        try:
+            await self._open(post_id)
+        except Exception:
+            log.exception("could not revive %s for its schedules", post_id)
 
 
 def create_app(
@@ -352,7 +371,6 @@ def create_app(
     router: Router | None = None,
     orchestrator=None,
     keepalive=None,
-    scheduler=None,
 ) -> FastAPI:
     store = store or Store(config.db_path)
     if router is None:
@@ -379,64 +397,46 @@ def create_app(
     # live_events out of the app layer. on_death → drop the dead instance's
     # gateway route so a stale /s/<id> hit revives (Caddy falls through to the
     # board revive handler; board-proxy re-revives on next access).
-    # ⏰ 에이전트 파일 계약 (§7): 요청파일 변경을 live 스캐너가 감지하면 반영
-    # 후 스케줄러를 깨움 (rearm 은 thread-safe — executor 스레드에서 호출됨).
-    def _on_sched_requests(post) -> None:
-        changed = sched_contract.apply_requests(
-            store, post.post_id, config.workspace_for(post.post_id)
-        )
-        if changed:
-            scheduler.rearm()
+    reviver = ScheduleReviver(config, store, orchestrator.open)
+    loop_ref: dict = {}
+
+    def _on_death(post_id: str) -> None:
+        # 스캐너의 executor 스레드에서 불린다 — 라우트 제거는 그대로, 되살리기는
+        # 루프 스레드로 넘긴다.
+        router.remove_route(post_id)
+        loop = loop_ref.get("loop")
+        if loop is not None:
+            loop.call_soon_threadsafe(reviver.revive, post_id)
 
     live = LiveEvents(
         config,
         store,
         lambda p: _post_view(config, store, p),
-        on_death=router.remove_route,
-        on_sched_requests=_on_sched_requests,
+        on_death=_on_death,
     )
-
-    # ⏰ 스케줄러 (docs/schedule-design.md) — sleep-until-next + rearm. 발화 =
-    # spawn-or-attach(orchestrator.open) 후 인스턴스 /api/input 에 주입.
-    def _sched_inject(post, prompt: str, nickname: str) -> None:
-        if post is None or not post.session_id:
-            raise RuntimeError("no session to inject into")
-        instances.inject_prompt(
-            config.workspace_for(post.post_id),
-            post.session_id,
-            prompt,
-            nickname=nickname,
-        )
-
-    def _sched_changed(post_id: str) -> None:
-        # 스케줄 상태 변화(발화·missed·UI 뮤테이션)를 그 행의 post_update 로
-        # 즉시 push — 프런트 배지가 새로고침 없이 갱신된다. 에이전트 쪽 state
-        # 파일도 함께 갱신해(§7 refresh) agent 의 다음 list 가 진실을 본다.
-        try:
-            sched_contract.refresh_state(store, post_id, config.workspace_for(post_id))
-        except OSError:
-            pass  # state 갱신 실패가 API/발화를 막으면 안 됨
-        post = store.get(post_id)
-        if post is not None:
-            live._broadcast(
-                {"type": "post_update", "post": _post_view(config, store, post)}
-            )
-
-    if scheduler is None:
-        scheduler = Scheduler(
-            store, orchestrator, inject_fn=_sched_inject, on_change=_sched_changed
-        )
 
     @asynccontextmanager
     async def lifespan(_app):
-        await restore_state(config, store, router, keepalive)
+        loop = asyncio.get_running_loop()
+        loop_ref["loop"] = loop
+        # v1.33 → v1.34: 보드 DB 의 예약을 세션 폴더로 한 번 옮긴다. 떠 있는
+        # 인스턴스는 멈춘다(파일을 기동 때만 읽는다) — 아래 restore 가 다시 띄운다.
+        await loop.run_in_executor(
+            None,
+            lambda: session_schedules.migrate_legacy(
+                store,
+                config,
+                stop_instance=getattr(
+                    getattr(orchestrator, "backend", None), "stop_instance", None
+                ),
+            ),
+        )
+        await restore_state(config, store, router, keepalive, reviver.revive)
         scanner = asyncio.create_task(live.run())
-        sched_task = asyncio.create_task(scheduler.run())
         try:
             yield
         finally:
             scanner.cancel()
-            sched_task.cancel()
             if hasattr(router, "aclose"):
                 await router.aclose()  # release the router's httpx client
 
@@ -445,7 +445,7 @@ def create_app(
     # router.remove_route)을 합동 검증할 수 있게 노출 — 배선 누락은
     # 양쪽 반쪽 유닛만으로는 안 잡힌다.
     app.state.live_events = live
-    app.state.scheduler = scheduler
+    app.state.schedule_reviver = reviver
     router.mount(app)  # /s/<post_id>/* reverse proxy
 
     # no-cache — plain StaticFiles 는 Cache-Control 미설정이라 브라우저가
@@ -754,75 +754,6 @@ def create_app(
         else:
             await keepalive.disable(post_id)
         return JSONResponse({"force_active": body.enabled})
-
-    # ── ⏰ 예약 API (docs/schedule-design.md §6) ─────────────
-
-    @app.get("/api/posts/{post_id}/schedules")
-    async def list_schedules_api(post_id: str):
-        if store.get(post_id) is None:
-            raise HTTPException(status_code=404, detail="no such post")
-        return [_schedule_view(s) for s in store.list_schedules(post_id)]
-
-    @app.post("/api/posts/{post_id}/schedules")
-    async def add_schedule_api(post_id: str, body: dict):
-        if store.get(post_id) is None:
-            raise HTTPException(status_code=404, detail="no such post")
-        expr = (body.get("cron") or "").strip()
-        prompt = (body.get("prompt") or "").strip()
-        if not prompt:
-            raise HTTPException(status_code=400, detail="prompt is required")
-        try:
-            cron.parse(expr)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"invalid cron: {e}") from e
-        s = store.add_schedule(
-            post_id=post_id,
-            source="user",
-            cron=expr,
-            prompt=prompt,
-            label=(body.get("label") or "").strip(),
-            nickname=(body.get("nickname") or "").strip(),
-        )
-        scheduler.rearm()
-        _sched_changed(post_id)
-        return _schedule_view(s)
-
-    def _get_sched_or_404(schedule_id: str):
-        s = store.get_schedule(schedule_id)
-        if s is None:
-            raise HTTPException(status_code=404, detail="no such schedule")
-        return s
-
-    @app.delete("/api/schedules/{schedule_id}")
-    async def delete_schedule_api(schedule_id: str):
-        s = _get_sched_or_404(schedule_id)
-        store.delete_schedule(schedule_id)
-        scheduler.rearm()
-        _sched_changed(s.post_id)
-        return JSONResponse({"deleted": schedule_id})
-
-    @app.post("/api/schedules/{schedule_id}/toggle")
-    async def toggle_schedule_api(schedule_id: str, body: dict):
-        s = _get_sched_or_404(schedule_id)
-        store.set_schedule_enabled(schedule_id, bool(body.get("enabled")))
-        scheduler.rearm()
-        _sched_changed(s.post_id)
-        return _schedule_view(store.get_schedule(schedule_id))
-
-    @app.post("/api/schedules/{schedule_id}/run-now")
-    async def run_now_api(schedule_id: str):
-        """즉시 1회 발화 — 놓친 발화의 [지금 실행] 과 수동 ▶ 버튼 공용.
-        성공 시 mark_fired 가 missed 도 함께 해소한다."""
-        s = _get_sched_or_404(schedule_id)
-        ok = await scheduler.fire(s)
-        return JSONResponse({"ok": ok})
-
-    @app.post("/api/schedules/{schedule_id}/dismiss-missed")
-    async def dismiss_missed_api(schedule_id: str):
-        s = _get_sched_or_404(schedule_id)
-        store.clear_missed(schedule_id)
-        _sched_changed(s.post_id)
-        return JSONResponse({"ok": True})
 
     return app
 
