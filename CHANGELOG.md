@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.34.0] - 2026-10-04
+
+### Changed — 예약을 agent-cli 세션으로 넘김 (agent-cli 10.12.0 짝, 호환 없음)
+
+보드는 더 이상 스케줄러가 아닙니다. 예약은 그 방의 agent-cli 세션이 소유하고
+그 프로세스가 발화합니다(세션 폴더의 `schedules.json`). 보드 없이 쓰는
+`agent-cli web`/`run` 에서도 예약이 동작하게 하려는 변경입니다.
+
+- **삭제**: `scheduler.py` · `sched_contract.py` · `cron.py`, `schedules` 테이블,
+  예약 API 여섯 개(`/api/posts/{id}/schedules`, `/api/schedules/...`), 카드의
+  예약 패널, spawn 시의 `AGENT_CLI_SCHEDULER` env, 워크스페이스 파일 계약
+  (`schedule-requests.jsonl` / `schedule-state.json`).
+- **남는 것**: 카드의 ⏰ 개수 배지와 놓친 예약 안내(세션 폴더의 파일을 읽기만
+  한다 — `session_schedules.py`). 목록·추가·실행/건너뛰기는 방 화면의 ⏰ 서랍.
+- **다시 띄우기** (`ScheduleReviver`): 켜진 예약이 있는 방의 인스턴스가 죽으면
+  보드 기동 때와 죽음 감지 때 다시 띄웁니다. 방 하나당 60초에 한 번.
+- **일회성 이전**: 첫 기동 때 DB 의 예약을 각 방의 세션 폴더로 옮기고 테이블을
+  지웁니다. 떠 있는 인스턴스는 먼저 멈춥니다(예약 파일은 기동 때만 읽습니다).
+  세션이 없는 방의 예약은 로그에 남기고 버립니다.
+- **복제**: 예약 파일·이력·세션 잠금은 복제본에 복사하지 않습니다.
+
 ## [1.31.3] - 2026-09-30
 
 ### Changed — 파일 계약의 식별자 키 `schedule_id` → `id` (agent-cli 9.25.4 짝, 호환 없음)

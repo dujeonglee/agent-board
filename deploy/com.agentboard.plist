@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  agent-board launchd 서비스 (macOS) — ⏰ 예약(schedules)의 배포 전제.
+  agent-board launchd 서비스 (macOS) — 재부팅 뒤 ⏰ 예약이 이어지기 위한 전제.
 
-  board 내부 스케줄러는 board 프로세스가 떠 있는 동안만 발화하므로, 예약을
-  쓰려면 board 를 OS 가 상시 유지해야 한다 (docs/schedule-design.md §8).
+  예약은 각 방의 agent-cli 프로세스가 발화한다(v1.34.0). 재부팅·크래시로 그
+  프로세스가 죽으면 board 가 다시 띄우므로, board 를 OS 가 상시 유지해야 한다.
   launchd 의 KeepAlive 가 크래시/재부팅 후 자동 재기동을 보장한다.
   (리눅스는 deploy/agent-board.service — systemd Restart=always.)
 

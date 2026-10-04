@@ -25,7 +25,16 @@ from pathlib import Path
 
 # 복사에서 항상 제외 — 인스턴스 라이브 상태 사이드카. stale pid/port/token
 # 이 새 방을 죽은 인스턴스로 오판하게 만든다(live_state/pid_alive).
-_SIDECAR_EXCLUDE = {"web.json", "status.json", "instance.log"}
+# 예약(schedules.json·이력)과 세션 잠금은 원본 세션의 것이다 — 복제본이
+# 물려받으면 두 방이 같은 예약을 각자 발화한다 (v1.34.0).
+_SIDECAR_EXCLUDE = {
+    "web.json",
+    "status.json",
+    "instance.log",
+    "schedules.json",
+    "schedule-log.jsonl",
+    "session.lock",
+}
 
 
 def _safe_join(root: Path, rel: str) -> Path:

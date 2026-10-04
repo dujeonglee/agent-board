@@ -39,6 +39,12 @@ def board_home(tmp_path):
         "VALUES (?, 'rwar', NULL, 0, '2026-08-19T13:17:25Z')",
         (OLD_ID,),
     )
+    # v1.33 까지의 DB: 예약이 보드 테이블에 있다 (v1.34.0 부터는 세션 폴더).
+    conn.execute(
+        "CREATE TABLE schedules (schedule_id TEXT PRIMARY KEY, post_id TEXT NOT NULL, "
+        "source TEXT NOT NULL, cron TEXT NOT NULL, prompt TEXT NOT NULL, "
+        "created_at TEXT NOT NULL)"
+    )
     conn.execute(
         "INSERT INTO schedules (schedule_id, post_id, source, cron, prompt, "
         "created_at) VALUES ('s1', ?, 'user', '0 9 * * *', 'ping', 'now')",
@@ -66,7 +72,14 @@ def _rows(home: Path):
     conn = sqlite3.connect(home / "board.db")
     conn.row_factory = sqlite3.Row
     posts = {r["post_id"]: r["topic"] for r in conn.execute("SELECT * FROM posts")}
-    scheds = [r["post_id"] for r in conn.execute("SELECT post_id FROM schedules")]
+    has_scheds = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedules'"
+    ).fetchone()
+    scheds = (
+        [r["post_id"] for r in conn.execute("SELECT post_id FROM schedules")]
+        if has_scheds
+        else []
+    )
     conn.close()
     return posts, scheds
 
@@ -193,3 +206,18 @@ class TestLegacyRootMove:
         assert r.returncode == 0, r.stderr
         assert "root:" not in r.stdout
         assert (legacy_home / "workspaces").is_dir()  # left alone
+
+
+class TestWithoutLegacyScheduleTable:
+    def test_apply_works_on_a_db_that_never_had_schedules(self, board_home):
+        """v1.34.0 이후에 만든 DB 에는 ``schedules`` 테이블이 없다."""
+        conn = sqlite3.connect(board_home / "board.db")
+        conn.execute("DROP TABLE schedules")
+        conn.commit()
+        conn.close()
+        r = _run(board_home, "--apply")
+        assert r.returncode == 0, r.stderr
+        conn = sqlite3.connect(board_home / "board.db")
+        ids = [row[0] for row in conn.execute("SELECT post_id FROM posts")]
+        conn.close()
+        assert OLD_ID not in ids
