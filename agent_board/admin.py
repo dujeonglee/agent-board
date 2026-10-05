@@ -293,6 +293,7 @@ def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> d
     """
     try:
         from agent_cli.providers.capabilities import (
+            UnsupportedModelError,
             _detect_runtime_capabilities,
             caps_to_entry,
         )
@@ -306,9 +307,14 @@ def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> d
     base_url = cfg.get("base_url", "")
     if not base_url:
         raise AdminError("config.json 에 base_url 이 없습니다")
-    caps = _detect_runtime_capabilities(
-        cfg.get("provider", "openai"), base_url, model_id, cfg.get("api_key", "")
-    )
+    try:
+        caps = _detect_runtime_capabilities(
+            cfg.get("provider", "openai"), base_url, model_id, cfg.get("api_key", "")
+        )
+    except UnsupportedModelError as e:
+        # 탐지기는 "쓸 수 없는 모델"(컨텍스트 창이 최소치 미만)을 None 이 아니라
+        # 예외로 알린다 — 사유 문구를 그대로 화면에 올린다.
+        raise AdminError(str(e)) from e
     if caps is None:
         raise AdminError(f"'{model_id}' capability 탐지 실패 (프로브 무응답/거부)")
     return caps_to_entry(caps, auto_detected=True)
