@@ -129,3 +129,19 @@ class TestCreatePostDoubleSubmit:
         )
         assert _titles(board) == []
         ctx.close()
+
+
+class TestNewPostRowHeights:
+    def test_topic_model_and_button_share_one_height(self, board, browser):
+        """제목 입력·모델 선택·버튼은 한 줄이고 높이가 같다. 종전엔 각자
+        브라우저 기본 높이라 select 가 input 과 어긋났다."""
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.goto(board.url, wait_until="load")
+        page.wait_for_selector("#new-topic", timeout=8000)
+        heights = page.evaluate(
+            """() => ['new-topic', 'new-model', 'new-create'].map(
+                 id => document.getElementById(id).getBoundingClientRect().height)"""
+        )
+        assert len(set(heights)) == 1, heights
+        ctx.close()

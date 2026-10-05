@@ -97,7 +97,8 @@ header h1 { margin: 0; font-size: 18px; }
 }
 
 #new {
-  display: flex; gap: 8px; align-items: flex-start;
+  /* stretch — 입력·모델 선택·버튼이 브라우저 기본 높이(제각각)가 아니라 한 줄 높이로 맞는다 */
+  display: flex; gap: 8px; align-items: stretch;
   padding: 16px 20px; border-bottom: 1px solid var(--border);
 }
 #new-topic { flex: 0 1 320px; }
@@ -109,6 +110,7 @@ header h1 { margin: 0; font-size: 18px; }
 #new-model {
   padding: 8px 10px; border-radius: 8px; font-size: 13px; max-width: 220px;
   border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+  font-family: inherit;
 }
 #new-create { padding: 8px 14px; font-size: 13px; }
 .model-sel {
