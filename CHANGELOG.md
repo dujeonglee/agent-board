@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.34.1] - 2026-10-05
+
+### Fixed — 모델 탐지가 "쓸 수 없는 모델" 에서 500 을 내던 것
+
+관리 화면의 🔍 탐지를 컨텍스트 창이 agent-cli 최소치(16,384) 미만인 모델에
+누르면 `Internal Server Error` 와 traceback 이 났습니다. agent-cli 의 탐지기는
+이 경우를 `None` 이 아니라 `UnsupportedModelError` 로 알리는데 보드가
+`AdminError` 만 잡았기 때문입니다. 이제 사유 문구가 그대로 화면에 뜹니다
+(예: `context window 8,192 is below the 16,384 minimum`).
+
 ## [1.34.0] - 2026-10-04
 
 ### Changed — 예약을 agent-cli 세션으로 넘김 (agent-cli 10.12.0 짝, 호환 없음)

@@ -254,6 +254,21 @@ class TestDetect:
         with pytest.raises(admin.AdminError):
             admin.detect_model_entry("fresh", cfg)
 
+    def test_detect_unsupported_model_is_admin_error_with_the_reason(
+        self, tmp_path, monkeypatch
+    ):
+        # 창이 최소치 미만이면 탐지기가 None 이 아니라 예외를 던진다 — 잡지 않아
+        # 500 + traceback 이 났다(gemma-2-9b-it, 8,192).
+        cfg = _cfg_file(tmp_path)
+        import agent_cli.providers.capabilities as caps_mod
+
+        def too_small(*a, **k):
+            raise caps_mod.UnsupportedModelError("tiny: context window 8,192 is below")
+
+        monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", too_small)
+        with pytest.raises(admin.AdminError, match="8,192"):
+            admin.detect_model_entry("tiny", cfg)
+
 
 # ── HTTP 라우트 ──────────────────────────────────────────────────
 
@@ -306,6 +321,18 @@ class TestAdminApi:
             "m1": "served",
             "gone": "missing",
         }
+
+    def test_detect_endpoint_reports_an_unsupported_model(self, tmp_path, monkeypatch):
+        import agent_cli.providers.capabilities as caps_mod
+
+        def too_small(*a, **k):
+            raise caps_mod.UnsupportedModelError("tiny: context window 8,192 is below")
+
+        monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", too_small)
+        _, _, c = _admin_client(tmp_path)
+        r = c.post("/api/admin/models/detect", json={"model": "tiny"})
+        assert r.status_code == 502
+        assert "8,192" in r.json()["detail"]
 
     def test_put_and_delete_model(self, tmp_path):
         _, models_json, c = _admin_client(tmp_path)
