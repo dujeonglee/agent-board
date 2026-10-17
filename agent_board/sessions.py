@@ -58,7 +58,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
 
     - status: ``working`` (LLM responding) / ``running`` (up, idle) / ``idle`` (down),
     - awaiting_input: an ask/confirm prompt is waiting for a reply,
-    - viewers: live browser subscribers on the instance (0 when down).
+    - viewers: live browser subscribers on the instance (0 when down),
+    - auditing (v1.35.0, additive): a session-audit run is in flight.
 
     agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
     path is a file read (no HTTP). Older instances have no file → fall back to
@@ -92,6 +93,10 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     # status.json 과 /api/health 둘 다 같은 키). 구버전은 미기록 → 키 생략.
     if isinstance(live.get("grammar"), bool):
         out["grammar"] = live["grammar"]
+    # v1.35.0: 🔎 세션 감사 런 진행 중 (agent-cli ≥10.42.0 additive 필드 —
+    # status.json 과 /api/health 둘 다 같은 키). 구버전은 미기록 → 키 생략.
+    if isinstance(live.get("auditing"), bool):
+        out["auditing"] = live["auditing"]
     return out
 
 

@@ -976,6 +976,53 @@ class TestSingletonLock:
             os.close(fd_b)
 
 
+class TestAuditingStatus:
+    """v1.35.0: 🔎 세션 감사 런 진행 중 — status.json/health 의 additive `auditing`
+    이 post 로 나오고(구버전은 None), 카드가 "결과 확인 중" 을 그린다."""
+
+    def test_live_state_passes_auditing_through(self, tmp_path, monkeypatch):
+        from agent_board import instances, sessions
+
+        monkeypatch.setattr(
+            instances, "read_web_json", lambda ws, sid: {"pid": 1, "port": 9}
+        )
+        monkeypatch.setattr(instances, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            instances,
+            "read_status_json",
+            lambda ws, sid: {
+                "busy": False,
+                "awaiting_input": False,
+                "viewers": 0,
+                "auditing": True,
+            },
+        )
+        assert sessions.live_state(tmp_path, "s")["auditing"] is True
+        monkeypatch.setattr(
+            instances,
+            "read_status_json",
+            lambda ws, sid: {"busy": False, "awaiting_input": False, "viewers": 0},
+        )
+        assert "auditing" not in sessions.live_state(tmp_path, "s")  # 구버전 인스턴스
+
+    def test_card_wiring(self):
+        from pathlib import Path
+
+        import agent_board
+
+        static = Path(agent_board.__file__).parent / "static"
+        js = (static / "app.js").read_text(encoding="utf-8")
+        css = (static / "style.css").read_text(encoding="utf-8")
+        assert 'label: "결과 확인 중"' in js and "p.auditing" in js
+        # 우선순위: 응답 필요 > 응답 중 > 결과 확인 중 > 에이전트 작업 중
+        assert (
+            js.index('"❗ 응답 필요"')
+            < js.index("? AUDITING")
+            < js.index("? AGENTS_BUSY")
+        )
+        assert ".dot.auditing" in css and "--audit:" in css
+
+
 class TestGrammarBadge:
     """v1.31.0: 📐 문법 제약 세션 — status.json/health 의 additive `grammar` 가
     post 로 나오고(구버전은 None), 카드가 켜진 것만 배지로 그린다."""
