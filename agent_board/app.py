@@ -274,6 +274,9 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "agents": state.get("agents"),
         # 📐 문법 제약 세션 (None = 구버전 인스턴스/다운 — 배지 숨김)
         "grammar": state.get("grammar"),
+        # 🔎 세션 감사 런 진행 중 (v1.35.0; None = 구버전/다운) — 카드 상태
+        # "결과 확인 중". 감사자는 팀원이 아니라 🤖 칩에 들지 않는다.
+        "auditing": state.get("auditing"),
         # ⏰ 예약 요약 — 카드 배지(개수)와 놓친 예약 표시용. 예약은 그 세션을
         # 연 agent-cli 프로세스의 것이고(v1.34.0) 보드는 세션 폴더의 파일을
         # 읽기만 한다. 목록·추가·답하기는 방 화면의 ⏰ 서랍에서 한다.

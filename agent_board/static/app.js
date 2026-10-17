@@ -235,6 +235,11 @@
   // 구분(보라). "응답 중"과 합치지 않는 이유: main 은 비어 있어 지금
   // 말 걸어도 되는 상태라는 정보가 사라짐.
   const AGENTS_BUSY = { cls: "agents-busy", label: "에이전트 작업 중" };
+  // main 유휴 + 세션 감사 런 진행 중 (v1.35.0, agent-cli ≥ 10.42.0 `auditing`) —
+  // 하니스가 방금 끝난 런의 결과를 확인하는 중. 감사자는 팀원이 아니라 🤖 칩에
+  // 없고, 이 상태 한 줄이 그 자리다. 우선순위: 응답 필요 > 응답 중 > 결과 확인 중
+  // > 에이전트 작업 중 > 대기.
+  const AUDITING = { cls: "auditing", label: "결과 확인 중" };
 
   function agentsChip(p) {
     const a = p.agents;
@@ -256,9 +261,11 @@
     const agentsWorking = p.agents && p.agents.working > 0;
     const st = p.awaiting_input
       ? { cls: "await", label: "❗ 응답 필요" }
-      : p.status === "running" && agentsWorking
-        ? AGENTS_BUSY
-        : STATUS[p.status] || STATUS.idle;
+      : p.status === "running" && p.auditing
+        ? AUDITING
+        : p.status === "running" && agentsWorking
+          ? AGENTS_BUSY
+          : STATUS[p.status] || STATUS.idle;
     const up = p.status === "running" || p.status === "working";
     el.innerHTML =
       `<div class="post-main">` +

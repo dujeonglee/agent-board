@@ -17,6 +17,7 @@
   --warn-soft-bg: rgba(210,153,34,.10); --warn-soft-border: rgba(210,153,34,.40);
   --shadow: rgba(0,0,0,.40);
   --agent-work: #a78bfa; /* 에이전트 작업 중 dot (violet) */
+  --audit: #f0b429; /* 결과 확인 중 dot (amber, v1.35.0) */
 }
 :root[data-theme="midnight"] {
   --bg: #0a0e17; --surface: #111725; --surface-2: #182032;
@@ -47,6 +48,7 @@
   --warn-soft-bg: #fef3c7; --warn-soft-border: #fed7aa;
   --shadow: rgba(15,23,42,.18);
   --agent-work: #7c3aed;
+  --audit: #d97706;
 }
 
 * { box-sizing: border-box; }
@@ -157,6 +159,8 @@ header h1 { margin: 0; font-size: 18px; }
 /* main 유휴 + 에이전트 작업 중 (v1.17.0) — 보라 dot. --agent-work 는
    board 전용 시맨틱 토큰 (agent-cli 와 공유 아님 — 대응 UI 부재). */
 .dot.agents-busy { background: var(--agent-work); animation: pulse 1s ease-out infinite; }
+/* main 유휴 + 세션 감사 런 진행 중 (v1.35.0) — 호박색 dot. */
+.dot.auditing { background: var(--audit); animation: pulse 1s ease-out infinite; }
 .agents-chip { font-size: 12px; color: var(--text-2); white-space: nowrap; }
 @keyframes pulse {
   0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
