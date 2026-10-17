@@ -25,6 +25,7 @@ from agent_board import (
     __version__,
     admin,
     instances,
+    knobs_spec,
     models_registry,
     session_schedules,
     sessions,
@@ -209,9 +210,11 @@ def build_log_config(log_file: str | Path) -> dict:
 
 class NewPost(BaseModel):
     topic: str
-    # v1.33.0: 필수 — "(기본)" 은 없다. agent-cli config.json 의 default_model
-    # 에 몰래 기대지 않는다(바인딩 판정을 보드가 할 수 없게 되므로).
-    model_id: str
+    # v1.36.0: 세션 노브 ``{이름: 값}`` — ``model`` 은 필수("(기본)" 은 없다,
+    # v1.33.0: agent-cli config.json 의 default_model 에 몰래 기대지 않는다 —
+    # 바인딩 판정을 보드가 할 수 없게 되므로). 나머지는 표(`/api/knobs/spec`)로
+    # 검증하고, 비우면 agent-cli 기본값. 생성 때 한 번 받고 그 뒤엔 방이 진실.
+    knobs: dict = {}
     # 대화방 clone (v1.20.0): 원본 post + 그 워크스페이스에서 복사할
     # 상대경로들. clone_from 만 주고 paths 를 비우면 아무것도 안 옮김
     # (fresh). `.agent-cli/sessions/<sid>` 가 포함되면 대화까지 이어받음.
@@ -221,10 +224,6 @@ class NewPost(BaseModel):
 
 class ForceActive(BaseModel):
     enabled: bool
-
-
-class SetModel(BaseModel):
-    model_id: str
 
 
 def model_problem(config: Config, model_id: str | None) -> dict | None:
@@ -246,22 +245,29 @@ def model_problem(config: Config, model_id: str | None) -> dict | None:
 
 
 def _post_view(config: Config, store: Store, post) -> dict:
-    """A post + its derived (live) fields for the list."""
+    """A post + its derived (live) fields for the list.
+
+    v1.36.0 거울: 떠 있는 방이 보고한 노브 값(``status.json.knobs``)이 저장값과
+    다르면 여기서 기록한다 — 목록·라이브 스캔이 이 함수를 지나므로 방에서 🤖 로
+    바꾼 모델이 다음 재시작에도 남는다. 보드는 떠 있는 방에 쓰지 않는다."""
     ws = config.workspace_for(post.post_id)
     lq = sessions.last_query_record(ws, post.session_id)
     state = sessions.live_state(ws, post.session_id)
     status = state["status"]
+    live_knobs = state.get("knobs")
+    if isinstance(live_knobs, dict) and live_knobs and live_knobs != post.knobs:
+        store.set_knobs(post.post_id, live_knobs)
+        post = store.get(post.post_id) or post
     # human viewers = live subscribers minus the force-active keep-alive's own one
     viewers = max(0, state.get("viewers", 0) - (1 if post.force_active else 0))
-    # model is changeable only when nobody is watching: down, or up-and-idle with
-    # 0 human viewers (mirrors orchestrator.change_model's gate).
-    model_changeable = status == "idle" or (status == "running" and viewers == 0)
     return {
         "post_id": post.post_id,
         "topic": post.topic,
-        "model_id": post.model_id,
+        # 저장된 노브(모델 포함) — 떠 있으면 방이 보고한 값과 같다(위 거울).
+        "knobs": post.knobs,
+        "model": post.model,
         # False 면 열기/재실행이 409 — 카드가 사유와 ⚙ 링크를 보여 준다.
-        "model_bound": model_problem(config, post.model_id) is None,
+        "model_bound": model_problem(config, post.model) is None,
         "force_active": post.force_active,
         "created_at": post.created_at,
         "last_query": lq["text"] if lq else None,
@@ -269,7 +275,6 @@ def _post_view(config: Config, store: Store, post) -> dict:
         "status": status,
         "awaiting_input": state["awaiting_input"],
         "viewers": viewers,
-        "model_changeable": model_changeable,
         # 상주 에이전트 요약 (없으면 None — 프런트가 칩/상태 숨김)
         "agents": state.get("agents"),
         # 📐 문법 제약 세션 (None = 구버전 인스턴스/다운 — 배지 숨김)
@@ -471,6 +476,16 @@ def create_app(
         # selectable models from agent-cli's registry (admin-managed)
         return models_registry.list_models(config.models_json)
 
+    @app.get("/api/knobs/spec")
+    async def knobs_spec_view():
+        """agent-cli 의 노브 표 (`agent-cli knobs --json`, v1.36.0) — 새 글 폼의
+        ⚙ 고급 컨트롤과 카드 패널의 라벨·단위가 여기서 나온다. 구버전
+        agent-cli(< 10.45.0)면 모델만 든 최소 표(``full: false``) → 폼 숨김."""
+        spec = await asyncio.get_event_loop().run_in_executor(
+            None, knobs_spec.load, config.agent_cli_bin
+        )
+        return {"full": knobs_spec.is_full(spec), "knobs": list(spec)}
+
     # ── Admin (⚙): agent-cli config.json / models.json 편집 ──────────
     # 도메인 로직은 admin.py (전송 계층 분리). 블로킹 I/O·프로브·탐지는
     # 전부 executor 오프로드 — SSE 이벤트루프 보호 (agent-cli C3 교훈).
@@ -618,13 +633,22 @@ def create_app(
             )
         if body.clone_from and store.get(body.clone_from) is None:
             raise HTTPException(status_code=404, detail="clone source not found")
-        problem = model_problem(config, body.model_id)
+        spec = await asyncio.get_event_loop().run_in_executor(
+            None, knobs_spec.load, config.agent_cli_bin
+        )
+        try:
+            knobs = knobs_spec.validate(spec, body.knobs)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400, detail={"reason": "bad_knob", "error": str(e)}
+            ) from e
+        problem = model_problem(config, knobs.get("model"))
         if problem is not None:
             raise HTTPException(status_code=400, detail=problem)
 
         post = store.create_post(
             topic=body.topic,
-            model_id=body.model_id,
+            knobs=knobs,
             # the id is also the workspace directory name — never reuse one
             # an orphaned directory (half-finished delete) already holds.
             dir_taken=lambda pid: config.workspace_for(pid).exists(),
@@ -699,7 +723,7 @@ def create_app(
         post = store.get(post_id)
         if post is None:
             raise HTTPException(status_code=404, detail="no such post")
-        problem = model_problem(config, post.model_id)
+        problem = model_problem(config, post.model)
         if problem is not None:
             raise HTTPException(status_code=409, detail=problem)
 
@@ -729,23 +753,6 @@ def create_app(
         except RuntimeError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
         return JSONResponse({"url": url})
-
-    @app.post("/api/posts/{post_id}/model")
-    async def change_model(post_id: str, body: SetModel):
-        if store.get(post_id) is None:
-            raise HTTPException(status_code=404, detail="no such post")
-        problem = model_problem(config, body.model_id)
-        if problem is not None:
-            raise HTTPException(status_code=400, detail=problem)
-        try:
-            result = await orchestrator.change_model(post_id, body.model_id)
-        except KeyError as e:
-            raise HTTPException(status_code=404, detail="no such post") from e
-        if not result["ok"]:
-            # blocked by the gate (busy / someone watching) — 409 Conflict so the
-            # frontend can revert the dropdown and explain why.
-            raise HTTPException(status_code=409, detail=result["reason"])
-        return JSONResponse(result)
 
     @app.post("/api/posts/{post_id}/force_active")
     async def set_force_active(post_id: str, body: ForceActive):

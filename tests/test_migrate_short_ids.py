@@ -35,7 +35,7 @@ def board_home(tmp_path):
     store.close()
     conn = sqlite3.connect(home / "board.db")
     conn.execute(
-        "INSERT INTO posts (post_id, topic, model_id, force_active, created_at) "
+        "INSERT INTO posts (post_id, topic, knobs, force_active, created_at) "
         "VALUES (?, 'rwar', NULL, 0, '2026-08-19T13:17:25Z')",
         (OLD_ID,),
     )
@@ -161,7 +161,7 @@ class TestLegacyRootMove:
         store.close()
         conn = sqlite3.connect(home / "board.db")
         conn.execute(
-            "INSERT INTO posts (post_id, topic, model_id, force_active, "
+            "INSERT INTO posts (post_id, topic, knobs, force_active, "
             "created_at) VALUES (?, 'rwar', NULL, 0, 'now')",
             (OLD_ID,),
         )

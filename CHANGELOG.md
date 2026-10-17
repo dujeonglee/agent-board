@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.36.0] - 2026-10-17
+
+### Changed — 보드는 방의 거울 (agent-cli ≥ 10.46.0 짝)
+
+모델을 포함한 세션 노브는 **새 글 폼(`⚙ 고급`)에서 한 번** 받고, 그 뒤엔 방 안의
+칩에서 바꿉니다. 보드는 방이 `status.json` 에 보고한 `knobs` 를 카드(🤖 모델 칩·
+노브 칩·`⚙` 읽기 전용 패널)에 보여 주고 기록해, 다음 재시작에 같은 플래그로
+돌려줍니다 — 방에서 🤖 로 바꾼 모델이 재시작 뒤에도 남습니다(종전엔 보드의 옛
+모델로 되돌아갔습니다). 폼의 컨트롤과 spawn 플래그는 `agent-cli knobs --json` 의
+표에서 나오므로 보드에 노브 이름이 박혀 있지 않습니다.
+
+### Removed
+
+- 카드의 모델 드롭다운, `POST /api/posts/{id}/model`, "아무도 안 볼 때만 변경"
+  게이트(busy/viewers 409)와 force-active 재spawn. 뜰 수 없는 방은 📋 복제로
+  다른 모델을 골라 이어갑니다.
+- `posts.model_id` 컬럼 — 첫 열기에 `knobs["model"]` 로 옮깁니다(멱등).
+
+### Added
+
+- `GET /api/knobs/spec` (표, 구버전 agent-cli 면 `full: false` → 폼 숨김),
+  `POST /api/posts` 의 `knobs`(표로 검증, 400 `bad_knob`), 복제 폼의 노브 프리필.
+
 ## [1.35.0] - 2026-10-17
 
 ### Added — 카드 상태 "결과 확인 중" (agent-cli ≥ 10.42.0 세션 감사자 짝)

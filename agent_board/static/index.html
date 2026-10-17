@@ -38,7 +38,10 @@
   <section id="new">
     <input id="new-topic" type="text" placeholder="주제 - 예: 라이브러리 만들기" maxlength="200">
     <select id="new-model" title="모델 — 방언(dialect)이 설정된 모델만 보입니다 (⚙ 어드민에서 설정)"></select>
+    <button id="new-adv" type="button" class="btn-ghost" aria-expanded="false" title="노브 — 사고·문법·에이전트 상한·압축·무진전·자동 승인·감사. 비우면 agent-cli 기본값. 만든 뒤에는 방 안의 칩에서 바꿉니다." hidden>⚙ 고급</button>
     <button id="new-create" type="button" class="btn-primary">+ 새 글</button>
+    <!-- 노브 폼 (v1.36.0): 컨트롤은 agent-cli 의 표(/api/knobs/spec)에서 그려진다 -->
+    <div id="new-knobs" class="knob-form" hidden></div>
   </section>
 
   <main id="posts"></main>
@@ -55,7 +58,9 @@
     <div class="clone-fields">
       <input id="clone-topic" type="text" placeholder="새 주제" maxlength="200">
       <select id="clone-model" title="모델 — 방언(dialect)이 설정된 모델만 보입니다 (⚙ 어드민에서 설정)"></select>
+      <button id="clone-adv" type="button" class="btn-ghost" aria-expanded="false" title="노브 — 원본의 값으로 채워져 있습니다" hidden>⚙ 고급</button>
     </div>
+    <div id="clone-knobs" class="knob-form" hidden></div>
     <div id="clone-hint" class="clone-hint">복사할 파일/폴더를 체크하세요. <code>.agent-cli</code> 를 포함하면 대화까지 이어집니다.</div>
     <div id="clone-tree" class="clone-tree"></div>
     <div id="clone-msg" class="clone-msg"></div>

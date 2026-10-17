@@ -79,7 +79,7 @@ class TestBuildSpawnCmd:
         assert cmd[cmd.index("--idle-timeout") + 1] == "42"
 
     def test_model_flag_when_set(self, tmp_path):
-        post = Post(post_id="p1", topic="t", model_id="Qwen3.6-27B")
+        post = Post(post_id="p1", topic="t", knobs={"model": "Qwen3.6-27B"})
         cmd = instances.build_spawn_cmd(_cfg(tmp_path), post, port=1, token="x")
         assert cmd[cmd.index("--model") + 1] == "Qwen3.6-27B"
 
@@ -88,6 +88,38 @@ class TestBuildSpawnCmd:
             _cfg(tmp_path), Post("p1", "t"), port=1, token="x"
         )
         assert "--model" not in cmd  # provider default
+
+    def test_every_stored_knob_becomes_its_flag(self, tmp_path):
+        """v1.36.0: 저장된 노브 전부가 표의 플래그로 — 방에서 바꾼 값이 재시작에 남는다."""
+        post = Post(
+            post_id="p1",
+            topic="t",
+            knobs={
+                "model": "m",
+                "thinking": "on",
+                "max_agents": 3,
+                "stall": 300,
+                "auditor": True,
+            },
+        )
+        cmd = instances.build_spawn_cmd(_cfg(tmp_path), post, port=1, token="x")
+        tail = cmd[cmd.index("--model") :]
+        assert tail == [
+            "--model",
+            "m",
+            "--thinking",
+            "on",
+            "--max-agents",
+            "3",
+            "--stall",
+            "300",
+            "--auditor",
+        ]
+
+    def test_false_bool_knob_is_the_no_flag(self, tmp_path):
+        post = Post(post_id="p1", topic="t", knobs={"model": "m", "auditor": False})
+        cmd = instances.build_spawn_cmd(_cfg(tmp_path), post, port=1, token="x")
+        assert "--no-auditor" in cmd and "--auditor" not in cmd
 
 
 class TestCliVersion:
@@ -301,7 +333,7 @@ class TestLastLogLines:
         from agent_board.orchestrator import RealBackend
 
         cfg = _cfg(tmp_path)
-        post = Post(post_id="p1", topic="t", session_id=None, model_id="m")
+        post = Post(post_id="p1", topic="t", session_id=None, knobs={"model": "m"})
         ws = cfg.workspace_for(post.post_id)
         (ws / ".agent-cli").mkdir(parents=True)
         (ws / ".agent-cli" / "instance.log").write_text("boom\n")

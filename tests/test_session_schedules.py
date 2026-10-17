@@ -306,7 +306,9 @@ class TestSpawnAndClone:
             return _P()
 
         monkeypatch.setattr(instances.subprocess, "Popen", popen)
-        instances.spawn(cfg, Post("p1", "t", model_id="m"), port=50001, token="x")
+        instances.spawn(
+            cfg, Post("p1", "t", knobs={"model": "m"}), port=50001, token="x"
+        )
         assert "AGENT_CLI_SCHEDULER" not in (seen.get("env") or {})
 
     def test_clone_does_not_inherit_the_sources_schedules(self):

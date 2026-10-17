@@ -141,3 +141,63 @@ class TestStore:
         s2 = Store(path)
         assert s2.get(pid).topic == "persisted"
         s2.close()
+
+
+class TestKnobs:
+    """v1.36.0: 노브(모델 포함)는 JSON 한 칸 — 생성 때 받고, 방이 보고한 값으로 갱신."""
+
+    def test_round_trip(self, store):
+        p = store.create_post(
+            topic="t", knobs={"model": "m", "thinking": "on", "stall": 600}
+        )
+        got = store.get(p.post_id)
+        assert got.knobs == {"model": "m", "thinking": "on", "stall": 600}
+        assert got.model == "m"
+
+    def test_set_knobs_replaces_the_whole_map(self, store):
+        p = store.create_post(topic="t", knobs={"model": "m", "thinking": "on"})
+        store.set_knobs(p.post_id, {"model": "n", "auditor": True})
+        assert store.get(p.post_id).knobs == {"model": "n", "auditor": True}
+        assert store.get(p.post_id).model == "n"
+
+    def test_no_knobs_is_empty_map_and_no_model(self, store):
+        p = store.create_post(topic="t")
+        assert store.get(p.post_id).knobs == {} and store.get(p.post_id).model is None
+
+    def test_corrupt_knobs_column_reads_as_empty(self, store):
+        p = store.create_post(topic="t", knobs={"model": "m"})
+        store._conn.execute(
+            "UPDATE posts SET knobs = 'not json' WHERE post_id = ?", (p.post_id,)
+        )
+        store._conn.commit()
+        assert store.get(p.post_id).knobs == {}
+
+    def test_v1_35_model_id_column_migrates_into_knobs(self, tmp_path):
+        """v1.35 까지의 DB(model_id 컬럼)를 열면 그 모델이 knobs["model"] 이 된다 —
+        옛 방이 모델 없는 방으로 보이지 않는다. 멱등: 다시 열어도 그대로."""
+        import sqlite3
+
+        db = tmp_path / "board.db"
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            """
+            CREATE TABLE posts (
+              post_id TEXT PRIMARY KEY, topic TEXT NOT NULL, session_id TEXT UNIQUE,
+              model_id TEXT, force_active INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL, last_opened_at TEXT);
+            INSERT INTO posts (post_id, topic, model_id, force_active, created_at)
+              VALUES ('aaaaaa', 'old', 'Qwen-old', 0, 'now');
+            INSERT INTO posts (post_id, topic, model_id, force_active, created_at)
+              VALUES ('bbbbbb', 'none', NULL, 0, 'now');
+            """
+        )
+        conn.commit()
+        conn.close()
+        s = Store(db)
+        assert s.get("aaaaaa").knobs == {"model": "Qwen-old"}
+        assert s.get("bbbbbb").knobs == {}
+        s.set_knobs("aaaaaa", {"model": "Qwen-new"})
+        s.close()
+        s = Store(db)  # 다시 열어도 새 값이 옛 model_id 로 되돌아가지 않는다
+        assert s.get("aaaaaa").model == "Qwen-new"
+        s.close()

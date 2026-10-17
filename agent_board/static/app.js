@@ -6,6 +6,8 @@
   const $topic = document.getElementById("new-topic");
   const $model = document.getElementById("new-model");
   const $create = document.getElementById("new-create");
+  const $newAdv = document.getElementById("new-adv");
+  const $newKnobs = document.getElementById("new-knobs");
   const $sameTab = document.getElementById("same-tab");
 
   // "open in current page" preference persists across reloads (default: new tab)
@@ -27,7 +29,134 @@
     if (detail.reason === "model_required") return "이 방에 모델이 없습니다 — 모델을 고르세요";
     if (detail.reason === "dialect_unbound")
       return `모델 '${detail.model}' 에 방언(dialect) 바인딩이 없습니다 — ⚙ 어드민에서 설정하세요`;
+    if (detail.reason === "bad_knob") return `노브 값 오류: ${detail.error}`;
     return null;
+  }
+
+  // ── 노브 (v1.36.0, agent-cli ≥ 10.45.0 `agent-cli knobs --json`) ─────────
+  // 보드는 노브 이름·플래그를 모른다: 표(SPEC)가 폼의 컨트롤·카드의 라벨·단위를
+  // 준다. 입력은 **새 글/복제 폼 한 번**뿐 — 만든 뒤에는 방 안의 칩에서 바꾸고,
+  // 보드는 방이 보고한 값(status.json knobs)을 거울처럼 보여 주기만 한다.
+  let SPEC = { full: false, knobs: [] };
+  const knobLabel = (k) => ((k.ui && k.ui.icon) ? k.ui.icon + " " : "") + k.label;
+  const knobChoiceLabel = (k, v) =>
+    (k.ui && k.ui.choice_labels && k.ui.choice_labels[v]) || v;
+  const formKnobs = () => SPEC.knobs.filter((k) => k.name !== "model");
+
+  async function loadSpec() {
+    try {
+      const d = await fetch("/api/knobs/spec").then((r) => (r.ok ? r.json() : null));
+      if (d && Array.isArray(d.knobs)) SPEC = d;
+    } catch (_e) {
+      /* 구버전 보드/agent-cli — 폼 없음 */
+    }
+  }
+
+  // 폼 한 벌 — 새 글·복제가 같은 함수로 그린다. 값 비움 = agent-cli 기본값.
+  function knobForm(container, values) {
+    container.innerHTML = "";
+    values = values || {};
+    formKnobs().forEach((k) => {
+      const row = document.createElement("label");
+      row.className = "kf-row";
+      row.title = k.help || "";
+      const name = document.createElement("span");
+      name.className = "kf-name";
+      name.textContent = knobLabel(k);
+      row.appendChild(name);
+      let ctl;
+      if (k.kind === "choice" || k.kind === "bool") {
+        ctl = document.createElement("select");
+        const opts = k.kind === "bool" ? ["on", "off"] : k.choices || [];
+        const def = document.createElement("option");
+        def.value = "";
+        def.textContent = k.default === null || k.default === undefined
+          ? "(기본)"
+          : `(기본 — ${k.kind === "bool" ? (k.default ? "켬" : "끔") : knobChoiceLabel(k, k.default)})`;
+        ctl.appendChild(def);
+        opts.forEach((v) => {
+          const o = document.createElement("option");
+          o.value = v;
+          o.textContent = k.kind === "bool" ? (v === "on" ? "켬" : "끔") : knobChoiceLabel(k, v);
+          ctl.appendChild(o);
+        });
+        const cur = values[k.name];
+        ctl.value = cur === undefined || cur === null ? "" : k.kind === "bool" ? (cur ? "on" : "off") : String(cur);
+      } else {
+        ctl = document.createElement("input");
+        ctl.type = "text";
+        ctl.placeholder = k.default === null || k.default === undefined ? "(기본)" : String(k.default);
+        const cur = values[k.name];
+        ctl.value = cur === undefined || cur === null ? "" : String(cur);
+      }
+      ctl.dataset.knob = k.name;
+      ctl.dataset.kind = k.kind;
+      row.appendChild(ctl);
+      if (k.ui && k.ui.unit) {
+        const u = document.createElement("span");
+        u.className = "kf-unit";
+        u.textContent = k.ui.unit;
+        row.appendChild(u);
+      }
+      container.appendChild(row);
+    });
+  }
+
+  function readKnobForm(container) {
+    const out = {};
+    container.querySelectorAll("[data-knob]").forEach((ctl) => {
+      const v = ctl.value.trim();
+      if (!v) return;
+      out[ctl.dataset.knob] = ctl.dataset.kind === "bool" ? v === "on" : v;
+    });
+    return out;
+  }
+
+  function wireAdvToggle(btn, panel) {
+    btn.addEventListener("click", () => {
+      panel.hidden = !panel.hidden;
+      btn.setAttribute("aria-expanded", String(!panel.hidden));
+    });
+  }
+
+  // 카드: 🤖 모델 칩 + 기본과 다른 노브 칩. 값은 방이 보고한 것(저장값과 같다).
+  function knobChips(p) {
+    const knobs = p.knobs || {};
+    const parts = [];
+    SPEC.knobs.forEach((k) => {
+      if (k.name === "model") return;
+      const v = knobs[k.name];
+      if (v === undefined || v === null || v === k.default) return;
+      const shown = k.kind === "bool" ? (v ? "켬" : "끔") : knobChoiceLabel(k, String(v));
+      const icon = (k.ui && k.ui.icon) || "⚙";
+      parts.push(
+        `<span class="knob-chip" title="${esc(k.label)}: ${esc(String(shown))}">${icon} ${esc(String(shown))}</span>`
+      );
+    });
+    return parts.join("");
+  }
+
+  const openPanels = new Set(); // SSE 재렌더에도 펼쳐 둔 패널을 기억
+
+  // 읽기 전용 패널 — 표의 모든 노브와 지금 값("(기본)" = 저장 안 됨).
+  function knobPanel(p) {
+    if (!SPEC.full) return "";
+    const knobs = p.knobs || {};
+    const up = p.status === "running" || p.status === "working";
+    const rows = SPEC.knobs.map((k) => {
+      const v = knobs[k.name];
+      const shown =
+        v === undefined || v === null
+          ? "(기본)"
+          : k.kind === "bool"
+            ? (v ? "켬" : "끔")
+            : knobChoiceLabel(k, String(v));
+      return `<div class="kp-row"><span class="kp-name" title="${esc(k.help || "")}">${esc(knobLabel(k))}</span><span class="kp-val">${esc(String(shown))}</span><span class="kp-unit">${esc((k.ui && k.ui.unit) || "")}</span></div>`;
+    });
+    const note = up
+      ? "방이 보고한 값입니다 — 바꾸려면 방 안의 칩에서."
+      : "다음 열기에 쓰는 값입니다 — 바꾸려면 방을 열어 칩에서.";
+    return `<div class="knob-panel"${openPanels.has(p.post_id) ? "" : " hidden"}><div class="kp-head"><span>⚙ 노브</span><span class="kp-note">${note}</span></div>${rows.join("")}</div>`;
   }
 
   // ── 탭 가드 (v1.14.0) ─────────────────────
@@ -158,37 +287,16 @@
   }
 
   async function loadModels() {
-    MODELS = await fetch("/api/models").then((r) => r.json());
+    const [models] = await Promise.all([
+      fetch("/api/models").then((r) => r.json()),
+      loadSpec(),
+    ]);
+    MODELS = models;
     BOUND = MODELS.filter((m) => m.dialect);
     fillModelPicker($model, $model.value);
     $create.disabled = !BOUND.length;
-  }
-
-  // per-post model <select>: bound models only; the current model is selected
-  // even when it is no longer bound (shown as ⚠ so the user sees why the room
-  // cannot open), and a room without a model gets a "choose" placeholder.
-  // Disabled when the gate (busy / someone watching) forbids a change — with a
-  // reason in the tooltip.
-  function modelSelect(p) {
-    const opts = BOUND.map(
-      (m) =>
-        `<option value="${esc(m.id)}"${m.id === p.model_id ? " selected" : ""}>${esc(m.id)}</option>`
-    );
-    if (!p.model_id) {
-      opts.unshift('<option value="" selected>⚠ 모델을 고르세요</option>');
-    } else if (!BOUND.some((m) => m.id === p.model_id)) {
-      opts.unshift(`<option value="${esc(p.model_id)}" selected>⚠ ${esc(p.model_id)} 미설정</option>`);
-    }
-    let reason = "모델 변경";
-    if (!p.model_changeable) {
-      reason =
-        p.status === "working"
-          ? "응답 중 — 변경 불가"
-          : p.viewers > 0
-            ? `접속자 ${p.viewers}명 — 변경 불가`
-            : "변경 불가";
-    }
-    return `<select class="model-sel" title="${reason}"${p.model_changeable ? "" : " disabled"}>${opts.join("")}</select>`;
+    $newAdv.hidden = !SPEC.full; // 구버전 agent-cli 는 표가 없다 → 폼 숨김
+    knobForm($newKnobs, readKnobForm($newKnobs));
   }
 
   const esc = (s) =>
@@ -197,11 +305,12 @@
   // 카드 경고 줄 — 모델 없음 / 방언 미설정 (model_bound=false 일 때만).
   function modelWarning(p) {
     if (p.model_bound) return "";
-    if (!p.model_id)
-      return `<div class="model-warn">⚠ 이 방에 모델이 없습니다 — 위 드롭다운에서 모델을 고르세요.</div>`;
+    if (!p.model)
+      return `<div class="model-warn">⚠ 이 방에 모델이 없습니다 — 📋 복제해서 모델을 골라 새 방으로 이어가세요.</div>`;
     return (
-      `<div class="model-warn">⚠ 모델 '${esc(p.model_id)}' 에 방언(dialect) 바인딩이 없어 열 수 없습니다 — ` +
-      adminLink(p.model_id) +
+      `<div class="model-warn">⚠ 모델 '${esc(p.model)}' 에 방언(dialect) 바인딩이 없어 열 수 없습니다 — ` +
+      adminLink(p.model) +
+      " 또는 📋 복제해서 다른 모델로 이어가세요" +
       `</div>`
     );
   }
@@ -287,7 +396,13 @@
       // 📐 문법 제약이 실리는 세션 — 인스턴스의 칩과 같은 값(status.json)
       (up && p.grammar ? ` <span class="grammar-chip" title="디코딩 문법 제약 켬 — 도구 호출 형식을 서버가 강제">📐</span>` : "") +
       `</span>` +
-      modelSelect(p) +
+      // 🤖 모델 칩 (v1.36.0): 드롭다운이 아니다 — 방이 보고한 현재 모델. 바꾸는
+      // 곳은 방 안의 🤖 칩이고 보드는 그 값을 기록해 다음 재시작에 넘긴다.
+      `<span class="model-chip" title="모델 — 방 안의 🤖 칩에서 바꿉니다">🤖 ${esc(p.model) || "⚠ 없음"}</span>` +
+      knobChips(p) +
+      (SPEC.full
+        ? `<button class="knobs btn-ghost" type="button" aria-expanded="${openPanels.has(p.post_id)}" title="노브 보기 (읽기 전용)">⚙</button>`
+        : "") +
       `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
       `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> 유지</label>` +
       // 🔄 restart only when the instance is up — a down room's "열기" already
@@ -308,6 +423,7 @@
       `<button class="del btn-danger" type="button" title="삭제(영구)">🗑</button>` +
       `</div>` +
       modelWarning(p) +
+      knobPanel(p) +
       missedBanner(p);
 
     wireSchedule(el, p);
@@ -358,11 +474,16 @@
     el.querySelector(".fa-cb").addEventListener("change", (e) =>
       forceActive(p.post_id, e.target.checked)
     );
-    const sel = el.querySelector(".model-sel");
-    if (sel)
-      sel.addEventListener("change", (e) =>
-        changeModel(p, e.target.value, e.target)
-      );
+    const knobsBtn = el.querySelector(".knobs");
+    if (knobsBtn)
+      knobsBtn.addEventListener("click", () => {
+        const panel = el.querySelector(".knob-panel");
+        if (!panel) return;
+        panel.hidden = !panel.hidden;
+        if (panel.hidden) openPanels.delete(p.post_id);
+        else openPanels.add(p.post_id);
+        knobsBtn.setAttribute("aria-expanded", String(!panel.hidden));
+      });
     return el;
   }
 
@@ -528,29 +649,6 @@
     });
   }
 
-  async function changeModel(p, model_id, selectEl) {
-    const r = await fetch(`/api/posts/${p.post_id}/model`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model_id: model_id || null }),
-    });
-    if (!r.ok) {
-      // 409 = gate refused (state changed between render and click); 400 = the
-      // model itself cannot run (unbound). Revert + explain.
-      let why = "변경 실패";
-      const d = (await r.json().catch(() => ({}))).detail;
-      if (r.status === 409) {
-        why = d === "busy" ? "응답 중" : d === "viewers" ? "접속자 있음" : "변경 불가";
-      } else if (r.status === 400) {
-        why = modelProblemText(d) || "변경 불가";
-      }
-      toast("모델 변경 실패: " + why, true);
-      selectEl.value = p.model_id || "";
-      return;
-    }
-    load(); // refresh — model + status (kill→DEAD, or force-active respawn)
-  }
-
   async function del(p) {
     if (!confirm(`삭제할까요? (영구 — 워크스페이스도 삭제)\n${p.topic}`)) return;
     await fetch(`/api/posts/${p.post_id}`, { method: "DELETE" });
@@ -588,7 +686,10 @@
       const r = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: topic, model_id: $model.value }),
+        body: JSON.stringify({
+          topic: topic,
+          knobs: Object.assign({ model: $model.value }, readKnobForm($newKnobs)),
+        }),
       });
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))).detail;
@@ -604,10 +705,12 @@
       $create.disabled = false;
     }
     $topic.value = "";
+    knobForm($newKnobs, {}); // 다음 글은 다시 기본값부터
     load();
   }
 
   $create.addEventListener("click", create);
+  wireAdvToggle($newAdv, $newKnobs);
 
   // ── 대화방 복제 모달 (v1.21.0) ─────────────────────────
   // 각 글 카드의 '복제' 버튼이 그 글을 원본으로 이 모달을 연다. 한 창에서
@@ -618,6 +721,9 @@
   const $cloneDlg = document.getElementById("clone-dlg");
   const $cloneTopic = document.getElementById("clone-topic");
   const $cloneModel = document.getElementById("clone-model");
+  const $cloneAdv = document.getElementById("clone-adv");
+  const $cloneKnobs = document.getElementById("clone-knobs");
+  wireAdvToggle($cloneAdv, $cloneKnobs);
   const $cloneSrcLabel = document.getElementById("clone-src-label");
   const $cloneTree = document.getElementById("clone-tree");
   const $cloneMsg = document.getElementById("clone-msg");
@@ -633,7 +739,12 @@
     $cloneMsg.textContent = "";
     $cloneGo.disabled = false;
     // 모델 옵션 채우기 (new-model 과 동일 소스 — 바인딩 있는 모델만)
-    fillModelPicker($cloneModel, p.model_id);
+    fillModelPicker($cloneModel, p.model);
+    // 노브는 원본 값으로 채운다 — 복제는 설정까지 이어받는다 (비우면 기본값)
+    knobForm($cloneKnobs, p.knobs || {});
+    $cloneAdv.hidden = !SPEC.full;
+    $cloneKnobs.hidden = true;
+    $cloneAdv.setAttribute("aria-expanded", "false");
     $cloneDlg.showModal();
     // 트리 로드
     $cloneTree.textContent = "불러오는 중…";
@@ -693,7 +804,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: topic,
-        model_id: $cloneModel.value,
+        knobs: Object.assign({ model: $cloneModel.value }, readKnobForm($cloneKnobs)),
         clone_from: cloneFrom,
         clone_paths: cloneSelection(),
       }),

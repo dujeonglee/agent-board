@@ -100,9 +100,25 @@ header h1 { margin: 0; font-size: 18px; }
 
 #new {
   /* stretch — 입력·모델 선택·버튼이 브라우저 기본 높이(제각각)가 아니라 한 줄 높이로 맞는다 */
-  display: flex; gap: 8px; align-items: stretch;
+  display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;
   padding: 16px 20px; border-bottom: 1px solid var(--border);
 }
+#new-adv { font-size: 13px; }
+/* ⚙ 노브 폼 (v1.36.0) — 새 글·복제가 같은 틀. 컨트롤은 agent-cli 표에서 그려진다. */
+/* ``:not([hidden])`` 필수 — 클래스의 display:grid 가 UA 의 [hidden] 을 이겨
+   폼이 항상 펼쳐진다 (agent-cli #stall-pop 과 같은 실버그, 브라우저 테스트가 잡음). */
+.knob-form:not([hidden]) {
+  flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 16px; padding: 8px 2px 2px; font-size: 12px;
+}
+.kf-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 6px; color: var(--text-2); }
+.kf-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kf-row select, .kf-row input {
+  font-size: 12px; padding: 3px 6px; border-radius: 6px; max-width: 150px;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text); font-family: inherit;
+}
+.kf-row input { width: 72px; }
+.kf-unit { color: var(--muted); font-size: 11px; white-space: nowrap; }
 #new-topic { flex: 0 1 320px; }
 #new input {
   padding: 8px 10px; border-radius: 8px; font-size: 13px;
@@ -115,12 +131,22 @@ header h1 { margin: 0; font-size: 18px; }
   font-family: inherit;
 }
 #new-create { padding: 8px 14px; font-size: 13px; }
-.model-sel {
+/* 🤖 모델 칩 + 기본과 다른 노브 칩 (v1.36.0) — 방이 보고한 값, 읽기 전용 */
+.model-chip, .knob-chip {
   font-size: 11px; color: var(--text-2); background: var(--surface-2);
-  border: 1px solid var(--border-2); border-radius: 5px; padding: 2px 4px;
-  max-width: 140px;
+  border: 1px solid var(--border-2); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
-.model-sel:disabled { opacity: .5; cursor: not-allowed; }
+.post-side .knobs { padding: 6px 9px; }
+/* 읽기 전용 노브 패널 — 카드 아래 폭 전체 */
+.knob-panel:not([hidden]) { flex-basis: 100%; border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; font-size: 12px; }
+.kp-head { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--text-2); font-weight: 600; }
+.kp-note { font-weight: 400; color: var(--muted); }
+.kp-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: baseline; color: var(--text-2); }
+.kp-val { font-family: ui-monospace, SFMono-Regular, monospace; color: var(--text); }
+.kp-unit { color: var(--muted); font-size: 11px; }
 .viewers { font-size: 11px; color: var(--text-2); }
 
 #posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 880px; }
@@ -233,7 +259,7 @@ header h1 { margin: 0; font-size: 18px; }
 
   /* new-post form: stack vertically, full width (was a squished flex row) */
   #new { flex-direction: column; }
-  #new-topic, #new-model, #new-create {
+  #new-topic, #new-model, #new-adv, #new-create {
     flex: none; width: 100%; max-width: none;
   }
 

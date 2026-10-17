@@ -59,7 +59,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     - status: ``working`` (LLM responding) / ``running`` (up, idle) / ``idle`` (down),
     - awaiting_input: an ask/confirm prompt is waiting for a reply,
     - viewers: live browser subscribers on the instance (0 when down),
-    - auditing (v1.35.0, additive): a session-audit run is in flight.
+    - auditing (v1.35.0, additive): a session-audit run is in flight,
+    - knobs (v1.36.0, additive): the session's current knob values.
 
     agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
     path is a file read (no HTTP). Older instances have no file → fall back to
@@ -97,6 +98,10 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     # status.json 과 /api/health 둘 다 같은 키). 구버전은 미기록 → 키 생략.
     if isinstance(live.get("auditing"), bool):
         out["auditing"] = live["auditing"]
+    # v1.36.0: 세션 노브의 현재 값 (agent-cli ≥10.46.0 additive 필드 `knobs`) —
+    # 보드가 거울처럼 기록해 다음 spawn 에 돌려준다. 구버전은 미기록 → 키 생략.
+    if isinstance(live.get("knobs"), dict):
+        out["knobs"] = live["knobs"]
     return out
 
 

@@ -11,6 +11,7 @@ The sqlite3 calls are synchronous; the FastAPI layer wraps them in
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS posts (
   post_id        TEXT PRIMARY KEY,
   topic          TEXT NOT NULL,
   session_id     TEXT UNIQUE,
-  model_id       TEXT,
+  knobs          TEXT,
   force_active   INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   last_opened_at TEXT
@@ -38,17 +39,25 @@ CREATE INDEX IF NOT EXISTS idx_posts_recent
 
 # additive migrations for DBs created before a column existed — old rows get the
 # default (no behaviour change), so resuming an old DB never breaks. Keyed by
-# table, then column → the ALTER that adds it. (The dropped ``directive`` column
-# is simply left unqueried on old DBs — no migration needed.)
+# table, then column → the ALTER that adds it. (The dropped ``directive`` and
+# ``model_id`` columns are simply left unqueried on old DBs.)
 _MIGRATIONS = {
-    "posts": {"model_id": "ALTER TABLE posts ADD COLUMN model_id TEXT"},
+    "posts": {"knobs": "ALTER TABLE posts ADD COLUMN knobs TEXT"},
 }
 
-_COLS = "post_id, topic, session_id, model_id, force_active, created_at, last_opened_at"
+_COLS = "post_id, topic, session_id, knobs, force_active, created_at, last_opened_at"
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _knobs_from_db(text: str | None) -> dict:
+    try:
+        data = json.loads(text) if text else {}
+    except json.JSONDecodeError:
+        data = {}
+    return data if isinstance(data, dict) else {}
 
 
 def _row_to_post(row: sqlite3.Row) -> Post:
@@ -56,7 +65,7 @@ def _row_to_post(row: sqlite3.Row) -> Post:
         post_id=row["post_id"],
         topic=row["topic"],
         session_id=row["session_id"],
-        model_id=row["model_id"],
+        knobs=_knobs_from_db(row["knobs"]),
         force_active=bool(row["force_active"]),
         created_at=row["created_at"],
         last_opened_at=row["last_opened_at"],
@@ -82,6 +91,18 @@ class Store:
             for col, ddl in cols_ddl.items():
                 if col not in existing:
                     self._conn.execute(ddl)
+            # v1.35 까지의 ``model_id`` 컬럼 → ``knobs["model"]`` (한 번, 멱등:
+            # knobs 가 비어 있고 model_id 가 있는 행만). 옛 컬럼은 더 읽지 않는다.
+            if table == "posts" and "model_id" in existing:
+                rows = self._conn.execute(
+                    "SELECT post_id, model_id FROM posts "
+                    "WHERE knobs IS NULL AND model_id IS NOT NULL"
+                ).fetchall()
+                for r in rows:
+                    self._conn.execute(
+                        "UPDATE posts SET knobs = ? WHERE post_id = ?",
+                        (json.dumps({"model": r["model_id"]}), r["post_id"]),
+                    )
 
     def close(self) -> None:
         self._conn.close()
@@ -91,7 +112,7 @@ class Store:
         self,
         *,
         topic: str,
-        model_id: str | None = None,
+        knobs: dict | None = None,
         dir_taken: Callable[[str], bool] | None = None,
     ) -> Post:
         """Allocate a post with a fresh short id (:mod:`agent_board.ids`).
@@ -112,16 +133,16 @@ class Store:
             post = Post(
                 post_id=new_post_id(),
                 topic=topic,
-                model_id=model_id,
+                knobs=dict(knobs or {}),
                 created_at=_now(),
             )
             if dir_taken is not None and dir_taken(post.post_id):
                 continue
             try:
                 self._conn.execute(
-                    "INSERT INTO posts (post_id, topic, model_id, force_active, "
+                    "INSERT INTO posts (post_id, topic, knobs, force_active, "
                     "created_at) VALUES (?, ?, ?, 0, ?)",
-                    (post.post_id, post.topic, post.model_id, post.created_at),
+                    (post.post_id, post.topic, json.dumps(post.knobs), post.created_at),
                 )
             except sqlite3.IntegrityError:
                 continue  # PK collision — draw again
@@ -140,10 +161,11 @@ class Store:
         )
         self._conn.commit()
 
-    def set_model(self, post_id: str, model_id: str | None) -> None:
+    def set_knobs(self, post_id: str, knobs: dict) -> None:
+        """방이 보고한 노브 값을 기록한다 (거울, v1.36.0) — 다음 spawn 이 쓴다."""
         self._conn.execute(
-            "UPDATE posts SET model_id = ? WHERE post_id = ?",
-            (model_id, post_id),
+            "UPDATE posts SET knobs = ? WHERE post_id = ?",
+            (json.dumps(dict(knobs)), post_id),
         )
         self._conn.commit()
 
