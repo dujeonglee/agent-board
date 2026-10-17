@@ -94,7 +94,7 @@ class Orchestrator:
         """Spawn-or-attach the instance + register its route; return
         ``(port, token)``. The CALLER must hold the post lock. Persists the
         session id on first spawn. Shared by ``open`` and the force-active
-        respawn in ``change_model``. ``reuse_token`` (set by ``restart``) spawns
+        respawn in ``restart``. ``reuse_token`` (set by ``restart``) spawns
         with a specific token instead of a fresh one so already-open viewers
         reconnect without re-opening; ignored when the instance is already up."""
         loop = asyncio.get_event_loop()
@@ -163,40 +163,6 @@ class Orchestrator:
             _, token = await self._ensure_up(post, reuse_token=reuse_token)
             self.store.touch_opened(post_id)
         return f"/s/{post_id}/?token={token}"
-
-    async def change_model(self, post_id: str, model_id: str | None) -> dict:
-        """Change a post's model — allowed only when NOBODY is watching: the
-        instance is down (``idle``), or up-and-idle (``running``) with 0 human
-        viewers. ``working`` (busy) or watched → refused (``{ok: False,
-        reason}``). On success the model is persisted and the instance is
-        stopped so the next open spawns with it (kill → DEAD); a force-active
-        post is brought straight back up on the new model to honour its
-        keep-alive. ``KeyError`` for an unknown post."""
-        if self.store.get(post_id) is None:
-            raise KeyError(post_id)
-        model_id = model_id or None
-        async with self._lock(post_id):
-            post = self.store.get(post_id)
-            if (post.model_id or None) == model_id:
-                return {"ok": True, "changed": False, "reason": "unchanged"}
-            state = self.backend.live_state(post)
-            status = state["status"]
-            # the force-active keep-alive holds one viewer of its own → exclude it
-            humans = state.get("viewers", 0) - (1 if post.force_active else 0)
-            if status == "working":
-                return {"ok": False, "reason": "busy"}
-            if status == "running" and humans > 0:
-                return {"ok": False, "reason": "viewers"}
-            # allowed — persist, then re-read so spawns use the new model
-            self.store.set_model(post_id, model_id)
-            post = self.store.get(post_id)
-            if status != "idle":  # instance is up → stop it
-                self.backend.stop_instance(post)
-                self.backend.remove_route(post_id)
-            if post.force_active:
-                await self._await_dead(post)  # avoid attaching to the dying one
-                await self._ensure_up(post)  # respawn on the new model
-            return {"ok": True, "changed": True}
 
     async def _await_dead(self, post: Post, *, timeout: float = 5.0) -> None:
         """Poll until the instance is no longer alive (``backend.info`` is None),

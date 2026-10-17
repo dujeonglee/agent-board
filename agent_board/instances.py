@@ -19,6 +19,7 @@ from pathlib import Path
 
 import httpx
 
+from agent_board import knobs_spec
 from agent_board.config import Config
 from agent_board.models import Post
 
@@ -62,10 +63,9 @@ def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> lis
         "--base-path",
         f"/s/{post.post_id}",
     ]
-    if post.model_id:
-        # agent-cli resolves the full definition (provider/url/key) from its own
-        # registry; the board only passes the chosen id.
-        cmd += ["--model", post.model_id]
+    # 노브(모델 포함) → 표(`agent-cli knobs --json`)의 플래그 (v1.36.0). agent-cli
+    # 가 모델의 정의(provider/url/key)를 자기 레지스트리에서 푼다 — 보드는 값만.
+    cmd += knobs_spec.spawn_args(knobs_spec.load(config.agent_cli_bin), post.knobs)
     if post.session_id:
         cmd += ["--resume", post.session_id]
     return cmd

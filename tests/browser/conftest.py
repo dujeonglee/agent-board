@@ -34,9 +34,6 @@ class _FakeOrch:
     async def restart(self, post_id):
         return f"/s/{post_id}/?token=T"
 
-    async def change_model(self, post_id, model_id):
-        return {"ok": True, "changed": True}
-
 
 class _FakeKeepalive:
     async def enable(self, post_id):
@@ -102,11 +99,14 @@ class BoardStack:
         self._uv.should_exit = True
         self._thread.join(timeout=5)
 
-    def seed_post(self, topic="t", *, agents=None, alive_pid=None):
+    def seed_post(
+        self, topic="t", *, agents=None, alive_pid=None, knobs=None, live_knobs=None
+    ):
         """게시글 + 라이브 인스턴스 사이드카. ``agents``=status.json 의
-        상주 에이전트 요약, ``alive_pid``=pid_alive 통과용(기본 이 프로세스).
+        상주 에이전트 요약, ``alive_pid``=pid_alive 통과용(기본 이 프로세스),
+        ``knobs``=저장 노브(모델 포함), ``live_knobs``=status.json 의 ``knobs``.
         반환: post_id."""
-        post = self.store.create_post(topic=topic, model_id="m")
+        post = self.store.create_post(topic=topic, knobs=knobs or {"model": "m"})
         sid = str(int_from(post.post_id))
         self.store.set_session_id(post.post_id, sid)
         sdir = self.cfg.workspace_for(post.post_id) / ".agent-cli" / "sessions" / sid
@@ -126,6 +126,8 @@ class BoardStack:
         status = {"busy": False, "awaiting_input": False, "viewers": 0}
         if agents is not None:
             status["agents"] = agents
+        if live_knobs is not None:
+            status["knobs"] = live_knobs
         (sdir / "status.json").write_text(json.dumps(status))
         return post.post_id
 

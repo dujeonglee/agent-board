@@ -63,11 +63,9 @@ class TestEnforceBindPolicy:
 
 
 class FakeOrch:
-    def __init__(self, change_result=None):
+    def __init__(self):
         self.opened = []
         self.restarted = []
-        self.model_changes = []
-        self._change_result = change_result or {"ok": True, "changed": True}
 
     async def open(self, post_id):
         self.opened.append(post_id)
@@ -76,10 +74,6 @@ class FakeOrch:
     async def restart(self, post_id):
         self.restarted.append(post_id)
         return f"/s/{post_id}/?token=T"
-
-    async def change_model(self, post_id, model_id):
-        self.model_changes.append((post_id, model_id))
-        return self._change_result
 
 
 class FakeKeepalive:
@@ -122,7 +116,7 @@ class TestPostsApi:
 
     def test_create_makes_workspace_and_lists(self, tmp_path):
         cfg, _, c = _client(tmp_path)
-        r = c.post("/api/posts", json={"model_id": "m", "topic": "DOOM 만들기"})
+        r = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "DOOM 만들기"})
         assert r.status_code == 200
         pid = r.json()["post_id"]
         assert cfg.workspace_for(pid).is_dir()  # workspace created
@@ -141,7 +135,7 @@ class TestPostsApi:
         from agent_board.ids import ALPHABET, ID_LENGTH
 
         cfg, _, c = _client(tmp_path)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         assert len(pid) == ID_LENGTH
@@ -165,9 +159,9 @@ class TestPostsApi:
         orig = store_mod.new_post_id
         store_mod.new_post_id = lambda: next(seq, orig())
         try:
-            pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
-                "post_id"
-            ]
+            pid = c.post(
+                "/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}
+            ).json()["post_id"]
         finally:
             store_mod.new_post_id = orig
         assert pid == real
@@ -179,7 +173,7 @@ class TestPostsApi:
         """Short random ids say nothing about which post they belong to, so the
         dashboard has to surface the id to make disk ↔ card mapping possible."""
         _, _, c = _client(tmp_path)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         assert c.get("/api/posts").json()[0]["post_id"] == pid
@@ -190,7 +184,7 @@ class TestPostsApi:
         cfg, _, c = _client(tmp_path)
         r = c.post(
             "/api/posts",
-            json={"model_id": "m", "topic": "t", "directive": "항상 한국어로"},
+            json={"knobs": {"model": "m"}, "topic": "t", "directive": "항상 한국어로"},
         )
         assert r.status_code == 200
         pid = r.json()["post_id"]
@@ -202,7 +196,7 @@ class TestPostsApi:
 
     def test_delete_removes_post_and_workspace(self, tmp_path):
         cfg, _, c = _client(tmp_path)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         ws = cfg.workspace_for(pid)
@@ -246,16 +240,16 @@ class TestPostsApi:
             keepalive=FakeKeepalive(),
         )
         client = TestClient(app)
-        pid = client.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
-            "post_id"
-        ]
+        pid = client.post(
+            "/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}
+        ).json()["post_id"]
         client.delete(f"/api/posts/{pid}")
         assert spy.removed == [pid]
 
     def test_open_calls_orchestrator(self, tmp_path):
         orch = FakeOrch()
         _cfg, _, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         r = c.post(f"/api/posts/{pid}/open")
@@ -270,7 +264,7 @@ class TestPostsApi:
     def test_restart_calls_orchestrator(self, tmp_path):
         orch = FakeOrch()
         _cfg, _, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         r = c.post(f"/api/posts/{pid}/restart")
@@ -285,7 +279,7 @@ class TestPostsApi:
     def test_force_active_on_off(self, tmp_path):
         ka = FakeKeepalive()
         _cfg, store, c = _client(tmp_path, keepalive=ka)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
 
@@ -347,19 +341,199 @@ class TestModelSelection:
             }
         ]
 
-    def test_create_with_model_id_persists(self, tmp_path):
+    def test_create_with_model_persists(self, tmp_path):
         _cfg, store, c = _client(tmp_path)
-        pid = c.post("/api/posts", json={"topic": "t", "model_id": "Qwen-X"}).json()[
+        pid = c.post(
+            "/api/posts", json={"topic": "t", "knobs": {"model": "Qwen-X"}}
+        ).json()["post_id"]
+        assert store.get(pid).model == "Qwen-X"
+        row = c.get("/api/posts").json()[0]
+        assert row["model"] == "Qwen-X" and row["knobs"] == {"model": "Qwen-X"}
+
+    def test_create_without_model_is_400(self, tmp_path):
+        # v1.33.0: "(기본)" 없음 — 모델은 필수 (v1.36.0: knobs 안의 model)
+        _, store, c = _client(tmp_path)
+        r = c.post("/api/posts", json={"topic": "t"})
+        assert r.status_code == 400 and r.json()["detail"] == {
+            "reason": "model_required"
+        }
+        assert store.list_posts() == []
+
+
+class TestKnobs:
+    """v1.36.0 (agent-cli ≥ 10.45.0/10.46.0 짝): 노브는 생성 폼 한 번 + 방의 거울."""
+
+    def test_spec_endpoint_serves_the_table(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        d = c.get("/api/knobs/spec").json()
+        assert d["full"] is True
+        assert [k["name"] for k in d["knobs"]] == [
+            "model",
+            "thinking",
+            "max_agents",
+            "stall",
+            "auditor",
+        ]
+
+    def test_spec_endpoint_on_old_agent_cli_is_model_only(self, tmp_path, monkeypatch):
+        from agent_board import knobs_spec
+
+        monkeypatch.setattr(knobs_spec, "load", lambda b: tuple(knobs_spec._MODEL_ONLY))
+        _, _, c = _client(tmp_path)
+        d = c.get("/api/knobs/spec").json()
+        assert d["full"] is False and [k["name"] for k in d["knobs"]] == ["model"]
+
+    def test_create_stores_validated_knobs(self, tmp_path):
+        _, store, c = _client(tmp_path)
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "t",
+                "knobs": {
+                    "model": "m",
+                    "thinking": "ON",
+                    "max_agents": "3",
+                    "stall": "10m",
+                    "auditor": "on",
+                    "": "",
+                },
+            },
+        )
+        assert r.status_code == 400  # "" 는 표에 없는 이름
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "t",
+                "knobs": {
+                    "model": "m",
+                    "thinking": "ON",
+                    "max_agents": "3",
+                    "stall": "10m",
+                    "auditor": "on",
+                },
+            },
+        )
+        assert r.status_code == 200, r.json()
+        pid = r.json()["post_id"]
+        assert store.get(pid).knobs == {
+            "model": "m",
+            "thinking": "on",
+            "max_agents": 3,
+            "stall": "10m",
+            "auditor": True,
+        }
+
+    def test_bad_knob_value_is_400_with_the_reason(self, tmp_path):
+        _, store, c = _client(tmp_path)
+        for knobs in (
+            {"model": "m", "thinking": "sometimes"},
+            {"model": "m", "max_agents": "many"},
+            {"model": "m", "nope": 1},
+        ):
+            r = c.post("/api/posts", json={"topic": "t", "knobs": knobs})
+            assert r.status_code == 400, knobs
+            assert r.json()["detail"]["reason"] == "bad_knob"
+        assert store.list_posts() == []
+
+    def test_empty_values_mean_default(self, tmp_path):
+        _, store, c = _client(tmp_path)
+        pid = c.post(
+            "/api/posts",
+            json={"topic": "t", "knobs": {"model": "m", "thinking": "", "stall": None}},
+        ).json()["post_id"]
+        assert store.get(pid).knobs == {"model": "m"}
+
+    def test_model_change_api_is_gone(self, tmp_path):
+        """보드는 떠 있는 방에 쓰지 않는다 — 모델은 방 안의 🤖 칩에서 바꾼다."""
+        _, _, c = _client(tmp_path)
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
-        assert store.get(pid).model_id == "Qwen-X"
-        assert c.get("/api/posts").json()[0]["model_id"] == "Qwen-X"
+        assert c.post(
+            f"/api/posts/{pid}/model", json={"model_id": "Qwen-X"}
+        ).status_code in (404, 405)
+        assert "model_changeable" not in c.get("/api/posts").json()[0]
 
-    def test_create_without_model_id_is_422(self, tmp_path):
-        # v1.33.0: "(기본)" 없음 — 모델은 필수
+    def test_live_knobs_are_mirrored_into_the_store(self, tmp_path, monkeypatch):
+        """방이 보고한 값(status.json knobs)이 저장값과 다르면 기록한다 — 방에서
+        🤖 로 바꾼 모델이 다음 spawn 에 남는다. 보드가 방에 쓰는 길은 없다."""
+        import json
+
+        from agent_board import sessions
+
+        cfg, store, c = _client(tmp_path)
+        pid = c.post(
+            "/api/posts", json={"knobs": {"model": "m", "thinking": "on"}, "topic": "t"}
+        ).json()["post_id"]
+        store.set_session_id(pid, "S1")
+        sdir = cfg.workspace_for(pid) / ".agent-cli" / "sessions" / "S1"
+        sdir.mkdir(parents=True)
+        (sdir / "web.json").write_text(
+            json.dumps({"session_id": "S1", "port": 1, "token": "t", "pid": 4242})
+        )
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        live = {"model": "Qwen-X", "thinking": "on", "stall": 300, "auditor": False}
+        (sdir / "status.json").write_text(
+            json.dumps(
+                {"busy": False, "awaiting_input": False, "viewers": 1, "knobs": live}
+            )
+        )
+        row = c.get("/api/posts").json()[0]
+        assert row["knobs"] == live and row["model"] == "Qwen-X"
+        assert store.get(pid).knobs == live  # 기록됐다 → 다음 spawn 이 쓴다
+        # 같은 값이면 쓰지 않는다 (불필요한 커밋 없음)
+        calls = []
+        monkeypatch.setattr(store, "set_knobs", lambda *a: calls.append(a))
+        c.get("/api/posts")
+        assert calls == []
+
+    def test_old_instance_without_knobs_keeps_the_stored_values(
+        self, tmp_path, monkeypatch
+    ):
+        import json
+
+        from agent_board import sessions
+
+        cfg, store, c = _client(tmp_path)
+        pid = c.post(
+            "/api/posts", json={"knobs": {"model": "m", "thinking": "on"}, "topic": "t"}
+        ).json()["post_id"]
+        store.set_session_id(pid, "S1")
+        sdir = cfg.workspace_for(pid) / ".agent-cli" / "sessions" / "S1"
+        sdir.mkdir(parents=True)
+        (sdir / "web.json").write_text(
+            json.dumps({"session_id": "S1", "port": 1, "token": "t", "pid": 4242})
+        )
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        (sdir / "status.json").write_text(
+            json.dumps({"busy": False, "awaiting_input": False, "viewers": 0})
+        )
+        assert c.get("/api/posts").json()[0]["knobs"] == {
+            "model": "m",
+            "thinking": "on",
+        }
+        assert store.get(pid).knobs == {"model": "m", "thinking": "on"}
+
+    def test_clone_takes_the_knobs_it_is_given(self, tmp_path):
         _, store, c = _client(tmp_path)
-        assert c.post("/api/posts", json={"topic": "t"}).status_code == 422
-        assert store.list_posts() == []
+        src = c.post(
+            "/api/posts",
+            json={"knobs": {"model": "m", "thinking": "on"}, "topic": "src"},
+        ).json()["post_id"]
+        r = c.post(
+            "/api/posts",
+            json={
+                "topic": "c",
+                "knobs": {"model": "Qwen-X", "thinking": "on", "auditor": True},
+                "clone_from": src,
+            },
+        )
+        assert r.status_code == 200
+        assert store.get(r.json()["post_id"]).knobs == {
+            "model": "Qwen-X",
+            "thinking": "on",
+            "auditor": True,
+        }
 
 
 class TestUiWired:
@@ -379,9 +553,18 @@ class TestUiWired:
         assert "dot.busy" in css
         assert "@media" in css  # responsive (mobile) layout
         assert 'name="viewport"' in html
-        # per-post model selection
-        assert 'id="new-model"' in html
-        assert "/api/models" in js and "model_id" in js
+        # per-post model selection at creation + knob form from the spec (v1.36.0)
+        assert (
+            'id="new-model"' in html
+            and 'id="new-knobs"' in html
+            and 'id="new-adv"' in html
+        )
+        assert "/api/models" in js and "/api/knobs/spec" in js
+        assert "knobs:" in js and "model_id" not in js  # 모델도 knobs 안에
+        # 보드는 떠 있는 방에 쓰지 않는다 — 모델 드롭다운·변경 호출 없음
+        assert "model-sel" not in js and "/model" not in js.replace("/api/models", "")
+        assert "knob-panel" in js and "model-chip" in js
+        assert "knob-form" in css and ".knob-panel" in css and ".model-sel" not in css
         # created / last-query dates on the card
         assert "post-meta" in js and "created_at" in js and "last_query_at" in js
         # "needs your answer" indicator for pending ask/confirm
@@ -393,43 +576,15 @@ class TestUiWired:
         assert "글 하나 = agent-cli 세션" not in html  # hint removed
 
 
-class TestChangeModelApi:
-    def test_change_model_ok(self, tmp_path):
-        orch = FakeOrch()
-        _, _, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
-            "post_id"
-        ]
-        r = c.post(f"/api/posts/{pid}/model", json={"model_id": "Qwen3.6"})
-        assert r.status_code == 200
-        assert orch.model_changes == [(pid, "Qwen3.6")]
-
-    def test_change_model_blocked_is_409(self, tmp_path):
-        # gate refused (busy / someone watching) → 409 with the reason
-        orch = FakeOrch(change_result={"ok": False, "reason": "busy"})
-        _, _, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
-            "post_id"
-        ]
-        r = c.post(f"/api/posts/{pid}/model", json={"model_id": "Qwen-X"})
-        assert r.status_code == 409 and r.json()["detail"] == "busy"
-
-    def test_change_model_unknown_post_404(self, tmp_path):
+class TestPostView:
+    def test_post_view_exposes_viewers(self, tmp_path):
         _, _, c = _client(tmp_path)
-        assert (
-            c.post("/api/posts/nope/model", json={"model_id": "m"}).status_code == 404
-        )
-
-    def test_post_view_exposes_viewers_and_changeable(self, tmp_path):
-        _, _, c = _client(tmp_path)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         p = c.get("/api/posts").json()[0]
         assert p["post_id"] == pid
-        assert p["viewers"] == 0
-        # never opened → idle (down) → model is changeable
-        assert p["model_changeable"] is True
+        assert p["viewers"] == 0 and p["status"] == "idle"
 
 
 class TestEventsStream:
@@ -567,7 +722,7 @@ class TestClonePost:
         r = c.post(
             "/api/posts",
             json={
-                "model_id": "m",
+                "knobs": {"model": "m"},
                 "topic": "cloned",
                 "clone_from": src.post_id,
                 "clone_paths": ["main.py"],
@@ -591,7 +746,7 @@ class TestClonePost:
         r = c.post(
             "/api/posts",
             json={
-                "model_id": "m",
+                "knobs": {"model": "m"},
                 "topic": "cloned",
                 "clone_from": src.post_id,
                 "clone_paths": [".agent-cli"],
@@ -623,7 +778,7 @@ class TestClonePost:
         r = c.post(
             "/api/posts",
             json={
-                "model_id": "m",
+                "knobs": {"model": "m"},
                 "topic": "강등본",
                 "clone_from": src.post_id,
                 "clone_paths": [".agent-cli"],
@@ -638,7 +793,8 @@ class TestClonePost:
     def test_clone_paths_without_source_400(self, tmp_path):
         _, _, c = _client(tmp_path)
         r = c.post(
-            "/api/posts", json={"model_id": "m", "topic": "x", "clone_paths": ["a"]}
+            "/api/posts",
+            json={"knobs": {"model": "m"}, "topic": "x", "clone_paths": ["a"]},
         )
         assert r.status_code == 400
 
@@ -647,7 +803,7 @@ class TestClonePost:
         r = c.post(
             "/api/posts",
             json={
-                "model_id": "m",
+                "knobs": {"model": "m"},
                 "topic": "x",
                 "clone_from": "nope",
                 "clone_paths": ["a"],
@@ -663,7 +819,7 @@ class TestClonePost:
         r = c.post(
             "/api/posts",
             json={
-                "model_id": "m",
+                "knobs": {"model": "m"},
                 "topic": "x",
                 "clone_from": src.post_id,
                 "clone_paths": ["../../secret"],
@@ -675,7 +831,7 @@ class TestClonePost:
 
     def test_plain_create_still_works(self, tmp_path):
         _, store, c = _client(tmp_path)
-        r = c.post("/api/posts", json={"model_id": "m", "topic": "plain"})
+        r = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "plain"})
         assert r.status_code == 200 and store.get(r.json()["post_id"]) is not None
 
     def test_frontend_clone_modal_wired(self, tmp_path):
@@ -1080,9 +1236,9 @@ class TestCloneUsesSourceSessionId:
         import json as _json
 
         cfg, store, c = _client(tmp_path)
-        src = c.post("/api/posts", json={"model_id": "m", "topic": "src"}).json()[
-            "post_id"
-        ]
+        src = c.post(
+            "/api/posts", json={"knobs": {"model": "m"}, "topic": "src"}
+        ).json()["post_id"]
         store.set_session_id(src, "2000000000")
         ws = cfg.workspace_for(src)
         for sid, marker in (("1000000000", "stray"), ("2000000000", "mine")):
@@ -1097,7 +1253,7 @@ class TestCloneUsesSourceSessionId:
         r = c.post(
             "/api/posts",
             json={
-                "model_id": "m",
+                "knobs": {"model": "m"},
                 "topic": "clone",
                 "clone_from": src,
                 "clone_paths": [".agent-cli"],
@@ -1124,51 +1280,28 @@ class TestModelGate:
 
     def test_create_with_unbound_model_is_400(self, tmp_path):
         _, store, c = _client(tmp_path)
-        r = c.post("/api/posts", json={"topic": "t", "model_id": "unbound"})
+        r = c.post("/api/posts", json={"topic": "t", "knobs": {"model": "unbound"}})
         assert r.status_code == 400
         assert r.json()["detail"] == {"reason": "dialect_unbound", "model": "unbound"}
         assert store.list_posts() == []
 
     def test_create_with_unknown_model_is_400(self, tmp_path):
         _, _, c = _client(tmp_path)
-        r = c.post("/api/posts", json={"topic": "t", "model_id": "nope"})
+        r = c.post("/api/posts", json={"topic": "t", "knobs": {"model": "nope"}})
         assert r.status_code == 400
         assert r.json()["detail"]["reason"] == "dialect_unbound"
 
     def test_clone_with_unbound_model_is_400_and_leaves_no_post(self, tmp_path):
         _, store, c = _client(tmp_path)
-        src = c.post("/api/posts", json={"model_id": "m", "topic": "src"}).json()[
-            "post_id"
-        ]
+        src = c.post(
+            "/api/posts", json={"knobs": {"model": "m"}, "topic": "src"}
+        ).json()["post_id"]
         r = c.post(
             "/api/posts",
-            json={"topic": "c", "model_id": "unbound", "clone_from": src},
+            json={"topic": "c", "knobs": {"model": "unbound"}, "clone_from": src},
         )
         assert r.status_code == 400
         assert [p.post_id for p in store.list_posts()] == [src]
-
-    def test_change_to_unbound_model_is_400_and_not_applied(self, tmp_path):
-        orch = FakeOrch()
-        _, store, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
-            "post_id"
-        ]
-        r = c.post(f"/api/posts/{pid}/model", json={"model_id": "unbound"})
-        assert r.status_code == 400
-        assert r.json()["detail"]["reason"] == "dialect_unbound"
-        assert orch.model_changes == []
-        assert store.get(pid).model_id == "m"
-
-    def test_change_requires_model(self, tmp_path):
-        _, _, c = _client(tmp_path)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
-            "post_id"
-        ]
-        assert c.post(f"/api/posts/{pid}/model", json={}).status_code == 422
-        assert (
-            c.post(f"/api/posts/{pid}/model", json={"model_id": None}).status_code
-            == 422
-        )
 
     def test_open_without_model_is_409(self, tmp_path):
         # v1.33.0 전 "(기본)" 방 — 조용히 바꾸지 않고 고르게 한다
@@ -1183,7 +1316,7 @@ class TestModelGate:
     def test_open_and_restart_with_unbound_model_are_409(self, tmp_path):
         orch = FakeOrch()
         _, store, c = _client(tmp_path, orch=orch)
-        post = store.create_post(topic="t", model_id="unbound")
+        post = store.create_post(topic="t", knobs={"model": "unbound"})
         for action in ("open", "restart"):
             r = c.post(f"/api/posts/{post.post_id}/{action}")
             assert r.status_code == 409, action
@@ -1197,7 +1330,7 @@ class TestModelGate:
         # 드롭다운은 걸러도, 고른 뒤 어드민에서 바인딩이 빠진 방은 게이트가 잡는다
         orch = FakeOrch()
         _, _, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         assert c.post(f"/api/posts/{pid}/open").status_code == 200
@@ -1210,7 +1343,7 @@ class TestModelGate:
     def test_open_with_bound_model_passes(self, tmp_path):
         orch = FakeOrch()
         _, _, c = _client(tmp_path, orch=orch)
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         assert c.post(f"/api/posts/{pid}/open").status_code == 200
@@ -1219,9 +1352,9 @@ class TestModelGate:
 
     def test_post_view_model_bound(self, tmp_path):
         _, store, c = _client(tmp_path)
-        c.post("/api/posts", json={"model_id": "m", "topic": "bound"})
+        c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "bound"})
         store.create_post(topic="none")
-        store.create_post(topic="unbound", model_id="unbound")
+        store.create_post(topic="unbound", knobs={"model": "unbound"})
         by_topic = {p["topic"]: p["model_bound"] for p in c.get("/api/posts").json()}
         assert by_topic == {"bound": True, "none": False, "unbound": False}
 
@@ -1236,7 +1369,7 @@ class TestModelGate:
                 raise RuntimeError("instance for x did not become ready: boom")
 
         _, _, c = _client(tmp_path, orch=DeadOrch())
-        pid = c.post("/api/posts", json={"model_id": "m", "topic": "t"}).json()[
+        pid = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "t"}).json()[
             "post_id"
         ]
         r = c.post(f"/api/posts/{pid}/open")

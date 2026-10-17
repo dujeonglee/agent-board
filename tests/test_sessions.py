@@ -221,6 +221,24 @@ class TestStatus:
         )
         assert "agents" not in sessions.live_state(ws, "S1")
 
+    def test_live_state_passes_knobs_through_from_status_file(
+        self, tmp_path, monkeypatch
+    ):
+        """v1.36.0: agent-cli ≥10.46.0 의 ``knobs`` (노브 현재 값) — 보드 거울의
+        소스. 구버전(키 없음)은 키 생략, dict 가 아니면 무시."""
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        self._status_json(ws, knobs={"model": "m", "thinking": "on", "stall": 600})
+        assert sessions.live_state(ws, "S1")["knobs"] == {
+            "model": "m",
+            "thinking": "on",
+            "stall": 600,
+        }
+        self._status_json(ws)
+        assert "knobs" not in sessions.live_state(ws, "S1")
+        self._status_json(ws, knobs="bogus")
+        assert "knobs" not in sessions.live_state(ws, "S1")
+
     def test_live_state_prefers_status_file_over_health(self, tmp_path, monkeypatch):
         # status.json present (agent-cli >= 4.27.0) → read the file, NEVER HTTP
         ws = self._web_json(tmp_path)

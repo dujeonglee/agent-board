@@ -99,16 +99,16 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
 | 메서드 | 경로 | 동작 |
 |---|---|---|
 | GET | `/` | 보드 UI(글 목록) |
-| GET | `/api/posts` | 글 목록 — 각 글에 `last_query`·`status`·`force_active`·`viewers`·`model_changeable` 유도 포함 |
+| GET | `/api/posts` | 글 목록 — 각 글에 `last_query`·`status`·`force_active`·`viewers`·`knobs`·`model`·`model_bound` 유도 포함 (§16 거울) |
+| GET | `/api/knobs/spec` | agent-cli 의 노브 표(`agent-cli knobs --json`, 프로세스당 1회 캐시) — `{full, knobs}`; 구버전 agent-cli 면 모델만 든 최소 표(`full: false`) (§17) |
 | GET | `/api/posts/{id}/tree` | 원본 글 워크스페이스 한 레벨 목록 (clone 트리 피커 — 보드가 fs 직접 읽음, 인스턴스 미기동도 동작) |
-| POST | `/api/posts` | 새 글 `{topic, model_id?, clone_from?, clone_paths?}` → 생성 (workspace 자동). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) |
+| POST | `/api/posts` | 새 글 `{topic, knobs{model, …}, clone_from?, clone_paths?}` → 생성 (workspace 자동). `knobs` 는 표(§17)로 검증(400 `bad_knob`), `model` 필수(400 `model_required`/`dialect_unbound`). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) |
 | DELETE | `/api/posts/{id}` | 글 삭제 + 그 글의 워크스페이스 디렉토리 삭제(보드 소유) |
 | POST | `/api/posts/{id}/open` | spawn-or-attach → 라우트 등록 → `{url}` 반환(프론트 리다이렉트) |
 | POST | `/api/posts/{id}/restart` | 강제 재시작 = stop + respawn → `{url}` 반환. **게이트 없음**(busy/viewer 무시 — 새로 설치한 agent-cli 반영 목적). **토큰 재사용**(열려 있던 뷰어 자동 재연결) + `--resume` 로 같은 세션 유지 |
 | POST | `/api/posts/{id}/force_active` | `{enabled}` 토글 |
-| POST | `/api/posts/{id}/model` | `{model_id}` 변경 — 게이트 통과 200, 거부 409(`detail`=`busy`/`viewers`) (§16) |
 
-## 4. 새 글 생성 흐름 (`POST /api/posts {topic, model_id?, clone_from?, clone_paths?}`)
+## 4. 새 글 생성 흐름 (`POST /api/posts {topic, knobs, clone_from?, clone_paths?}`)
 1. `post_id` 발급 → `posts` 행 삽입(`session_id=NULL`).
 2. `mkdir <WORKSPACES_ROOT>/<post_id>/` (보드 소유 빈 워크스페이스). 실패 시 row 롤백.
    *(agent-cli 세션은 아직 안 만듦 — 첫 open 에 생성.)*
@@ -328,24 +328,38 @@ PORT_RANGE       = (50000, 60000)                  # 인스턴스 포트 할당
 - 글별 권한/소유권, 기존 CLI 세션 노출, 검색/필터, presence, 멀티호스트.
 - **프로덕션화(다음 마일스톤)**: CaddyRouter(TLS·재시작 견고) + 게이트웨이 인증 + 배포.
 
-## 16. 게시물별 모델 변경 + 접속자 수 (gate)
-게시글 행의 모델 드롭다운으로 모델을 바꾼다. 여러 명이 동시에 쓰는 환경이라, **아무도 보고
-있지 않을 때만** 허용한다(보고 있던 사람의 세션을 뺏지 않기 위해).
+## 16. 보드는 방의 거울이다 — 노브(모델 포함) + 접속자 수 (v1.36.0, agent-cli ≥ 10.46.0)
 
-**게이트** (`orchestrator.change_model`, per-post lock 으로 직렬화):
-| 인스턴스 상태 | 변경 | 동작 |
-|---|---|---|
-| `working`(busy) | ❌ 409 `busy` | LLM 생성 중단 안 함 |
-| `running` + human viewers>0 | ❌ 409 `viewers` | 보고 있는 사람 보호 |
-| `running` + human viewers=0 | ✅ | model 저장 → `stop_instance`+`remove_route` (kill→DEAD) |
-| `idle`(down) | ✅ | model 저장만 → 다음 open 이 `--model` 새 값으로 spawn |
+방이 떠 있는 동안 모델·노브의 진실은 **방(agent-cli 세션)** 이다. 뷰어 간 동기화는
+agent-cli 의 sticky `knob:<name>` 한 길(마지막 쓴 사람이 이긴다)이고, 보드는 떠 있는
+방에 **쓰지 않는다** — 두 군데서 쓰는 상태를 만들지 않기 위해.
 
-- **human viewers** = `/api/health.viewers`(라이브 SSE 구독자) − (force-active 면 보드 keepalive 1).
-  `_post_view` 가 `viewers`(보정값)+`model_changeable` 를 내보내 프론트가 드롭다운을 **비활성**.
-- **force-active 예외**: kill 후 DEAD 로 두면 "유지" 약속이 깨지므로, **즉시 새 모델로
-  재시작**(`_await_dead`[죽을 때까지 대기 → 죽어가는 인스턴스에 attach 방지] → `_ensure_up`).
-- 세션은 `--resume <sid> --model <new>` 로 이어진다(모델은 세션에 안 박힘 — agent-cli 가
-  매 실행 시 `--model` 로 해석). 맥락 유지 + 모델만 교체.
-- **동시성**: 클릭~서버처리 사이 상태가 바뀔 수 있어 **apply 직전 게이트 재확인**(락 안에서
-  live_state 재조회). 거부되면 409 → 프론트가 드롭다운 되돌리고 사유 표시.
-- **접속자 수**: 위 `viewers` 를 목록에 `👁 N` 으로 표시(SSE 라이브 push, §7 Phase 2). agent-cli ≥ 4.17.11 필요.
+- **입력은 생성 폼 한 번.** 새 글 줄의 모델 선택 + `⚙ 고급`(표에서 그린 노브 폼, 비우면
+  agent-cli 기본값). 복제 폼은 원본 값으로 채워진다. 서버는 `knobs_spec.validate` 로
+  모양만 보고(선택지·bool 글자·숫자·기간·미지 이름), 의미(범위·모델 존재)는 agent-cli 가 본다.
+- **거울.** agent-cli 10.46.0 이 노브가 바뀔 때마다 `status.json` 에 `knobs: {이름: 값}` 을
+  쓴다. `sessions.live_state` 가 읽고, `_post_view` 가 저장값과 다르면 `store.set_knobs` 로
+  기록한다 — 목록·라이브 스캔(status.json mtime)이 이 함수를 지나므로 방에서 🤖 로 바꾼
+  모델이 몇 초 안에 카드에 보이고, 다음 spawn 에 같은 플래그로 돌아간다(종전엔 보드의 옛
+  `model_id` 로 되돌아갔다). 구버전 인스턴스(키 없음)는 저장값 그대로.
+- **spawn.** `instances.build_spawn_cmd` 가 `knobs_spec.spawn_args(load(bin), post.knobs)` —
+  표 순서대로 값 있는 노브만, bool 은 `--x`/`--no-x`. 손으로 적은 플래그 목록이 없다.
+- **카드.** 🤖 모델 칩 + 기본과 다른 노브 칩 + `⚙` 읽기 전용 패널(표의 모든 노브와 지금 값,
+  "(기본)" = 저장 안 됨; 펼친 상태는 SSE 재렌더에도 유지). 모델 드롭다운·`POST /api/posts/{id}/model`
+  ·busy/viewers 게이트·force-active 재spawn 은 **삭제**.
+- **뜰 수 없는 방**(모델 삭제·방언 미설정)은 📋 복제로 다른 모델을 골라 살린다 — 읽기
+  전용 규칙에 예외를 두지 않는다. 카드 경고 줄이 그렇게 안내한다.
+- **접속자 수**: `/api/health.viewers`(라이브 SSE 구독자) − (force-active 면 보드 keepalive 1)
+  를 목록에 `👁 N` 으로 표시(SSE 라이브 push, §7 Phase 2).
+
+## 17. 노브 표 (`agent_board/knobs_spec.py`)
+
+`load(agent_cli_bin)` 이 `agent-cli knobs --json` 을 프로세스당 한 번 읽는다(`cli_version`
+과 같은 lru_cache). 실패·구버전(< 10.45.0)·JSON 아님이면 모델만 든 최소 표
+(`is_full() == False`) — 그때 폼은 숨고 spawn 은 `--model` 만 넘긴다. 표 한 행:
+`{name, label, help, flag, short, env, kind(text|choice|bool|number|duration), choices,
+default, ui{icon, group, placement, control, scale, unit, choice_labels}}`. 프런트
+(`knobForm`·`knobChips`·`knobPanel`)와 서버(`validate`·`spawn_args`)가 같은 표를 쓴다.
+`Post.knobs` 는 SQLite `posts.knobs TEXT`(JSON); v1.35 의 `model_id` 컬럼은 첫 열기에
+`knobs["model"]` 로 옮기고 더 읽지 않는다(`Store._migrate`).
+
