@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.37.0] - 2026-10-21
+
+### Changed — 화면 문자열 영어 단일화 (agent-cli ≥ 10.62.2 짝)
+
+보드·어드민 화면의 사용자 문자열(카드 상태 "Responding/Idle/Off/Agents working/
+Checking result/❗ Needs your reply", 버튼 "Open/Clone/Keep", 새 글·복제 폼, 노브
+패널, 토스트, 어드민 표·사유)과 서버 오류 문구를 전부 영어로 — agent-cli 가
+v10.62.0~10.62.2 에서 같은 결정을 했고, 보드가 그대로 보여 주는 노브 표(`agent-cli
+knobs --json`)도 이제 영어라 한 화면에 두 언어가 섞이지 않습니다. 주석·docstring·
+문서는 한글 그대로. 회귀 가드 `tests/test_ui_english.py` 가 정적 파일의 주석 밖
+한글을 막습니다.
+
 ## [1.36.0] - 2026-10-17
 
 ### Changed — 보드는 방의 거울 (agent-cli ≥ 10.46.0 짝)

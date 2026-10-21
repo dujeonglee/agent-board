@@ -568,11 +568,11 @@ class TestUiWired:
         # created / last-query dates on the card
         assert "post-meta" in js and "created_at" in js and "last_query_at" in js
         # "needs your answer" indicator for pending ask/confirm
-        assert "awaiting_input" in js and "응답 필요" in js
+        assert "awaiting_input" in js and "Needs your reply" in js
         # open in new tab by default + "현재 페이지에서 열기" toggle
-        assert 'id="same-tab"' in html and "현재 페이지에서 열기" in html
+        assert 'id="same-tab"' in html and "Open in this page" in html
         assert "window.open" in js
-        assert "라이브러리 만들기" in html  # topic placeholder
+        assert "build a library" in html  # topic placeholder
         assert "글 하나 = agent-cli 세션" not in html  # hint removed
 
 
@@ -1169,10 +1169,10 @@ class TestAuditingStatus:
         static = Path(agent_board.__file__).parent / "static"
         js = (static / "app.js").read_text(encoding="utf-8")
         css = (static / "style.css").read_text(encoding="utf-8")
-        assert 'label: "결과 확인 중"' in js and "p.auditing" in js
+        assert 'label: "Checking result"' in js and "p.auditing" in js
         # 우선순위: 응답 필요 > 응답 중 > 결과 확인 중 > 에이전트 작업 중
         assert (
-            js.index('"❗ 응답 필요"')
+            js.index('"❗ Needs your reply"')
             < js.index("? AUDITING")
             < js.index("? AGENTS_BUSY")
         )

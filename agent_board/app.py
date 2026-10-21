@@ -121,16 +121,16 @@ def enforce_bind_policy(
     if gateway == "board-proxy" and host not in _LOOPBACK_HOSTS:
         if allow_unauth_lan:
             print(
-                f"  ⚠️  board-proxy 를 {host} 로 바인드 — 인증 없는 컨트롤 플레인이 "
-                "네트워크에 노출됩니다 (AGENT_BOARD_ALLOW_UNAUTH_LAN=1 로 허용됨).",
+                f"  ⚠️  board-proxy bound to {host} — an unauthenticated control plane is "
+                "exposed to the network (allowed by AGENT_BOARD_ALLOW_UNAUTH_LAN=1).",
                 file=sys.stderr,
             )
             return
         print(
-            f"board-proxy 게이트웨이는 인증이 없어 {host} 바인드를 거부합니다 "
-            "(스폰/삭제/admin 무인증 노출). AGENT_BOARD_HOST=127.0.0.1 로 바인드하거나 "
-            "gateway=caddy 인증을 쓰세요. 위험을 감수하면 "
-            "AGENT_BOARD_ALLOW_UNAUTH_LAN=1 로 명시 허용.",
+            f"the board-proxy gateway has no authentication, so binding to {host} is "
+            "refused (spawn/delete/admin would be exposed). Bind to AGENT_BOARD_HOST=127.0.0.1 "
+            "or use gateway=caddy with auth. To accept the risk, allow it explicitly with "
+            "AGENT_BOARD_ALLOW_UNAUTH_LAN=1.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -534,7 +534,7 @@ def create_app(
     async def admin_detect_model(body: dict):
         model_id = (body or {}).get("model", "")
         if not model_id:
-            raise HTTPException(status_code=400, detail="model 필드가 필요합니다")
+            raise HTTPException(status_code=400, detail="the model field is required")
         try:
             entry = await _admin_call(
                 admin.detect_model_entry, model_id, config.agent_cli_config_json
@@ -559,7 +559,7 @@ def create_app(
             admin.delete_model_entry, model_id, config.models_json
         )
         if not removed:
-            raise HTTPException(status_code=404, detail="registry 에 없는 모델")
+            raise HTTPException(status_code=404, detail="model not in the registry")
         return {"ok": True}
 
     @app.get("/api/posts")
@@ -784,7 +784,7 @@ def main() -> None:  # pragma: no cover
         except OSError:
             holder = ""
         print(
-            f"이미 이 data_dir 에서 agent-board 가 실행 중입니다: {config.data_dir}"
+            f"agent-board is already running on this data_dir: {config.data_dir}"
             + (f" (pid {holder})" if holder else ""),
             file=sys.stderr,
         )
@@ -817,9 +817,9 @@ def main() -> None:  # pragma: no cover
     # board should bind loopback (deploy/agent-board.service uses 127.0.0.1).
     if config.gateway == "caddy" and host not in ("127.0.0.1", "::1", "localhost"):
         print(
-            f"  ⚠️  gateway=caddy 인데 {host} 로 바인드됨 — 보드 포트({port})에 직접 접속하면 "
-            "Caddy 를 우회해 /s/<id> 가 503 루프가 됩니다. 브라우저는 Caddy 주소로 접속하고, "
-            "보드는 AGENT_BOARD_HOST=127.0.0.1 로 바인드하세요.",
+            f"  ⚠️  gateway=caddy but bound to {host} — connecting straight to the board port ({port}) "
+            "bypasses Caddy and turns /s/<id> into a 503 loop. Point the browser at the Caddy "
+            "address and bind the board to AGENT_BOARD_HOST=127.0.0.1.",
             file=sys.stderr,
         )
     uvicorn.run(

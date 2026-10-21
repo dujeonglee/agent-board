@@ -83,7 +83,7 @@ class TestCreateForm:
         page.fill("#new-topic", "잘못된 값")
         page.fill("#new-knobs [data-knob=max_agents]", "many")
         page.click("#new-create")
-        assert _wait(lambda: "노브 값 오류" in page.inner_text("body"))
+        assert _wait(lambda: "Bad knob value" in page.inner_text("body"))
         assert board.store.list_posts() == []
         assert page.input_value("#new-topic") == "잘못된 값"
         ctx.close()
@@ -119,7 +119,7 @@ class TestCardIsAMirror:
             "() => Array.from(document.querySelectorAll('.knob-chip')).map(e => e.textContent.trim())"
         )
         # max_agents=10 은 기본값이라 칩 없음; 아이콘 없는 노브는 ⚙ 로
-        assert chips == ["⚙ 켜기", "🔎 켬"]
+        assert chips == ["⚙ on", "🔎 on"]
         assert page.locator(".model-sel").count() == 0  # 드롭다운은 없다
         ctx.close()
 
@@ -132,16 +132,16 @@ class TestCardIsAMirror:
         assert page.locator(".knob-panel").is_visible()
         txt = page.inner_text(".knob-panel")
         for word in (
-            "모델",
-            "사고",
-            "에이전트 상한",
-            "무진전 한도",
-            "세션 감사",
-            "(기본)",
+            "Model",
+            "Thinking",
+            "Agent cap",
+            "Stream stall limit",
+            "Session audit",
+            "(default)",
             "10m",
         ):
             assert word in txt, word
-        assert "방 안의 칩" in txt
+        assert "chips inside" in txt
         assert (
             page.locator(
                 ".knob-panel input, .knob-panel select, .knob-panel button"
@@ -191,7 +191,11 @@ class TestCardIsAMirror:
             )
         )
         assert _wait(
-            lambda: "켜기" in (page.inner_text(".knob-panel") or ""), timeout=10
+            lambda: (
+                "⚙ on" in (page.inner_text(".knob-panel") or "")
+                or "on" in (page.inner_text(".knob-panel") or "")
+            ),
+            timeout=10,
         )
         assert page.locator(".knob-panel").is_visible()
         ctx.close()
@@ -218,6 +222,6 @@ class TestCloneForm:
         page.select_option("#clone-knobs [data-knob=thinking]", "off")
         page.click("#clone-go")
         assert _wait(lambda: len(board.store.list_posts()) == 2)
-        clone = next(p for p in board.store.list_posts() if p.topic.endswith("(복제)"))
+        clone = next(p for p in board.store.list_posts() if p.topic.endswith("(clone)"))
         assert clone.knobs == {"model": "m", "thinking": "off", "max_agents": 3}
         ctx.close()

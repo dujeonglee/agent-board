@@ -22,14 +22,14 @@
   // 어드민(⚙)은 설정하는 곳이라 전부 보여 준다.
   let BOUND = [];
   const adminLink = (mid) =>
-    `<a href="/admin#model=${encodeURIComponent(mid)}" title="어드민에서 이 모델의 방언을 설정">⚙ 설정</a>`;
+    `<a href="/admin#model=${encodeURIComponent(mid)}" title="Set this model's dialect in admin">⚙ Set up</a>`;
   // 서버 게이트의 사유(detail.reason) → 사람 문장. 400(생성·변경)/409(열기·재실행) 공용.
   function modelProblemText(detail) {
     if (!detail || typeof detail !== "object") return null;
-    if (detail.reason === "model_required") return "이 방에 모델이 없습니다 — 모델을 고르세요";
+    if (detail.reason === "model_required") return "This room has no model — pick one";
     if (detail.reason === "dialect_unbound")
-      return `모델 '${detail.model}' 에 방언(dialect) 바인딩이 없습니다 — ⚙ 어드민에서 설정하세요`;
-    if (detail.reason === "bad_knob") return `노브 값 오류: ${detail.error}`;
+      return `Model '${detail.model}' has no dialect binding — set it in ⚙ admin`;
+    if (detail.reason === "bad_knob") return `Bad knob value: ${detail.error}`;
     return null;
   }
 
@@ -71,13 +71,13 @@
         const def = document.createElement("option");
         def.value = "";
         def.textContent = k.default === null || k.default === undefined
-          ? "(기본)"
-          : `(기본 — ${k.kind === "bool" ? (k.default ? "켬" : "끔") : knobChoiceLabel(k, k.default)})`;
+          ? "(default)"
+          : `(default — ${k.kind === "bool" ? (k.default ? "on" : "off") : knobChoiceLabel(k, k.default)})`;
         ctl.appendChild(def);
         opts.forEach((v) => {
           const o = document.createElement("option");
           o.value = v;
-          o.textContent = k.kind === "bool" ? (v === "on" ? "켬" : "끔") : knobChoiceLabel(k, v);
+          o.textContent = k.kind === "bool" ? (v === "on" ? "on" : "off") : knobChoiceLabel(k, v);
           ctl.appendChild(o);
         });
         const cur = values[k.name];
@@ -85,7 +85,7 @@
       } else {
         ctl = document.createElement("input");
         ctl.type = "text";
-        ctl.placeholder = k.default === null || k.default === undefined ? "(기본)" : String(k.default);
+        ctl.placeholder = k.default === null || k.default === undefined ? "(default)" : String(k.default);
         const cur = values[k.name];
         ctl.value = cur === undefined || cur === null ? "" : String(cur);
       }
@@ -127,7 +127,7 @@
       if (k.name === "model") return;
       const v = knobs[k.name];
       if (v === undefined || v === null || v === k.default) return;
-      const shown = k.kind === "bool" ? (v ? "켬" : "끔") : knobChoiceLabel(k, String(v));
+      const shown = k.kind === "bool" ? (v ? "on" : "off") : knobChoiceLabel(k, String(v));
       const icon = (k.ui && k.ui.icon) || "⚙";
       parts.push(
         `<span class="knob-chip" title="${esc(k.label)}: ${esc(String(shown))}">${icon} ${esc(String(shown))}</span>`
@@ -147,16 +147,16 @@
       const v = knobs[k.name];
       const shown =
         v === undefined || v === null
-          ? "(기본)"
+          ? "(default)"
           : k.kind === "bool"
-            ? (v ? "켬" : "끔")
+            ? (v ? "on" : "off")
             : knobChoiceLabel(k, String(v));
       return `<div class="kp-row"><span class="kp-name" title="${esc(k.help || "")}">${esc(knobLabel(k))}</span><span class="kp-val">${esc(String(shown))}</span><span class="kp-unit">${esc((k.ui && k.ui.unit) || "")}</span></div>`;
     });
     const note = up
-      ? "방이 보고한 값입니다 — 바꾸려면 방 안의 칩에서."
-      : "다음 열기에 쓰는 값입니다 — 바꾸려면 방을 열어 칩에서.";
-    return `<div class="knob-panel"${openPanels.has(p.post_id) ? "" : " hidden"}><div class="kp-head"><span>⚙ 노브</span><span class="kp-note">${note}</span></div>${rows.join("")}</div>`;
+      ? "Values reported by the room — change them from the chips inside."
+      : "Values for the next open — open the room and change them from the chips.";
+    return `<div class="knob-panel"${openPanels.has(p.post_id) ? "" : " hidden"}><div class="kp-head"><span>⚙ Knobs</span><span class="kp-note">${note}</span></div>${rows.join("")}</div>`;
   }
 
   // ── 탭 가드 (v1.14.0) ─────────────────────
@@ -265,7 +265,7 @@
     if (!BOUND.length) {
       const o = document.createElement("option");
       o.value = "";
-      o.textContent = "⚠ 방언이 설정된 모델 없음 — ⚙ 어드민에서 설정";
+      o.textContent = "⚠ No model has a dialect — set one in ⚙ admin";
       sel.appendChild(o);
       sel.disabled = true;
       return;
@@ -274,7 +274,7 @@
     if (BOUND.length > 1) {
       const o = document.createElement("option");
       o.value = "";
-      o.textContent = "— 모델 선택 —";
+      o.textContent = "— pick a model —";
       sel.appendChild(o);
     }
     BOUND.forEach((m) => {
@@ -306,11 +306,11 @@
   function modelWarning(p) {
     if (p.model_bound) return "";
     if (!p.model)
-      return `<div class="model-warn">⚠ 이 방에 모델이 없습니다 — 📋 복제해서 모델을 골라 새 방으로 이어가세요.</div>`;
+      return `<div class="model-warn">⚠ This room has no model — 📋 clone it, pick a model and continue in the new room.</div>`;
     return (
-      `<div class="model-warn">⚠ 모델 '${esc(p.model)}' 에 방언(dialect) 바인딩이 없어 열 수 없습니다 — ` +
+      `<div class="model-warn">⚠ Model '${esc(p.model)}' has no dialect binding, so the room cannot open — ` +
       adminLink(p.model) +
-      " 또는 📋 복제해서 다른 모델로 이어가세요" +
+      " or 📋 clone it and continue with another model" +
       `</div>`
     );
   }
@@ -328,7 +328,7 @@
     const posts = await fetch("/api/posts").then((r) => r.json());
     $posts.innerHTML = "";
     if (!posts.length) {
-      $posts.innerHTML = '<div class="empty">아직 글이 없습니다. 새 글을 만들어 보세요.</div>';
+      $posts.innerHTML = '<div class="empty">No posts yet. Create one.</div>';
       return;
     }
     posts.forEach((p) => $posts.appendChild(card(p)));
@@ -336,19 +336,19 @@
 
   // status → {dot css class, label}. working = LLM 응답 중, running = 대기, idle = 꺼짐
   const STATUS = {
-    working: { cls: "busy", label: "응답 중" },
-    running: { cls: "on", label: "대기" },
-    idle: { cls: "off", label: "꺼짐" },
+    working: { cls: "busy", label: "Responding" },
+    running: { cls: "on", label: "Idle" },
+    idle: { cls: "off", label: "Off" },
   };
   // main 유휴 + 상주 에이전트 작업 중 (v1.17.0) — 같은 원형 dot, 색만
   // 구분(보라). "응답 중"과 합치지 않는 이유: main 은 비어 있어 지금
   // 말 걸어도 되는 상태라는 정보가 사라짐.
-  const AGENTS_BUSY = { cls: "agents-busy", label: "에이전트 작업 중" };
+  const AGENTS_BUSY = { cls: "agents-busy", label: "Agents working" };
   // main 유휴 + 세션 감사 런 진행 중 (v1.35.0, agent-cli ≥ 10.42.0 `auditing`) —
   // 하니스가 방금 끝난 런의 결과를 확인하는 중. 감사자는 팀원이 아니라 🤖 칩에
   // 없고, 이 상태 한 줄이 그 자리다. 우선순위: 응답 필요 > 응답 중 > 결과 확인 중
   // > 에이전트 작업 중 > 대기.
-  const AUDITING = { cls: "auditing", label: "결과 확인 중" };
+  const AUDITING = { cls: "auditing", label: "Checking result" };
 
   function agentsChip(p) {
     const a = p.agents;
@@ -369,7 +369,7 @@
     // awaiting an ask/confirm reply takes precedence over the busy/idle label
     const agentsWorking = p.agents && p.agents.working > 0;
     const st = p.awaiting_input
-      ? { cls: "await", label: "❗ 응답 필요" }
+      ? { cls: "await", label: "❗ Needs your reply" }
       : p.status === "running" && p.auditing
         ? AUDITING
         : p.status === "running" && agentsWorking
@@ -379,48 +379,48 @@
     el.innerHTML =
       `<div class="post-main">` +
       `<div class="post-topic">${esc(p.topic)}</div>` +
-      `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— 아직 질문 없음</span>"}</div>` +
+      `<div class="post-last">${esc(p.last_query) || "<span class='muted'>— no request yet</span>"}</div>` +
       // 워크스페이스 id — 디스크의 `<workspaces_root>/<id>` 와 이 카드를 잇는
       // 유일한 표식이라 반드시 보여야 한다(짧은 랜덤 id 는 그 자체로는 어떤
       // 글인지 말해주지 않는다). 클릭하면 복사 → 터미널에 바로 붙여넣기.
       `<div class="post-meta">` +
-      `<button type="button" class="ws-id" data-id="${esc(p.post_id)}" title="워크스페이스 id — 클릭하면 복사">${esc(p.post_id)}</button>` +
-      ` · 생성 ${fmtDate(p.created_at)}` +
-      (p.last_query_at ? ` · 마지막 ${fmtDate(p.last_query_at)}` : "") +
+      `<button type="button" class="ws-id" data-id="${esc(p.post_id)}" title="workspace id — click to copy">${esc(p.post_id)}</button>` +
+      ` · created ${fmtDate(p.created_at)}` +
+      (p.last_query_at ? ` · last ${fmtDate(p.last_query_at)}` : "") +
       `</div>` +
       `</div>` +
       `<div class="post-side">` +
       `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}` +
-      (up ? ` <span class="viewers" title="접속자 수">👁 ${p.viewers}</span>` : "") +
+      (up ? ` <span class="viewers" title="viewers">👁 ${p.viewers}</span>` : "") +
       (up ? agentsChip(p) : "") +
       // 📐 문법 제약이 실리는 세션 — 인스턴스의 칩과 같은 값(status.json)
-      (up && p.grammar ? ` <span class="grammar-chip" title="디코딩 문법 제약 켬 — 도구 호출 형식을 서버가 강제">📐</span>` : "") +
+      (up && p.grammar ? ` <span class="grammar-chip" title="Decoding grammar on — the server enforces the tool-call shape">📐</span>` : "") +
       `</span>` +
       // 🤖 모델 칩 (v1.36.0): 드롭다운이 아니다 — 방이 보고한 현재 모델. 바꾸는
       // 곳은 방 안의 🤖 칩이고 보드는 그 값을 기록해 다음 재시작에 넘긴다.
-      `<span class="model-chip" title="모델 — 방 안의 🤖 칩에서 바꿉니다">🤖 ${esc(p.model) || "⚠ 없음"}</span>` +
+      `<span class="model-chip" title="Model — change it from the 🤖 chip inside the room">🤖 ${esc(p.model) || "⚠ none"}</span>` +
       knobChips(p) +
       (SPEC.full
-        ? `<button class="knobs btn-ghost" type="button" aria-expanded="${openPanels.has(p.post_id)}" title="노브 보기 (읽기 전용)">⚙</button>`
+        ? `<button class="knobs btn-ghost" type="button" aria-expanded="${openPanels.has(p.post_id)}" title="View knobs (read-only)">⚙</button>`
         : "") +
-      `<label class="fa" title="force-active: 접속자 없어도 계속 살려둠">` +
-      `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> 유지</label>` +
+      `<label class="fa" title="force-active: keep the room alive with no viewers">` +
+      `<input type="checkbox" class="fa-cb" ${p.force_active ? "checked" : ""}> Keep</label>` +
       // 🔄 restart only when the instance is up — a down room's "열기" already
       // spawns fresh, so restart is the ONLY way to force-replace a running
       // process (e.g. to pick up an agent-cli update).
       (up
-        ? `<button class="restart btn-ghost" type="button" title="재실행 — 프로세스를 재시작(새로 설치한 agent-cli 반영). 세션은 이어집니다.">🔄</button>`
+        ? `<button class="restart btn-ghost" type="button" title="Restart — restarts the process (picks up a newly installed agent-cli). The session continues.">🔄</button>`
         : "") +
       // ⏰ 예약 배지 — 예약은 그 방(agent-cli 세션)의 것이다(v1.34.0). 보드는
       // 개수만 보여 주고, 목록·추가·답하기는 방 화면의 ⏰ 서랍에서 한다.
       (p.schedules && p.schedules.count
-        ? `<button class="sched btn-ghost" type="button" title="예약 ${p.schedules.count}개 — 방을 열어 ⏰ 에서 관리합니다">⏰<span class="scnt">${p.schedules.count}</span></button>`
+        ? `<button class="sched btn-ghost" type="button" title="${p.schedules.count} schedule(s) — open the room and manage them under ⏰">⏰<span class="scnt">${p.schedules.count}</span></button>`
         : "") +
-      `<button class="clone btn-ghost" type="button" title="이 글의 파일/대화를 복사해 새 글 시작">📋 복제</button>` +
+      `<button class="clone btn-ghost" type="button" title="Copy this post's files and conversation into a new post">📋 Clone</button>` +
       // 모델이 없거나 방언 미설정이면 열 수 없다 — 서버(409)와 같은 판정을
       // 버튼에 먼저 반영하고, 아래 경고 줄이 사유와 ⚙ 링크를 보여 준다.
-      `<button class="open btn-primary" type="button"${p.model_bound ? "" : ' disabled title="모델/방언 설정 전에는 열 수 없습니다"'}>열기</button>` +
-      `<button class="del btn-danger" type="button" title="삭제(영구)">🗑</button>` +
+      `<button class="open btn-primary" type="button"${p.model_bound ? "" : ' disabled title="Cannot open until a model and dialect are set"'}>Open</button>` +
+      `<button class="del btn-danger" type="button" title="Delete (permanent)">🗑</button>` +
       `</div>` +
       modelWarning(p) +
       knobPanel(p) +
@@ -434,7 +434,7 @@
         // execCommand 폴백이 필수 (agent-cli 쪽 copyToClipboard 와 같은 이유).
         const done = () => {
           const orig = wsId.dataset.id;
-          wsId.textContent = "✓ 복사됨";
+          wsId.textContent = "✓ copied";
           setTimeout(() => (wsId.textContent = orig), 1200);
         };
         // execCommand 폴백은 clipboard API 가 *없을* 때뿐 아니라 **거부될 때**도
@@ -498,10 +498,10 @@
       .map(
         (m) =>
           `<div class="sched-missed">` +
-          `<span class="lbl">⏰ 놓친 예약: ${esc(m.label)}</span>` +
-          `<span class="why">예정 ${fmtDate(m.missed_at)} — 실행되지 않았습니다</span>` +
+          `<span class="lbl">⏰ Missed schedule: ${esc(m.label)}</span>` +
+          `<span class="why">due ${fmtDate(m.missed_at)} — did not run</span>` +
           `<span class="acts">` +
-          `<button class="m-open btn-primary" type="button"${p.model_bound ? "" : " disabled"}>방에서 답하기</button>` +
+          `<button class="m-open btn-primary" type="button"${p.model_bound ? "" : " disabled"}>Answer in the room</button>` +
           `</span></div>`
       )
       .join("");
@@ -538,16 +538,16 @@
       if (gatewayMode !== "caddy" && !reusing) {
         if (held.count >= MAX_HELD_TABS) {
           toast(
-            `연결 한도 — 이 브라우저에 연결을 잡은 탭이 ${held.count}개입니다. ` +
-              `HTTP/1.1 은 주소당 동시 연결 6개뿐이라 더 열면 모든 탭이 멈춥니다. ` +
-              `안 쓰는 방 탭을 닫고 다시 여세요.`,
+            `Connection limit — ${held.count} tabs in this browser hold a connection. ` +
+              `HTTP/1.1 allows only 6 concurrent connections per host; one more and every tab stalls. ` +
+              `Close unused room tabs and try again.`,
             true
           );
           return;
         }
         if (held.count === MAX_HELD_TABS - 1) {
           toast(
-            `연결을 잡은 탭 ${held.count + 1}개 — 한도(6)에 근접했습니다. 안 쓰는 탭을 닫아주세요.`,
+            `${held.count + 1} tabs hold a connection — close to the limit (6). Close unused tabs.`,
             true
           );
         }
@@ -557,7 +557,7 @@
     if (!r.ok) {
       // 409 = 모델/방언 게이트, 502 = 인스턴스 부트 실패(사유 = instance.log 꼬리)
       const d = (await r.json().catch(() => ({}))).detail;
-      toast("열기 실패: " + (modelProblemText(d) || (typeof d === "string" ? d : r.status)), true);
+      toast("Open failed: " + (modelProblemText(d) || (typeof d === "string" ? d : r.status)), true);
       load();
       return;
     }
@@ -625,13 +625,13 @@
       const r = await fetch(`/api/posts/${post_id}/restart`, { method: "POST" });
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))).detail;
-        toast("재실행 실패: " + (modelProblemText(d) || (typeof d === "string" ? d : r.status)), true);
+        toast("Restart failed: " + (modelProblemText(d) || (typeof d === "string" ? d : r.status)), true);
         return;
       }
-      toast("🔄 재실행되었습니다" + (topic ? " — " + topic : ""));
+      toast("🔄 Restarted" + (topic ? " — " + topic : ""));
       load(); // re-render: the row's status reflects the fresh process
     } catch (e) {
-      toast("재실행 실패: 네트워크 오류", true);
+      toast("Restart failed: network error", true);
     } finally {
       // load() may already have replaced this button node — harmless no-op then.
       if (btn) {
@@ -650,7 +650,7 @@
   }
 
   async function del(p) {
-    if (!confirm(`삭제할까요? (영구 — 워크스페이스도 삭제)\n${p.topic}`)) return;
+    if (!confirm(`Delete? (permanent — the workspace is deleted too)\n${p.topic}`)) return;
     await fetch(`/api/posts/${p.post_id}`, { method: "DELETE" });
     load();
   }
@@ -676,7 +676,7 @@
       return;
     }
     if (!$model.value) {
-      toast(BOUND.length ? "모델을 고르세요" : "방언이 설정된 모델이 없습니다 — ⚙ 어드민에서 설정하세요", true);
+      toast(BOUND.length ? "Pick a model" : "No model has a dialect — set one in ⚙ admin", true);
       $model.focus();
       return;
     }
@@ -693,7 +693,7 @@
       });
       if (!r.ok) {
         const d = (await r.json().catch(() => ({}))).detail;
-        toast("생성 실패: " + (modelProblemText(d) || r.status), true);
+        toast("Create failed: " + (modelProblemText(d) || r.status), true);
         $topic.focus();
         return;
       }
@@ -734,8 +734,8 @@
   async function openCloneDialog(p) {
     cloneFrom = p.post_id;
     cloneChecked.clear();
-    $cloneSrcLabel.textContent = "원본: " + p.topic;
-    $cloneTopic.value = p.topic + " (복제)";
+    $cloneSrcLabel.textContent = "Source: " + p.topic;
+    $cloneTopic.value = p.topic + " (clone)";
     $cloneMsg.textContent = "";
     $cloneGo.disabled = false;
     // 모델 옵션 채우기 (new-model 과 동일 소스 — 바인딩 있는 모델만)
@@ -747,20 +747,20 @@
     $cloneAdv.setAttribute("aria-expanded", "false");
     $cloneDlg.showModal();
     // 트리 로드
-    $cloneTree.textContent = "불러오는 중…";
+    $cloneTree.textContent = "Loading…";
     const res = await fetchTree("");
     $cloneTree.textContent = "";
     if (!res.ok) {
       $cloneTree.innerHTML =
-        '<div class="clone-empty">파일 목록을 불러오지 못했습니다 (HTTP ' +
+        '<div class="clone-empty">Could not load the file list (HTTP ' +
         res.status +
-        "). board 프로세스가 구버전일 수 있습니다 — <b>재시작</b> 후 다시 시도하세요.</div>";
+        "). The board process may be an old version — <b>restart</b> it and try again.</div>";
       return;
     }
     if (!res.nodes.length) {
       $cloneTree.innerHTML =
-        '<div class="clone-empty">이 방에는 아직 복사할 파일이 없습니다 ' +
-        "(한 번도 열지 않았거나 빈 워크스페이스).</div>";
+        '<div class="clone-empty">This room has no files to copy yet ' +
+        "(never opened, or an empty workspace).</div>";
       return;
     }
     res.nodes.forEach((n) => $cloneTree.appendChild(cloneNode(n)));
@@ -792,13 +792,13 @@
       return;
     }
     if (!$cloneModel.value) {
-      $cloneMsg.textContent = BOUND.length ? "모델을 고르세요" : "방언이 설정된 모델이 없습니다 — ⚙ 어드민에서 설정하세요";
+      $cloneMsg.textContent = BOUND.length ? "Pick a model" : "No model has a dialect — set one in ⚙ admin";
       $cloneModel.focus();
       return;
     }
     cloning = true;
     $cloneGo.disabled = true;
-    $cloneMsg.textContent = "복제 중…";
+    $cloneMsg.textContent = "Cloning…";
     const r = await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -811,7 +811,7 @@
     });
     if (!r.ok) {
       const detail = await r.json().catch(() => ({}));
-      $cloneMsg.textContent = "실패: " + (modelProblemText(detail.detail) || detail.detail || r.status);
+      $cloneMsg.textContent = "Failed: " + (modelProblemText(detail.detail) || detail.detail || r.status);
       $cloneGo.disabled = false;
       cloning = false;
       return;
@@ -926,7 +926,7 @@
     if (el) el.remove();
     if (!$posts.querySelector(".post")) {
       $posts.innerHTML =
-        '<div class="empty">아직 글이 없습니다. 새 글을 만들어 보세요.</div>';
+        '<div class="empty">No posts yet. Create one.</div>';
     }
   }
 

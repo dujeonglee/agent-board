@@ -40,7 +40,7 @@ class TestCloneModal:
 
         ctx, page = _open_clone_modal(board, browser, src)
         # 원본이 미리 스코프됨 (라벨)
-        assert "원본 프로젝트" in page.inner_text("#clone-src-label")
+        assert "Source: 원본 프로젝트" in page.inner_text("#clone-src-label")
         page.fill("#clone-topic", "복제본")
         page.wait_for_selector("#clone-tree .clone-node", timeout=6000)
         page.locator(
@@ -119,7 +119,7 @@ class TestCloneModal:
         empty = board.store.create_post(topic="빈방")
         board.cfg.workspace_for(empty.post_id).mkdir(parents=True, exist_ok=True)
         ctx, page = _open_clone_modal(board, browser, empty.post_id)
-        assert _wait(lambda: "복사할 파일이 없" in page.inner_text("#clone-tree"))
+        assert _wait(lambda: "no files to copy" in page.inner_text("#clone-tree"))
         ctx.close()
 
 
