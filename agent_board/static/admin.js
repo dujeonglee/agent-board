@@ -30,13 +30,13 @@
   async function loadConfig() {
     try {
       const c = await api("GET", "/api/admin/config");
-      $("cfg-path").textContent = c.path + (c.exists ? "" : " (없음 — 저장 시 생성)");
+      $("cfg-path").textContent = c.path + (c.exists ? "" : " (missing — created on save)");
       $("cfg-provider").value = c.provider || "openai";
       $("cfg-base-url").value = c.base_url;
       $("cfg-api-key").value = c.api_key; // "***" 또는 ""
       $("cfg-default-model").value = c.default_model;
     } catch (e) {
-      status($("cfg-status"), "불러오기 실패: " + e.message, false);
+      status($("cfg-status"), "Load failed: " + e.message, false);
     }
   }
 
@@ -48,10 +48,10 @@
         api_key: $("cfg-api-key").value,
         default_model: $("cfg-default-model").value,
       });
-      status($("cfg-status"), "저장됨 — 새로 여는 인스턴스부터 적용", true);
+      status($("cfg-status"), "Saved — applies to newly opened instances", true);
       loadConfig();
     } catch (e) {
-      status($("cfg-status"), "저장 실패: " + e.message, false);
+      status($("cfg-status"), "Save failed: " + e.message, false);
     }
   });
 
@@ -63,17 +63,17 @@
   // 방언 선택 가이드 — 어떤 모양으로 돌릴지 모르는 사용자용 한 줄. 이름은
   // agent-cli 등록명(옵션 소스)이고, 사전에 없는 이름은 이름만 보인다.
   const DIALECT_GUIDE = {
-    json_fc: "일반 권장 — 산문 reasoning + JSON 배열 tool-call. 모르면 이것.",
-    native_fc: "서버가 함수 호출(tools/tool_calls)을 직접 파싱할 때 — OpenAI 호환 서버 전용.",
-    xml_fc: "<tool_call><function=…> 태그 모양을 선호하는 모델용 (값에 JSON escaping 없음).",
-    hermes_json: "<tool_call>{\"name\",\"arguments\"}</tool_call> — Hermes·Qwen 계열 네이티브 모양.",
-    glm_argkey: "<tool_call>NAME<arg_key>…</arg_key><arg_value>…</arg_value> — GLM 계열.",
+    json_fc: "Recommended default — prose reasoning + a JSON array of tool calls. Pick this if unsure.",
+    native_fc: "When the server parses function calls itself (tools/tool_calls) — OpenAI-compatible servers only.",
+    xml_fc: "For models that prefer <tool_call><function=…> tags (no JSON escaping in values).",
+    hermes_json: "<tool_call>{\"name\",\"arguments\"}</tool_call> — the native shape of Hermes and Qwen models.",
+    glm_argkey: "<tool_call>NAME<arg_key>…</arg_key><arg_value>…</arg_value> — GLM models.",
   };
   function showDialectGuide() {
     const v = $("ef-wire").value;
     $("ef-wire-guide").textContent = v
       ? DIALECT_GUIDE[v] || v
-      : "필수 — 이 모델이 어떤 응답 모양(방언)으로 돌지 고르세요. 없으면 agent-cli 가 이 모델을 실행하지 않습니다.";
+      : "Required — choose the reply shape (dialect) this model runs with. Without it agent-cli will not run the model.";
   }
 
   function entryCells(entry) {
@@ -84,7 +84,7 @@
       // 📐 3값 — 모름(키 없음)은 ? 로, false 로 뭉개지 않는다
       "<td>" + (entry.supports_grammar === true ? "✓" : entry.supports_grammar === false ? "✗" : "?") + "</td>" +
       // dialect — 없으면 미설정: agent-cli(≥ 10.3.0)가 이 모델을 실행하지 않는다
-      "<td>" + (entry.dialect ? esc(entry.dialect) : "<span class='badge unbound'>⚠ 미설정</span>") + "</td>"
+      "<td>" + (entry.dialect ? esc(entry.dialect) : "<span class='badge unbound'>⚠ unbound</span>") + "</td>"
     );
   }
 
@@ -101,20 +101,20 @@
       const edit = document.createElement("button");
       edit.className = "btn-icon";
       edit.textContent = "✎";
-      edit.title = "편집";
+      edit.title = "Edit";
       edit.addEventListener("click", () => openEntryDialog(row.id, row.entry));
       actions.appendChild(edit);
       const del = document.createElement("button");
       del.className = "btn-danger";
       del.textContent = "🗑";
-      del.title = "registry 에서 삭제";
+      del.title = "Remove from the registry";
       del.addEventListener("click", async () => {
-        if (!confirm("'" + row.id + "' 를 models.json 에서 삭제할까요?")) return;
+        if (!confirm("Remove '" + row.id + "' from models.json?")) return;
         try {
           await api("DELETE", "/api/admin/models/" + encodeURIComponent(row.id));
           refreshModels();
         } catch (e) {
-          status($("models-status"), "삭제 실패: " + e.message, false);
+          status($("models-status"), "Remove failed: " + e.message, false);
         }
       });
       actions.appendChild(del);
@@ -129,39 +129,39 @@
       const actions = tr.cells[tr.cells.length - 1];
       const detect = document.createElement("button");
       detect.className = "btn-primary";
-      detect.textContent = "🔍 탐지";
-      detect.title = "capability 자동 탐지 (수십 초 걸릴 수 있음)";
+      detect.textContent = "🔍 Detect";
+      detect.title = "Auto-detect capabilities (may take tens of seconds)";
       detect.addEventListener("click", async () => {
         detect.disabled = true;
-        detect.textContent = "탐지 중…";
-        status($("models-status"), "'" + mid + "' capability 탐지 중 — 수십 초 걸릴 수 있습니다", true);
+        detect.textContent = "Detecting…";
+        status($("models-status"), "Detecting '" + mid + "' capabilities — may take tens of seconds", true);
         try {
           const r = await api("POST", "/api/admin/models/detect", { model: mid });
-          status($("models-status"), "탐지 완료 — 값 검토 후 저장하세요", true);
+          status($("models-status"), "Detection done — review the values, then save", true);
           openEntryDialog(mid, r.entry);
         } catch (e) {
-          status($("models-status"), "탐지 실패: " + e.message + " — 수동 입력으로 저장 가능", false);
+          status($("models-status"), "Detection failed: " + e.message + " — you can still save manual values", false);
           openEntryDialog(mid, {});
         } finally {
           detect.disabled = false;
-          detect.textContent = "🔍 탐지";
+          detect.textContent = "🔍 Detect";
         }
       });
       actions.appendChild(detect);
       const manual = document.createElement("button");
       manual.className = "btn-ghost";
-      manual.textContent = "✎ 수동";
-      manual.title = "탐지 없이 직접 입력";
+      manual.textContent = "✎ Manual";
+      manual.title = "Enter values without detection";
       manual.addEventListener("click", () => openEntryDialog(mid, {}));
       actions.appendChild(manual);
       tbody.appendChild(tr);
     }
     const missing = modelsView.models.filter((m) => m.status === "missing").length;
     $("models-clean").disabled = missing === 0;
-    $("models-clean").textContent = "🗑 missing 전체 정리" + (missing ? " (" + missing + ")" : "");
+    $("models-clean").textContent = "🗑 Clean up all missing" + (missing ? " (" + missing + ")" : "");
     if (modelsView.probe_error) {
-      status($("models-status"), "endpoint 프로브 실패: " + modelsView.probe_error +
-        " — 상태 분류 없이 registry 만 표시", false);
+      status($("models-status"), "Endpoint probe failed: " + modelsView.probe_error +
+        " — showing the registry only, without status", false);
     }
   }
 
@@ -172,7 +172,7 @@
       render();
       openModelFromHash();
     } catch (e) {
-      status($("models-status"), "목록 실패: " + e.message, false);
+      status($("models-status"), "List failed: " + e.message, false);
     }
   }
 
@@ -181,13 +181,13 @@
   $("models-clean").addEventListener("click", async () => {
     const missing = modelsView.models.filter((m) => m.status === "missing");
     if (!missing.length) return;
-    if (!confirm("서버에서 사라진 " + missing.length + "개 모델을 models.json 에서 삭제할까요?\n" +
+    if (!confirm("Remove " + missing.length + " model(s) gone from the server from models.json?\n" +
       missing.map((m) => "- " + m.id).join("\n"))) return;
     for (const m of missing) {
       try {
         await api("DELETE", "/api/admin/models/" + encodeURIComponent(m.id));
       } catch (e) {
-        status($("models-status"), "'" + m.id + "' 삭제 실패: " + e.message, false);
+        status($("models-status"), "Remove '" + m.id + "' failed: " + e.message, false);
         break;
       }
     }
@@ -215,7 +215,7 @@
     sel.innerHTML = "";
     const pick = document.createElement("option");
     pick.value = "";
-    pick.textContent = "— 방언을 고르세요 —";
+    pick.textContent = "— pick a dialect —";
     pick.disabled = true;
     sel.appendChild(pick);
     for (const n of names) {
@@ -226,7 +226,7 @@
     }
     sel.value = current;
     showDialectGuide();
-    status($("entry-status"), current ? "" : "방언 바인딩이 없으면 이 모델은 실행되지 않습니다", !!current);
+    status($("entry-status"), current ? "" : "Without a dialect binding this model will not run", !!current);
     $("entry-dlg").showModal();
     if (!current) sel.focus();
   }
@@ -257,7 +257,7 @@
     // 방언은 필수 (v1.33.0) — 서버도 거절하지만 여기서 먼저 멈춘다.
     const dialect = $("ef-wire").value;
     if (!dialect) {
-      status($("entry-status"), "방언을 고르세요 — 없으면 이 모델은 실행되지 않습니다", false);
+      status($("entry-status"), "Pick a dialect — without one this model will not run", false);
       $("ef-wire").focus();
       return;
     }
@@ -271,7 +271,7 @@
       $("entry-dlg").close();
       refreshModels();
     } catch (e) {
-      status($("entry-status"), "저장 실패: " + e.message, false);
+      status($("entry-status"), "Save failed: " + e.message, false);
     }
   });
 

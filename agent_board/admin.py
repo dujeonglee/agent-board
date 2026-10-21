@@ -79,9 +79,9 @@ def _read_json(path: Path) -> dict:
     except FileNotFoundError:
         return {}
     except (json.JSONDecodeError, OSError) as e:
-        raise AdminError(f"{path.name} 읽기 실패: {e}") from e
+        raise AdminError(f"could not read {path.name}: {e}") from e
     if not isinstance(data, dict):
-        raise AdminError(f"{path.name} 최상위가 object 가 아닙니다")
+        raise AdminError(f"{path.name}: top level is not an object")
     return data
 
 
@@ -129,7 +129,7 @@ def update_config(fields: dict, path: Path = DEFAULT_CONFIG_JSON) -> dict:
             continue
         v = fields[k]
         if not isinstance(v, str):
-            raise AdminError(f"'{k}' 는 문자열이어야 합니다")
+            raise AdminError(f"'{k}' must be a string")
         v = v.strip()
         if k == "api_key" and v in ("", KEY_MASK):
             continue  # 기존 키 유지
@@ -150,7 +150,7 @@ def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
     cfg = _read_json(cfg_path)
     base_url = (cfg.get("base_url") or "").rstrip("/")
     if not base_url:
-        raise AdminError("config.json 에 base_url 이 없습니다")
+        raise AdminError("config.json has no base_url")
     provider = cfg.get("provider", "openai")
     api_key = cfg.get("api_key", "")
     if provider == "anthropic":
@@ -165,7 +165,7 @@ def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
         # otherwise exfiltrate it silently. (Remote is legitimate for a real
         # remote LLM, so we warn, not block.)
         print(
-            f"  ⚠️  admin 모델 프로브가 API 키를 원격 호스트로 전송합니다: {base_url}",
+            f"  ⚠️  the admin model probe sends the API key to a remote host: {base_url}",
             file=sys.stderr,
         )
     try:
@@ -173,10 +173,10 @@ def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
         r.raise_for_status()
         data = r.json()
     except (httpx.HTTPError, json.JSONDecodeError) as e:
-        raise AdminError(f"모델 목록 프로브 실패 ({url}): {e}") from e
+        raise AdminError(f"model list probe failed ({url}): {e}") from e
     items = data.get("data") if isinstance(data, dict) else None
     if not isinstance(items, list):
-        raise AdminError(f"모델 목록 응답 형식이 예상과 다릅니다 ({url})")
+        raise AdminError(f"unexpected model list response shape ({url})")
     return sorted(
         {m.get("id") for m in items if isinstance(m, dict) and m.get("id")},
         key=str.lower,
@@ -233,20 +233,20 @@ def save_model_entry(model_id: str, entry: dict, models_path: Path) -> None:
     방언이어야 한다(목록을 못 얻는 환경 — 미설치 — 에서만 이름 검증 생략).
     """
     if not model_id or not isinstance(entry, dict):
-        raise AdminError("model id 와 entry(object)가 필요합니다")
+        raise AdminError("model id and entry (object) are required")
     dialect = entry.get("dialect")
     if not (isinstance(dialect, str) and dialect):
         raise AdminError(
-            "dialect 바인딩이 필요합니다 — 이 모델이 어떤 응답 모양(방언)으로 "
-            "돌지 고르세요 (모르면 json_fc)"
+            "a dialect binding is required — choose the reply shape this model "
+            "runs with (json_fc if unsure)"
         )
     names = list_dialect_names()
     if names and dialect not in names:
-        raise AdminError(f"알 수 없는 dialect '{dialect}' (가능: {', '.join(names)})")
+        raise AdminError(f"unknown dialect '{dialect}' (one of: {', '.join(names)})")
     registry = _read_json(models_path)
     models = registry.setdefault("models", {})
     if not isinstance(models, dict):
-        raise AdminError("models.json 의 'models' 가 object 가 아닙니다")
+        raise AdminError("'models' in models.json is not an object")
     models[model_id] = entry
     _atomic_write_json(models_path, registry)
 
@@ -299,14 +299,14 @@ def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> d
         )
     except ImportError as e:
         raise AdminError(
-            "agent_cli 패키지를 import 할 수 없어 자동 탐지를 못 합니다 — "
-            "수동 입력으로 저장하세요"
+            "the agent_cli package cannot be imported, so auto-detection is "
+            "unavailable — save manual values"
         ) from e
 
     cfg = _read_json(cfg_path)
     base_url = cfg.get("base_url", "")
     if not base_url:
-        raise AdminError("config.json 에 base_url 이 없습니다")
+        raise AdminError("config.json has no base_url")
     try:
         caps = _detect_runtime_capabilities(
             cfg.get("provider", "openai"), base_url, model_id, cfg.get("api_key", "")
@@ -316,5 +316,7 @@ def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> d
         # 예외로 알린다 — 사유 문구를 그대로 화면에 올린다.
         raise AdminError(str(e)) from e
     if caps is None:
-        raise AdminError(f"'{model_id}' capability 탐지 실패 (프로브 무응답/거부)")
+        raise AdminError(
+            f"capability detection for '{model_id}' failed (probe unanswered or rejected)"
+        )
     return caps_to_entry(caps, auto_detected=True)

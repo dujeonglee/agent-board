@@ -24,22 +24,22 @@
 <body>
   <header>
     <h1>agent-board</h1>
-    <span id="version" class="version" title="board · agent-cli 버전"></span>
-    <label class="open-mode" title="끄면 새 탭에서 열림">
-      <input type="checkbox" id="same-tab"> 현재 페이지에서 열기
+    <span id="version" class="version" title="board · agent-cli version"></span>
+    <label class="open-mode" title="Off: rooms open in a new tab">
+      <input type="checkbox" id="same-tab"> Open in this page
     </label>
-    <a id="admin-link" href="/admin" title="admin — agent-cli config/models 편집">⚙</a>
+    <a id="admin-link" href="/admin" title="admin — edit agent-cli config and models">⚙</a>
     <span id="theme-wrap">
-      <button id="theme-btn" class="btn-icon" type="button" title="테마 선택" aria-haspopup="true" aria-expanded="false">🎨</button>
+      <button id="theme-btn" class="btn-icon" type="button" title="Theme" aria-haspopup="true" aria-expanded="false">🎨</button>
       <div id="theme-menu" role="menu" hidden></div>
     </span>
   </header>
 
   <section id="new">
-    <input id="new-topic" type="text" placeholder="주제 - 예: 라이브러리 만들기" maxlength="200">
-    <select id="new-model" title="모델 — 방언(dialect)이 설정된 모델만 보입니다 (⚙ 어드민에서 설정)"></select>
-    <button id="new-adv" type="button" class="btn-ghost" aria-expanded="false" title="노브 — 사고·문법·에이전트 상한·압축·무진전·자동 승인·감사. 비우면 agent-cli 기본값. 만든 뒤에는 방 안의 칩에서 바꿉니다." hidden>⚙ 고급</button>
-    <button id="new-create" type="button" class="btn-primary">+ 새 글</button>
+    <input id="new-topic" type="text" placeholder="Topic — e.g. build a library" maxlength="200">
+    <select id="new-model" title="Model — only models with a dialect binding are listed (set it in ⚙ admin)"></select>
+    <button id="new-adv" type="button" class="btn-ghost" aria-expanded="false" title="Knobs — thinking, grammar, agent cap, compaction, stall, auto-approve, audit. Empty = agent-cli defaults. After creation, change them from the chips inside the room." hidden>⚙ Advanced</button>
+    <button id="new-create" type="button" class="btn-primary">+ New post</button>
     <!-- 노브 폼 (v1.36.0): 컨트롤은 agent-cli 의 표(/api/knobs/spec)에서 그려진다 -->
     <div id="new-knobs" class="knob-form" hidden></div>
   </section>
@@ -51,22 +51,22 @@
        취소 = 중단. -->
   <dialog id="clone-dlg">
     <div class="clone-dlg-head">
-      <div class="clone-dlg-title">📋 대화방 복제</div>
-      <button id="clone-x" type="button" class="btn-icon" title="닫기">✕</button>
+      <div class="clone-dlg-title">📋 Clone room</div>
+      <button id="clone-x" type="button" class="btn-icon" title="Close">✕</button>
     </div>
     <div id="clone-src-label" class="clone-src-label"></div>
     <div class="clone-fields">
-      <input id="clone-topic" type="text" placeholder="새 주제" maxlength="200">
-      <select id="clone-model" title="모델 — 방언(dialect)이 설정된 모델만 보입니다 (⚙ 어드민에서 설정)"></select>
-      <button id="clone-adv" type="button" class="btn-ghost" aria-expanded="false" title="노브 — 원본의 값으로 채워져 있습니다" hidden>⚙ 고급</button>
+      <input id="clone-topic" type="text" placeholder="New topic" maxlength="200">
+      <select id="clone-model" title="Model — only models with a dialect binding are listed (set it in ⚙ admin)"></select>
+      <button id="clone-adv" type="button" class="btn-ghost" aria-expanded="false" title="Knobs — pre-filled with the source room's values" hidden>⚙ Advanced</button>
     </div>
     <div id="clone-knobs" class="knob-form" hidden></div>
-    <div id="clone-hint" class="clone-hint">복사할 파일/폴더를 체크하세요. <code>.agent-cli</code> 를 포함하면 대화까지 이어집니다.</div>
+    <div id="clone-hint" class="clone-hint">Check the files and folders to copy. Include <code>.agent-cli</code> to carry the conversation over.</div>
     <div id="clone-tree" class="clone-tree"></div>
     <div id="clone-msg" class="clone-msg"></div>
     <div class="clone-dlg-foot">
-      <button id="clone-cancel" type="button" class="btn-ghost">취소</button>
-      <button id="clone-go" type="button" class="btn-primary">복제 생성</button>
+      <button id="clone-cancel" type="button" class="btn-ghost">Cancel</button>
+      <button id="clone-go" type="button" class="btn-primary">Create clone</button>
     </div>
   </dialog>
 

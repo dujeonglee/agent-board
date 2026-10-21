@@ -38,7 +38,7 @@ class TestAgentsChip:
         assert page.inner_text(".agents-chip").strip() == "🤖 1/2"
         # main 유휴 + 에이전트 작업 중 = 보라 dot + "에이전트 작업 중" 라벨
         assert page.locator(".dot.agents-busy").count() == 1
-        assert "에이전트 작업" in page.inner_text(".post .st")
+        assert "Agents working" in page.inner_text(".post .st")
         # hover 상세 (title 속성)
         assert "coder · ui: busy" in (page.get_attribute(".agents-chip", "title") or "")
         ctx.close()
@@ -89,7 +89,7 @@ class TestTabGuard:
         clicker.click("button.open")
         clicker.wait_for_timeout(700)
         toast = clicker.query_selector("#toast.show")
-        blocked = toast and "연결 한도" in (toast.inner_text() or "")
+        blocked = toast and "Connection limit" in (toast.inner_text() or "")
         assert blocked and not open_posts, "6번째 열기가 차단돼야 한다"
 
         # 탭 정리 후 재클릭 → 게이트 통과. 닫힌 탭 presence 응답기가
@@ -180,7 +180,7 @@ class TestHeldFilterCounting:
         # absent 5 + 대시보드 1 = 6 ≥ 5 → 차단(발화 안 함) + 토스트
         assert not self._click_open_fires(page, pid)
         toast = page.query_selector("#toast.show")
-        assert toast and "연결 한도" in (toast.inner_text() or "")
+        assert toast and "Connection limit" in (toast.inner_text() or "")
         ctx.close()
 
 
@@ -287,7 +287,7 @@ class TestWorkspaceIdChip:
         page.goto(board.url, wait_until="load")
         page.wait_for_selector(".ws-id", timeout=8000)
         page.click(".ws-id")
-        assert _wait(lambda: "복사" in page.inner_text(".ws-id")), (
+        assert _wait(lambda: "copied" in page.inner_text(".ws-id")), (
             f"복사 피드백 없음: {page.inner_text('.ws-id')!r}"
         )
         ctx.close()

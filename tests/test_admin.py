@@ -192,7 +192,7 @@ class TestModelEntryEdit:
     def test_save_with_unknown_dialect_is_refused(self, tmp_path, monkeypatch):
         models = _models_file(tmp_path)
         monkeypatch.setattr(admin, "list_dialect_names", lambda: ["json_fc"])
-        with pytest.raises(admin.AdminError, match="알 수 없는 dialect 'nope'"):
+        with pytest.raises(admin.AdminError, match="unknown dialect 'nope'"):
             admin.save_model_entry("m1", {"dialect": "nope"}, models)
 
     def test_save_skips_name_check_when_agent_cli_missing(self, tmp_path, monkeypatch):
@@ -470,7 +470,7 @@ class TestDialectBinding:
         assert "wire_format" not in js  # 옛 키는 읽지도 쓰지도 않는다
         assert "auto (기본 체인)" not in js  # auto 선택지 없음 — 바인딩 필수
         assert 'auto.value = ""' not in js
-        assert "방언을 고르세요" in js  # 빈 값은 프론트에서도 멈춘다
+        assert "Pick a dialect" in js  # 빈 값은 프론트에서도 멈춘다
         assert "DIALECT_GUIDE" in js and "json_fc:" in js and "native_fc:" in js
         assert "#model=" in js  # /admin#model=<id> 딥링크
         assert (
@@ -550,7 +550,7 @@ class TestBaseUrlIsRemote:
 
         monkeypatch.setattr(admin.httpx, "get", lambda *a, **k: _Resp())
         admin.list_served_models(cfg)
-        assert "원격 호스트" in capsys.readouterr().err
+        assert "remote host" in capsys.readouterr().err
 
     def test_probe_no_warn_on_local(self, tmp_path, monkeypatch, capsys):
         cfg = tmp_path / "config.json"
@@ -612,7 +612,7 @@ class TestSupportsGrammarField:
         static = Path(admin.__file__).parent / "static"
         html = (static / "admin.html").read_text(encoding="utf-8")
         js = (static / "admin.js").read_text(encoding="utf-8")
-        assert 'id="ef-grammar"' in html and "<th>문법</th>" in html
+        assert 'id="ef-grammar"' in html and "<th>grammar</th>" in html
         assert (
             "supports_grammar" in js and 'entry.supports_grammar = sg === "true"' in js
         )

@@ -19,7 +19,7 @@ import pytest
 FAKE_SPEC = (
     {
         "name": "model",
-        "label": "모델",
+        "label": "Model",
         "help": "",
         "flag": "--model",
         "short": "-m",
@@ -31,7 +31,7 @@ FAKE_SPEC = (
     },
     {
         "name": "thinking",
-        "label": "사고",
+        "label": "Thinking",
         "help": "Model thinking",
         "flag": "--thinking",
         "short": "",
@@ -43,12 +43,12 @@ FAKE_SPEC = (
             "icon": "",
             "group": "thinking",
             "unit": "",
-            "choice_labels": {"off": "끄기", "on": "켜기"},
+            "choice_labels": {},
         },
     },
     {
         "name": "max_agents",
-        "label": "에이전트 상한",
+        "label": "Agent cap",
         "help": "",
         "flag": "--max-agents",
         "short": "",
@@ -60,7 +60,7 @@ FAKE_SPEC = (
     },
     {
         "name": "stall",
-        "label": "무진전 한도",
+        "label": "Stream stall limit",
         "help": "",
         "flag": "--stall",
         "short": "",
@@ -77,7 +77,7 @@ FAKE_SPEC = (
     },
     {
         "name": "auditor",
-        "label": "세션 감사",
+        "label": "Session audit",
         "help": "",
         "flag": "--auditor",
         "short": "",
