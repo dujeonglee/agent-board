@@ -83,6 +83,8 @@
       "<td>" + (entry.supports_thinking ? "✓" : "✗") + "</td>" +
       // 📐 3값 — 모름(키 없음)은 ? 로, false 로 뭉개지 않는다
       "<td>" + (entry.supports_grammar === true ? "✓" : entry.supports_grammar === false ? "✗" : "?") + "</td>" +
+      // 👁 vision 도 3값 (v1.38.0) — 키 없음은 첫 이미지에서 프로브해 채워진다(agent-cli ≥ 10.68.0)
+      "<td>" + (entry.supports_vision === true ? "✓" : entry.supports_vision === false ? "✗" : "?") + "</td>" +
       // dialect — 없으면 미설정: agent-cli(≥ 10.3.0)가 이 모델을 실행하지 않는다
       "<td>" + (entry.dialect ? esc(entry.dialect) : "<span class='badge unbound'>⚠ unbound</span>") + "</td>"
     );
@@ -205,6 +207,8 @@
     $("ef-thinking").checked = !!entry.supports_thinking;
     $("ef-grammar").value =
       entry.supports_grammar === true ? "true" : entry.supports_grammar === false ? "false" : "";
+    $("ef-vision").value =
+      entry.supports_vision === true ? "true" : entry.supports_vision === false ? "false" : "";
     // dialect 바인딩 — 필수, 등록명 드롭다운만 (자유입력 금지: agent-cli 가
     // unknown 이름에 fail-fast). auto 없음 (v1.33.0): 빈 값은 저장이 거절된다.
     // 미설치로 목록이 비어도 현재값은 보존.
@@ -266,6 +270,8 @@
     // 여기서는 true/false 만 적는다.
     const sg = $("ef-grammar").value;
     if (sg) entry.supports_grammar = sg === "true";
+    const sv = $("ef-vision").value;
+    if (sv) entry.supports_vision = sv === "true";
     try {
       await api("PUT", "/api/admin/models/" + encodeURIComponent(dlgModelId), entry);
       $("entry-dlg").close();

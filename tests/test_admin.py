@@ -576,6 +576,35 @@ class TestBaseUrlIsRemote:
         assert "원격 호스트" not in capsys.readouterr().err
 
 
+class TestSupportsVisionField:
+    """v1.38.0: `supports_vision` 도 3값(없음/true/false) — 편집 폼은 미기록을 그대로
+    두어 인스턴스의 첫-이미지 프로브(agent-cli ≥ 10.68.0 은 판정을 엔트리에 적는다)에
+    맡긴다. 종전엔 편집기에 이 필드가 아예 없었다."""
+
+    def test_entry_round_trips_true_false_and_absent(self, tmp_path):
+        mp = tmp_path / "models.json"
+        base = {
+            "context_window": 1,
+            "max_output_tokens": 1,
+            "supports_thinking": False,
+            "dialect": "json_fc",
+        }
+        admin.save_model_entry("m", {**base, "supports_vision": False}, mp)
+        assert admin._read_json(mp)["models"]["m"]["supports_vision"] is False
+        admin.save_model_entry("m", base, mp)
+        assert "supports_vision" not in admin._read_json(mp)["models"]["m"]
+
+    def test_admin_ui_wiring(self):
+        from pathlib import Path
+
+        static = Path(admin.__file__).parent / "static"
+        html = (static / "admin.html").read_text(encoding="utf-8")
+        js = (static / "admin.js").read_text(encoding="utf-8")
+        assert 'id="ef-vision"' in html and "<th>vision</th>" in html
+        assert 'entry.supports_vision = sv === "true"' in js
+        assert "entry.supports_vision === true" in js  # 표 열
+
+
 class TestSupportsGrammarField:
     """v1.31.0: models.json 의 `supports_grammar` 는 3값(없음/true/false) — 편집
     폼은 auto 를 '미기록' 으로 저장해 인스턴스의 프로브에 맡긴다."""
