@@ -79,7 +79,7 @@
     <div class="adm-status" id="models-status"></div>
     <table class="adm-models">
       <thead><tr>
-        <th>model</th><th>status</th><th>ctx</th><th>max out</th><th>thinking</th><th>grammar</th><th>dialect</th><th></th>
+        <th>model</th><th>status</th><th>ctx</th><th>max out</th><th>thinking</th><th>grammar</th><th>vision</th><th>dialect</th><th></th>
       </tr></thead>
       <tbody id="models-body"></tbody>
     </table>
@@ -101,6 +101,7 @@
       <label>max_output_tokens</label><input id="ef-maxout" type="number" min="1">
       <label>supports_thinking</label><input id="ef-thinking" type="checkbox">
       <label>supports_grammar</label><select id="ef-grammar" title="Whether the server enforces a decoding grammar (guided_grammar) — unrecorded locks 📐 as unknown in the instance; running detection (probe) fills it in"><option value="">unrecorded (decided on detection)</option><option value="true">true</option><option value="false">false</option></select>
+      <label>supports_vision</label><select id="ef-vision" title="Whether the model can view images — unrecorded means the instance probes once on the first image and writes the verdict here (agent-cli ≥ 10.68.0)"><option value="">unrecorded (decided on first image)</option><option value="true">true</option><option value="false">false</option></select>
       <label>dialect</label><select id="ef-wire" title="This model's dialect binding (the tool-call shape of its replies) — required. Without it agent-cli will not run the model"></select>
       <div id="ef-wire-guide" class="ef-guide"></div>
     </form>

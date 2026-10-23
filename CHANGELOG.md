@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.38.0] - 2026-10-23
+
+### Added — 모델 편집기의 `supports_vision` (agent-cli ≥ 10.68.0 짝)
+
+어드민 models.json 표에 `vision` 열(✓/✗/`?`=키 없음), 편집 폼에 3값 선택(미기록 /
+true / false). 편집기에 `supports_thinking`·`supports_grammar` 는 있었는데 vision 만
+없어서 손으로 파일을 열어야 했습니다. 미기록이면 인스턴스가 첫 이미지에서 한 번
+프로브하고, agent-cli 10.68.0 부터는 그 판정을 엔트리의 빠진 키에 적습니다.
+
 ## [1.37.0] - 2026-10-21
 
 ### Changed — 화면 문자열 영어 단일화 (agent-cli ≥ 10.62.2 짝)
