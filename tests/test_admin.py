@@ -7,6 +7,7 @@ LLM 없이 분류·마스킹·보존 계약을 고정한다.
 from __future__ import annotations
 
 import json
+import typing
 
 import httpx
 import pytest
@@ -645,3 +646,50 @@ class TestSupportsGrammarField:
         assert (
             "supports_grammar" in js and 'entry.supports_grammar = sg === "true"' in js
         )
+
+
+class TestSamplingDefaults:
+    """v1.39.0: 모델 기본 샘플링 `temperature`·`top_p` (agent-cli ≥ 10.69.0 의 models.json
+    선택 키). 편집기가 이 두 키의 유일한 UI — 빈 칸은 키를 적지 않고(서버 기본), 범위
+    밖·숫자 아님은 저장 단계에서 거절한다. 하니스 쪽은 프로브가 채우지 않는다."""
+
+    _BASE: typing.ClassVar[dict] = {
+        "context_window": 1,
+        "max_output_tokens": 1,
+        "supports_thinking": False,
+        "dialect": "json_fc",
+    }
+
+    def test_entry_round_trips_and_absent_means_unrecorded(self, tmp_path):
+        mp = tmp_path / "models.json"
+        admin.save_model_entry("m", {**self._BASE, "temperature": 0.2, "top_p": 1}, mp)
+        saved = admin._read_json(mp)["models"]["m"]
+        assert saved["temperature"] == 0.2 and saved["top_p"] == 1.0
+        admin.save_model_entry("m", {**self._BASE, "temperature": None}, mp)
+        saved = admin._read_json(mp)["models"]["m"]
+        assert "temperature" not in saved and "top_p" not in saved
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"temperature": 2.5},
+            {"top_p": -0.1},
+            {"temperature": "warm"},
+            {"top_p": True},
+        ],
+    )
+    def test_out_of_range_or_non_number_is_refused(self, tmp_path, bad):
+        mp = tmp_path / "models.json"
+        with pytest.raises(admin.AdminError):
+            admin.save_model_entry("m", {**self._BASE, **bad}, mp)
+        assert not mp.exists()
+
+    def test_admin_ui_wiring(self):
+        from pathlib import Path
+
+        static = Path(admin.__file__).parent / "static"
+        html = (static / "admin.html").read_text(encoding="utf-8")
+        js = (static / "admin.js").read_text(encoding="utf-8")
+        assert 'id="ef-temperature"' in html and 'id="ef-top-p"' in html
+        assert "<th>sampling</th>" in html
+        assert "samplingCell(entry)" in js and "entry[key] = num" in js
