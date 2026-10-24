@@ -175,6 +175,7 @@ cascade). 그 open 만 기다리고 루프는 계속 돈다(`_await_dead` 와 �
   ```
   agent-cli web --host 127.0.0.1 --port <port> --token <tok> --no-browser
                 --idle-timeout <N> --trust-local --base-path /s/<post_id>
+                [--title <topic>        # agent-cli ≥ 10.71.0 — 헤더·탭·배너의 방 제목 (v1.40.0)]
                 [--resume <session_id>  # session_id 있을 때만]
   cwd = post.workspace
   ```
