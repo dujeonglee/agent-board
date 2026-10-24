@@ -126,7 +126,7 @@ agent-board
    - **config.json**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
      화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 외 키는 보존.
      변경은 **새로 여는 인스턴스부터** 적용(떠 있는 방은 🔄 재실행).
-   - **models.json**: 표에 `문법` 열(`supports_grammar` ✓/✗/`?`=키 없음), 편집 폼에 3값 선택(미기록 → 인스턴스에서 미확인으로 잠김, 감지(프로브)가 판정해 채움 / true / false) — v1.31.0. `vision` 열·`supports_vision` 3값 선택도 같은 모양(v1.38.0) — 미기록이면 인스턴스가 첫 이미지에서 한 번 프로브해 판정을 엔트리에 적는다(agent-cli ≥ 10.68.0). 글 카드에는 문법 제약이 실리는 세션에 📐 배지(status.json·health 의 `grammar`, agent-cli ≥ 9.24.0).
+   - **models.json**: 표에 `문법` 열(`supports_grammar` ✓/✗/`?`=키 없음), 편집 폼에 3값 선택(미기록 → 인스턴스에서 미확인으로 잠김, 감지(프로브)가 판정해 채움 / true / false) — v1.31.0. `vision` 열·`supports_vision` 3값 선택도 같은 모양(v1.38.0) — 미기록이면 인스턴스가 첫 이미지에서 한 번 프로브해 판정을 엔트리에 적는다(agent-cli ≥ 10.68.0). `sampling` 열(`T 0.2 · p 0.95` / `—`)과 편집 폼의 `temperature`(0~2)·`top_p`(0~1) 숫자 칸은 **이 모델의 기본 샘플링**(v1.39.0, agent-cli ≥ 10.69.0) — 방이 자기 🎲 노브로 정하지 않은 키에 매 요청 실리고, 빈 칸 = 키 미기록(서버 기본), 범위 밖은 저장 거절(400). 이 두 키는 하니스의 프로브가 채우지 않는 사용자 결정값이다. 글 카드에는 문법 제약이 실리는 세션에 📐 배지(status.json·health 의 `grammar`, agent-cli ≥ 9.24.0).
    - **models.json**: config 의 endpoint 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
      `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 "missing 전체 정리") /
      `NEW`(서버에만 있음 — **🔍 탐지** 버튼이 agent-cli 의 capability 자동 탐지를 돌려

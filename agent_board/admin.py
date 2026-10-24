@@ -225,6 +225,31 @@ def list_models_with_status(
     return {"models": rows, "new": new, "probe_error": probe_error}
 
 
+#: 🎲 모델 기본 샘플링 키의 범위 (v1.39.0, agent-cli ≥ 10.69.0 `SAMPLING_RANGES` 와 같다).
+SAMPLING_RANGES: dict[str, tuple[float, float]] = {
+    "temperature": (0.0, 2.0),
+    "top_p": (0.0, 1.0),
+}
+
+
+def _check_sampling(entry: dict) -> None:
+    """엔트리의 선택 키 ``temperature``·``top_p`` — 있으면 범위 안의 숫자여야 한다.
+    None 은 "미기록" 과 같아 키를 지운다(폼의 빈 칸). 하니스는 오타를 미기록으로
+    조용히 넘기지만(부트를 막지 않기 위해), 편집기는 사용자가 보고 있으니 바로 말한다."""
+    for key, (lo, hi) in SAMPLING_RANGES.items():
+        if key not in entry:
+            continue
+        value = entry[key]
+        if value is None:
+            del entry[key]
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise AdminError(f"{key} must be a number between {lo:g} and {hi:g}")
+        if not lo <= float(value) <= hi:
+            raise AdminError(f"{key} must be between {lo:g} and {hi:g}, got {value}")
+        entry[key] = float(value)
+
+
 def save_model_entry(model_id: str, entry: dict, models_path: Path) -> None:
     """entry 생성/교체 — 나머지 모델·최상위 키(provider_defaults 등) 보존.
 
@@ -243,6 +268,7 @@ def save_model_entry(model_id: str, entry: dict, models_path: Path) -> None:
     names = list_dialect_names()
     if names and dialect not in names:
         raise AdminError(f"unknown dialect '{dialect}' (one of: {', '.join(names)})")
+    _check_sampling(entry)
     registry = _read_json(models_path)
     models = registry.setdefault("models", {})
     if not isinstance(models, dict):

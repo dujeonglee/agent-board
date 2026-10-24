@@ -76,6 +76,13 @@
       : "Required — choose the reply shape (dialect) this model runs with. Without it agent-cli will not run the model.";
   }
 
+  function samplingCell(entry) {
+    const parts = [];
+    if (typeof entry.temperature === "number") parts.push("T " + entry.temperature);
+    if (typeof entry.top_p === "number") parts.push("p " + entry.top_p);
+    return parts.length ? esc(parts.join(" · ")) : "—";
+  }
+
   function entryCells(entry) {
     return (
       "<td>" + (entry.context_window ?? "—") + "</td>" +
@@ -85,6 +92,8 @@
       "<td>" + (entry.supports_grammar === true ? "✓" : entry.supports_grammar === false ? "✗" : "?") + "</td>" +
       // 👁 vision 도 3값 (v1.38.0) — 키 없음은 첫 이미지에서 프로브해 채워진다(agent-cli ≥ 10.68.0)
       "<td>" + (entry.supports_vision === true ? "✓" : entry.supports_vision === false ? "✗" : "?") + "</td>" +
+      // 🎲 sampling (v1.39.0, agent-cli ≥ 10.69.0) — 모델 기본 temperature/top_p; 키 없음은 — (서버 기본)
+      "<td>" + samplingCell(entry) + "</td>" +
       // dialect — 없으면 미설정: agent-cli(≥ 10.3.0)가 이 모델을 실행하지 않는다
       "<td>" + (entry.dialect ? esc(entry.dialect) : "<span class='badge unbound'>⚠ unbound</span>") + "</td>"
     );
@@ -126,7 +135,7 @@
       const tr = document.createElement("tr");
       tr.innerHTML =
         "<td></td><td><span class='badge new'>NEW</span></td>" +
-        "<td>—</td><td>—</td><td>—</td><td>—</td><td></td>";
+        "<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td></td>";
       tr.cells[0].textContent = mid;
       const actions = tr.cells[tr.cells.length - 1];
       const detect = document.createElement("button");
@@ -209,6 +218,9 @@
       entry.supports_grammar === true ? "true" : entry.supports_grammar === false ? "false" : "";
     $("ef-vision").value =
       entry.supports_vision === true ? "true" : entry.supports_vision === false ? "false" : "";
+    // 🎲 기본 샘플링 — 키 없음은 빈 칸(미기록 → 서버 기본), 숫자만 채운다
+    $("ef-temperature").value = typeof entry.temperature === "number" ? entry.temperature : "";
+    $("ef-top-p").value = typeof entry.top_p === "number" ? entry.top_p : "";
     // dialect 바인딩 — 필수, 등록명 드롭다운만 (자유입력 금지: agent-cli 가
     // unknown 이름에 fail-fast). auto 없음 (v1.33.0): 빈 값은 저장이 거절된다.
     // 미설치로 목록이 비어도 현재값은 보존.
@@ -272,6 +284,18 @@
     if (sg) entry.supports_grammar = sg === "true";
     const sv = $("ef-vision").value;
     if (sv) entry.supports_vision = sv === "true";
+    // 🎲 (v1.39.0): 빈 칸 = 키를 적지 않음(서버 기본). 범위는 서버가 다시 보지만 여기서 먼저 멈춘다.
+    for (const [id, key, lo, hi] of [["ef-temperature", "temperature", 0, 2], ["ef-top-p", "top_p", 0, 1]]) {
+      const raw = $(id).value.trim();
+      if (!raw) continue;
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num < lo || num > hi) {
+        status($("entry-status"), key + " must be a number between " + lo + " and " + hi, false);
+        $(id).focus();
+        return;
+      }
+      entry[key] = num;
+    }
     try {
       await api("PUT", "/api/admin/models/" + encodeURIComponent(dlgModelId), entry);
       $("entry-dlg").close();
