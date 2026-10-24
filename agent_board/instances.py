@@ -44,6 +44,18 @@ def cli_version(agent_cli_bin: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _supports_title(config: Config) -> bool:
+    """agent-cli 가 ``--title`` 을 아는가 (≥ 10.71.0). 버전을 못 읽으면 넘기지 않는다
+    — 모르는 옵션은 typer 가 부트에서 거절해 방이 아예 안 뜬다."""
+    v = cli_version(config.agent_cli_bin)
+    if not v:
+        return False
+    try:
+        return tuple(int(x) for x in v.split(".")[:3]) >= (10, 71, 0)
+    except ValueError:
+        return False
+
+
 def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> list[str]:
     """The ``agent-cli web ...`` argv for this post. ``--resume`` only when the
     session already exists (first open creates a new session)."""
@@ -63,6 +75,12 @@ def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> lis
         "--base-path",
         f"/s/{post.post_id}",
     ]
+    # 방 제목 (v1.40.0, agent-cli ≥ 10.71.0 `--title`): 글의 topic — 헤더·브라우저 탭·
+    # 배너에 보인다. 제목의 주인은 글이고 spawn 마다 넘기므로 고친 제목은 다음
+    # 재시작에 들어온다(떠 있는 방엔 쓰지 않는 거울 규칙). 구버전 agent-cli 는 모르는
+    # 옵션에 부트 실패하므로 10.71.0 미만이면 넘기지 않는다.
+    if post.topic.strip() and _supports_title(config):
+        cmd += ["--title", post.topic.strip()]
     # 노브(모델 포함) → 표(`agent-cli knobs --json`)의 플래그 (v1.36.0). agent-cli
     # 가 모델의 정의(provider/url/key)를 자기 레지스트리에서 푼다 — 보드는 값만.
     cmd += knobs_spec.spawn_args(knobs_spec.load(config.agent_cli_bin), post.knobs)

@@ -17,6 +17,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from agent_board import instances
 from agent_board.config import Config
 from agent_board.models import Post
@@ -338,3 +340,33 @@ class TestLastLogLines:
         (ws / ".agent-cli").mkdir(parents=True)
         (ws / ".agent-cli" / "instance.log").write_text("boom\n")
         assert RealBackend(cfg, router=None).boot_failure_hint(post) == "boom"
+
+
+class TestSpawnTitle:
+    """v1.40.0: 글의 topic 을 ``--title`` 로 (agent-cli ≥ 10.71.0). 구버전·버전 미상
+    agent-cli 엔 넘기지 않는다 — 모르는 옵션은 부트에서 거절돼 방이 안 뜬다."""
+
+    def test_topic_passed_when_cli_is_new_enough(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(instances, "cli_version", lambda _b: "10.71.0")
+        cmd = instances.build_spawn_cmd(
+            _cfg(tmp_path), Post("p1", " GLM — bench rerun "), port=1, token="x"
+        )
+        i = cmd.index("--title")
+        assert cmd[i + 1] == "GLM — bench rerun"
+        # 노브 플래그보다 앞, --base-path 뒤 — 고정 오케스트레이션 인자 묶음 끝
+        assert cmd.index("--base-path") < i
+
+    @pytest.mark.parametrize("ver", ["10.70.1", None, "garbage"])
+    def test_not_passed_to_older_or_unknown_cli(self, tmp_path, monkeypatch, ver):
+        monkeypatch.setattr(instances, "cli_version", lambda _b: ver)
+        cmd = instances.build_spawn_cmd(
+            _cfg(tmp_path), Post("p1", "t"), port=1, token="x"
+        )
+        assert "--title" not in cmd
+
+    def test_blank_topic_is_not_passed(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(instances, "cli_version", lambda _b: "10.71.0")
+        cmd = instances.build_spawn_cmd(
+            _cfg(tmp_path), Post("p1", "  "), port=1, token="x"
+        )
+        assert "--title" not in cmd

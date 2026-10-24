@@ -32,7 +32,7 @@
 
 ## 요구사항
 - Python 3.10+
-- **`agent-cli` 가 PATH 에 있어야 함** (보드가 `agent-cli web ...` 를 spawn).
+- **`agent-cli` 가 PATH 에 있어야 함** (보드가 `agent-cli web ...` 를 spawn). agent-cli ≥ 10.71.0 이면 글의 **제목(topic)을 `--title` 로 넘겨** 방의 헤더 첫 자리·브라우저 탭(`<제목> · agent-cli`)·배너에 보인다(v1.40.0). 제목의 주인은 글이고 spawn 마다 넘기므로, 제목을 바꾸면 다음 🔄 재시작에 들어온다 — 떠 있는 방엔 쓰지 않는다(거울 규칙). 구버전 agent-cli 엔 넘기지 않는다.
   상태 표시(busy)·뒤로가기 정리까지 쓰려면 **agent-cli ≥ 4.17.3**, **접속자 수 표시 +
   게시물별 모델 변경**까지 쓰려면 **agent-cli ≥ 4.17.11**(`/api/health` 의 `viewers`) 권장.
   **≥ 4.27.0** 이면 라이브 상태를 `status.json` 파일에서 읽어 **`/api/health` 폴링을 안 함**
