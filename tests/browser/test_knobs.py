@@ -118,8 +118,8 @@ class TestCardIsAMirror:
         chips = page.evaluate(
             "() => Array.from(document.querySelectorAll('.knob-chip')).map(e => e.textContent.trim())"
         )
-        # max_agents=10 은 기본값이라 칩 없음; 아이콘 없는 노브는 ⚙ 로
-        assert chips == ["⚙ on", "🔎 on"]
+        # max_agents=10 은 기본값이라 칩 없음; 칩 아이콘은 표의 ui.icon(🧠, 🔎)
+        assert chips == ["🧠 on", "🔎 on"]
         assert page.locator(".model-sel").count() == 0  # 드롭다운은 없다
         ctx.close()
 

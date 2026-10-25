@@ -37,13 +37,13 @@ FAKE_SPEC = (
         "short": "",
         "env": "AGENT_CLI_THINKING",
         "kind": "choice",
-        "choices": ["off", "on", "auto"],
+        "choices": ["off", "on"],  # agent-cli 10.72.0: auto 없음, 묶음 아님
         "default": "off",
         "ui": {
-            "icon": "",
-            "group": "thinking",
+            "icon": "🧠",
+            "group": "",
             "unit": "",
-            "choice_labels": {},
+            "choice_labels": {"off": "off (default)", "on": "on"},
         },
     },
     {
