@@ -180,6 +180,72 @@ class TestCloneModal:
         assert page.locator(f"{card} .open").is_visible()
         ctx.close()
 
+    def test_tree_picker_shows_links_checkable_but_not_expandable(
+        self, board, browser, tmp_path
+    ):
+        """v1.43.0: 링크는 링크로 복사된다 — 트리에 🔗, 펼침 없음, 고를 수는 있다."""
+        import os
+
+        src = board.seed_post(topic="링크 원본")
+        ws = board.cfg.workspace_for(src)
+        (ws / "a.py").write_text("a")
+        os.symlink("/etc", ws / "etc_link")
+        ctx, page = _open_clone_modal(board, browser, src)
+        node = page.locator("#clone-tree .clone-node:has-text('etc_link')")
+        node.wait_for(timeout=6000)
+        assert "🔗" in node.inner_text()
+        assert node.locator(".clone-name").get_attribute("title") == "symlink → /etc"
+        assert node.locator(".clone-kids").count() == 0  # 펼칠 자리가 없다
+        cb = node.locator("input[type=checkbox]")
+        assert cb.is_enabled()
+        cb.check()
+        assert cb.is_checked()
+        ctx.close()
+
+    def test_failure_after_close_shows_a_toast(self, board, browser, monkeypatch):
+        """v1.43.0: 모달을 닫은 뒤 복제가 실패하면 카드는 롤백으로 사라지고 사유는
+        토스트로."""
+        gate = _hold_clone(monkeypatch, fail="disk full")
+        src = board.seed_post(topic="원본")
+        (board.cfg.workspace_for(src) / "f.py").write_text("x")
+        ctx, page = _open_clone_modal(board, browser, src)
+        page.fill("#clone-topic", "실패할 방")
+        page.wait_for_selector("#clone-tree .clone-node", timeout=6000)
+        page.locator(
+            "#clone-tree .clone-node:has-text('f.py') input[type=checkbox]"
+        ).check()
+        page.click("#clone-go")
+        page.wait_for_selector("#clone-bar:not([hidden])", timeout=4000)
+        page.click("#clone-cancel")  # Close
+        assert _wait(lambda: not page.locator("#clone-dlg[open]").count())
+        gate.set()
+        page.wait_for_selector("#toast.show.err", timeout=6000)
+        assert page.inner_text("#toast") == "Clone failed: disk full"
+        assert _wait(lambda: not _has_post(board, "실패할 방"))
+        ctx.close()
+
+    def test_failure_with_the_modal_open_has_no_toast(
+        self, board, browser, monkeypatch
+    ):
+        """모달이 그 글을 보여 주는 중이면 사유는 모달에만 — 두 번 보이지 않는다."""
+        gate = _hold_clone(monkeypatch, fail="disk full")
+        src = board.seed_post(topic="원본")
+        (board.cfg.workspace_for(src) / "f.py").write_text("x")
+        ctx, page = _open_clone_modal(board, browser, src)
+        page.fill("#clone-topic", "모달 실패")
+        page.wait_for_selector("#clone-tree .clone-node", timeout=6000)
+        page.locator(
+            "#clone-tree .clone-node:has-text('f.py') input[type=checkbox]"
+        ).check()
+        page.click("#clone-go")
+        page.wait_for_selector("#clone-bar:not([hidden])", timeout=4000)
+        gate.set()
+        assert _wait(lambda: "Failed: disk full" in page.inner_text("#clone-msg"))
+        assert page.locator("#clone-dlg[open]").count() == 1
+        page.wait_for_timeout(500)
+        assert page.locator("#toast.show").count() == 0
+        ctx.close()
+
     def test_empty_source_message(self, board, browser):
         empty = board.store.create_post(topic="빈방")
         board.cfg.workspace_for(empty.post_id).mkdir(parents=True, exist_ok=True)
@@ -188,9 +254,10 @@ class TestCloneModal:
         ctx.close()
 
 
-def _hold_clone(monkeypatch):
+def _hold_clone(monkeypatch, *, fail: str | None = None):
     """서버(같은 프로세스의 uvicorn 스레드)의 ``clone_paths`` 를 사건이 풀릴 때까지
-    붙잡는다 — running 상태를 잡아 진행바·카드 표시를 본다."""
+    붙잡는다 — running 상태를 잡아 진행바·카드 표시를 본다. ``fail`` 이면 풀린 뒤
+    그 사유로 ``OSError`` 를 낸다(작업이 롤백하고 failed 로 남는다, v1.43.0)."""
     import threading
 
     from agent_board import clone as clone_mod
@@ -200,6 +267,8 @@ def _hold_clone(monkeypatch):
 
     def slow(*a, **k):
         gate.wait(8)
+        if fail is not None:
+            raise OSError(fail)
         return real(*a, **k)
 
     monkeypatch.setattr(clone_mod, "clone_paths", slow)

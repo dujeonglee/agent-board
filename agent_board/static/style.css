@@ -225,6 +225,8 @@ header h1 { margin: 0; font-size: 18px; }
   opacity: 0; pointer-events: none; z-index: 100;
   transition: opacity .2s ease, transform .2s ease;
 }
+/* 긴 사유(복제 실패 등, v1.43.0)는 줄바꿈 — 화면 폭을 넘지 않게 */
+#toast { max-width: min(640px, calc(100vw - 32px)); overflow-wrap: anywhere; }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.err { border-color: var(--fail-soft-border); color: var(--fail-soft-fg); }
 

@@ -457,3 +457,142 @@ class TestProgress:
     def test_plan_rejects_traversal(self, tmp_path):
         with pytest.raises(ValueError):
             clone.plan_paths(tmp_path, ["../x"])
+
+
+class TestSymlinksAreKeptAsLinks:
+    """v1.43.0 (B-11 닫힘, 사용자 결정 2026-11-07): 복제는 링크를 링크로 — 대상 문자열
+    그대로 다시 만들고 내용은 따라가지 않는다. 안·밖·깨진 링크 모두 같은 규칙."""
+
+    @staticmethod
+    def _ws(tmp_path):
+        import os
+
+        src, dst, out = tmp_path / "src", tmp_path / "dst", tmp_path / "outside"
+        (src / "proj").mkdir(parents=True)
+        dst.mkdir()
+        (out / "d").mkdir(parents=True)
+        (out / "d" / "secret.txt").write_text("secret")
+        (out / "f.txt").write_text("outside file")
+        (src / "proj" / "main.py").write_text("print(1)")
+        os.symlink(out / "d", src / "proj" / "out_dir")
+        os.symlink(out / "f.txt", src / "proj" / "out_file")
+        os.symlink(src / "nope", src / "proj" / "broken")
+        (src / "shared").mkdir()
+        (src / "shared" / "x").write_text("shared x")
+        os.symlink("../shared/x", src / "proj" / "rel_link")
+        return src, dst, out
+
+    def test_outside_links_are_links_and_their_content_is_not_copied(self, tmp_path):
+        import os
+
+        src, dst, out = self._ws(tmp_path)
+        clone.clone_paths(src, dst, ["proj"], new_session_id="2")
+        for name, target in (("out_dir", out / "d"), ("out_file", out / "f.txt")):
+            p = dst / "proj" / name
+            assert p.is_symlink() and os.readlink(p) == str(target)
+        # 디렉터리 링크 아래 실제 파일이 생기지 않았다 — 링크 자체뿐
+        assert not any(
+            f.is_file() and not f.is_symlink()
+            for f in (dst / "proj").rglob("*")
+            if "secret" in f.name
+        )
+        assert (dst / "proj" / "main.py").read_text() == "print(1)"
+
+    def test_relative_inside_link_resolves_when_its_target_is_cloned_too(
+        self, tmp_path
+    ):
+        import os
+
+        src, dst, _ = self._ws(tmp_path)
+        clone.clone_paths(src, dst, ["proj", "shared"], new_session_id="2")
+        link = dst / "proj" / "rel_link"
+        assert link.is_symlink() and os.readlink(link) == "../shared/x"
+        assert link.read_text() == "shared x"  # 새 방 안에서 풀린다
+
+    def test_relative_link_without_its_target_stays_a_broken_link(self, tmp_path):
+        src, dst, _ = self._ws(tmp_path)
+        clone.clone_paths(src, dst, ["proj"], new_session_id="2")  # 오류 없음
+        link = dst / "proj" / "rel_link"
+        assert link.is_symlink() and not link.exists()
+
+    def test_a_broken_link_does_not_fail_the_clone(self, tmp_path):
+        import os
+
+        src, dst, _ = self._ws(tmp_path)
+        clone.clone_paths(src, dst, ["proj"], new_session_id="2")
+        b = dst / "proj" / "broken"
+        assert b.is_symlink() and os.readlink(b) == str(src / "nope")
+
+    def test_a_directly_selected_link_is_copied_as_a_link(self, tmp_path):
+        """rel 이 링크 자체 — 밖을 가리켜도 "path escapes root" 가 아니라 링크로."""
+        import os
+
+        src, dst, out = self._ws(tmp_path)
+        clone.clone_paths(
+            src, dst, ["proj/out_dir", "proj/out_file"], new_session_id="2"
+        )
+        assert os.readlink(dst / "proj" / "out_dir") == str(out / "d")
+        assert os.readlink(dst / "proj" / "out_file") == str(out / "f.txt")
+        assert not (dst / "proj" / "main.py").exists()
+
+    def test_an_existing_link_at_the_target_is_replaced(self, tmp_path):
+        import os
+
+        src, dst, out = self._ws(tmp_path)
+        (dst / "proj").mkdir()
+        os.symlink("old", dst / "proj" / "out_file")
+        clone.clone_paths(src, dst, ["proj/out_file"], new_session_id="2")
+        assert os.readlink(dst / "proj" / "out_file") == str(out / "f.txt")
+
+    def test_plan_skips_links_and_matches_progress_exactly(self, tmp_path):
+        src, dst, _ = self._ws(tmp_path)
+        paths = ["proj", "shared", "proj/out_file"]
+        files_total, bytes_total = clone.plan_paths(src, paths)
+        assert (files_total, bytes_total) == (2, len("print(1)") + len("shared x"))
+        calls = []
+        clone.clone_paths(
+            src,
+            dst,
+            paths,
+            new_session_id="2",
+            progress=lambda f, b, cur: calls.append((f, b)),
+        )
+        assert calls[-1] == (files_total, bytes_total)
+
+    def test_list_tree_shows_links_without_following(self, tmp_path):
+        import os
+
+        src, _, out = self._ws(tmp_path)
+        by = {e["name"]: e for e in clone.list_tree(src, "proj")}
+        assert by["out_dir"] == {
+            "name": "out_dir",
+            "rel": "proj/out_dir",
+            "type": "link",
+            "size": 0,
+            "target": str(out / "d"),
+        }
+        assert by["rel_link"]["type"] == "link" and by["rel_link"]["target"] == (
+            "../shared/x"
+        )
+        assert by["broken"]["type"] == "link"
+        assert by["main.py"]["type"] == "file"
+        # 상위 레벨의 디렉터리 크기에 링크 너머의 바이트가 없다
+        top = {e["name"]: e for e in clone.list_tree(src)}
+        assert top["proj"]["size"] == len("print(1)")
+        assert os.path.getsize(out / "f.txt") > 0
+
+    def test_path_rewrite_does_not_follow_links_out_of_the_workspace(self, tmp_path):
+        import os
+
+        src, dst, out = tmp_path / "src", tmp_path / "dst", tmp_path / "outside"
+        (src / ".agent-cli").mkdir(parents=True)
+        dst.mkdir()
+        out.mkdir()
+        victim = out / "notes.txt"
+        victim.write_text(f"see {src.resolve()}/a")
+        os.symlink(victim, src / ".agent-cli" / "notes.txt")
+        (src / ".agent-cli" / "own.txt").write_text(f"see {src.resolve()}/a")
+        clone.clone_paths(src, dst, [".agent-cli"], new_session_id="2")
+        assert victim.read_text() == f"see {src.resolve()}/a"  # 밖의 파일 그대로
+        assert (dst / ".agent-cli" / "own.txt").read_text() == f"see {dst.resolve()}/a"
+        assert (dst / ".agent-cli" / "notes.txt").is_symlink()

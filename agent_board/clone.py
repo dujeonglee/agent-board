@@ -58,6 +58,38 @@ def _safe_join(root: Path, rel: str) -> Path:
     return target
 
 
+def _lexical_join(root: Path, rel: str) -> Path:
+    """``root`` 밑의 ``rel`` — :func:`_safe_join` 과 같은 세그먼트 검사(``..``·절대·
+    백슬래시)를 하되 **마지막 이름은 풀지 않는다**(v1.43.0). 직접 고른 항목이 심링크면
+    링크 자체를 가리켜야 하기 때문이다(``_safe_join`` 은 대상으로 풀어, 밖을 가리키는
+    링크를 고르면 "path escapes root" 로 복제가 실패했다). 부모는 풀어서 root 밑인지
+    다시 본다. 링크는 링크로 다시 만들 뿐 따라가지 않으니 마지막 이름이 밖을 가리켜도
+    안전하다."""
+    parts = [p for p in rel.replace("\\", "/").split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts) or rel.startswith("/"):
+        raise ValueError(f"unsafe path: {rel!r}")
+    if not parts:
+        return root.resolve()
+    parent = (root / Path(*parts[:-1])).resolve()
+    root_r = root.resolve()
+    if root_r != parent and root_r not in parent.parents:
+        raise ValueError(f"path escapes root: {rel!r}")
+    return parent / parts[-1]
+
+
+def _copy_link(s: Path, d: Path) -> None:
+    """링크를 대상 문자열 그대로 다시 만든다 — 내용은 복사하지 않는다 (v1.43.0).
+    대상 자리에 링크가 있으면 지우고, 실제 파일·디렉터리가 있으면 ``FileExistsError`` 를
+    그대로 올린다(작업이 ``failed`` 로 남는다)."""
+    if d.is_symlink():
+        d.unlink()
+    os.symlink(os.readlink(s), d)
+    try:
+        shutil.copystat(s, d, follow_symlinks=False)
+    except (NotImplementedError, OSError):
+        pass  # 링크의 mtime 은 중요하지 않다 — 못 하는 플랫폼은 지나간다
+
+
 def list_tree(workspace: Path, rel: str = "") -> list[dict]:
     """``workspace/rel`` 한 레벨 목록 — dirs-first, `{name, rel, type, size}`.
     디렉토리 size 는 재귀 합산. 존재하지 않으면 빈 목록."""
@@ -67,6 +99,23 @@ def list_tree(workspace: Path, rel: str = "") -> list[dict]:
     entries: list[dict] = []
     for child in base.iterdir():
         crel = f"{rel}/{child.name}" if rel else child.name
+        if child.is_symlink():
+            # 링크는 링크로 복사된다(v1.43.0) — 따라가지 않고, 크기도 대상 것을 더하지
+            # 않는다. 트리 피커는 🔗 로 그리고 펼치지 않는다.
+            try:
+                target = os.readlink(child)
+            except OSError:
+                target = ""
+            entries.append(
+                {
+                    "name": child.name,
+                    "rel": crel,
+                    "type": "link",
+                    "size": 0,
+                    "target": target,
+                }
+            )
+            continue
         if child.is_dir():
             entries.append(
                 {
@@ -92,6 +141,10 @@ def _dir_size(d: Path) -> int:
     total = 0
     try:
         for f in d.rglob("*"):
+            # 링크 파일은 더하지 않는다 — 복사되는 바이트와 같게(링크는 링크로 복사된다).
+            # rglob 은 링크 디렉터리 안으로는 들어가지 않는다.
+            if f.is_symlink():
+                continue
             if f.is_file():
                 try:
                     total += f.stat().st_size
@@ -104,9 +157,14 @@ def _dir_size(d: Path) -> int:
 
 def plan_paths(src_ws: Path, paths: list[str]) -> tuple[int, int]:
     """복사될 ``(파일 수, 바이트 합)`` — :func:`clone_paths` 와 **같은 규칙**으로 센다
-    (v1.42.0): 심링크는 따라간다(``copytree(symlinks=False)`` 와 같음), 사이드카 이름
-    (``_SIDECAR_EXCLUDE``)은 어느 깊이에서든 뺀다, 없는 rel 은 건너뛴다. 못 읽는
-    항목은 세지 않는다(복사 쪽이 그때 실패를 낸다). traversal 이면 ValueError."""
+    (v1.42.0): 사이드카 이름(``_SIDECAR_EXCLUDE``)은 어느 깊이에서든 뺀다, 없는 rel 은
+    건너뛴다, 못 읽는 항목은 세지 않는다(복사 쪽이 그때 실패를 낸다). traversal 이면
+    ValueError.
+
+    심링크 (v1.43.0, B-11 닫힘): 링크는 링크로 다시 만들 뿐 내용을 복사하지 않으므로
+    **세지 않는다**(파일 0·바이트 0 — 바와 총계는 "복사되는 바이트" 다). 따라가지도
+    않는다. 진행 콜백도 링크를 보고하지 않아(``copytree(symlinks=True)`` 는 링크에
+    ``copy_function`` 을 부르지 않는다) 계획과 실제가 정확히 같다."""
     src_ws = src_ws.resolve()
     files = total = 0
 
@@ -128,13 +186,17 @@ def plan_paths(src_ws: Path, paths: list[str]) -> tuple[int, int]:
             if e.name in _SIDECAR_EXCLUDE:
                 continue
             p = Path(e.path)
-            if p.is_dir():  # 심링크 dir 도 따라간다 (copytree 와 같음)
+            if p.is_symlink():  # 링크는 세지 않고 따라가지 않는다 (위)
+                continue
+            if p.is_dir():
                 walk(p)
             else:
                 add_file(p)
 
     for rel in paths:
-        s = _safe_join(src_ws, rel)
+        s = _lexical_join(src_ws, rel)
+        if s.is_symlink():  # 직접 고른 링크도 같다
+            continue
         if not s.exists():
             continue
         if s.is_dir():
@@ -221,15 +283,28 @@ def clone_paths(
 
         copy_fn = _copy_with_progress(src_ws, report)
     for rel in paths:
-        s = _safe_join(src_ws, rel)
-        d = _safe_join(dst_ws, rel)
+        s = _lexical_join(src_ws, rel)
+        d = _lexical_join(dst_ws, rel)
+        if s.is_symlink():
+            # 직접 고른 항목이 링크(파일이든 디렉터리든) — `is_dir()` 보다 먼저 본다
+            # (링크 dir 은 is_dir() 이 참). 깨진 링크도 링크로 (v1.43.0, B-11).
+            if s.name in _SIDECAR_EXCLUDE:
+                continue
+            d.parent.mkdir(parents=True, exist_ok=True)
+            _copy_link(s, d)
+            continue
         if not s.exists():
             continue
         d.parent.mkdir(parents=True, exist_ok=True)
         if s.is_dir():
+            # symlinks=True (v1.43.0, B-11 닫힘): 안의 링크는 대상 문자열 그대로 다시
+            # 만들고 따라가지 않는다 — 종전 symlinks=False 는 링크가 가리키는 내용(밖의
+            # /etc·홈 디렉터리까지)을 실제 파일로 새 방에 복사했다. 깨진 링크도 링크로
+            # 만들어질 뿐 오류가 아니다. 링크에는 copy_function 이 불리지 않는다.
             shutil.copytree(
                 s,
                 d,
+                symlinks=True,
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(*_SIDECAR_EXCLUDE),
                 copy_function=copy_fn,
@@ -255,7 +330,8 @@ def _rewrite_workspace_paths(dst_ws: Path, old_ws: str, new_ws: str) -> None:
     if old_ws == new_ws or not agent_dir.is_dir():
         return
     for f in agent_dir.rglob("*"):
-        if not f.is_file():
+        # 링크는 열지 않는다 (v1.43.0) — 링크 너머의 밖 파일을 고쳐 쓰면 안 된다.
+        if f.is_symlink() or not f.is_file():
             continue
         try:
             text = f.read_text(encoding="utf-8")
