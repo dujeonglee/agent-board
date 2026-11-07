@@ -1360,6 +1360,62 @@ class TestCloneJob:
         assert not cfg.workspace_for(new_id).exists()
 
 
+class TestCloneSymlinks:
+    """v1.43.0 (B-11): 엔드포인트 경로로도 링크는 링크로 — 트리는 🔗 항목을 준다."""
+
+    def test_clone_job_keeps_an_outside_link_as_a_link(self, tmp_path):
+        import os
+
+        cfg, store, c = _client(tmp_path)
+        src = TestClonePost()._seed_source(cfg, store)
+        ws = cfg.workspace_for(src.post_id)
+        out = tmp_path / "outside"
+        out.mkdir()
+        (out / "big.txt").write_text("not mine")
+        (ws / "proj").mkdir()
+        (ws / "proj" / "a.py").write_text("a")
+        os.symlink(out, ws / "proj" / "ext")
+        r = c.post(
+            "/api/posts",
+            json={
+                "knobs": {"model": "m"},
+                "topic": "links",
+                "clone_from": src.post_id,
+                "clone_paths": ["proj"],
+            },
+        )
+        new_id = r.json()["post_id"]
+        snap = _wait_clone(c, new_id)
+        assert snap["state"] == "done"
+        assert snap["files_done"] == snap["files_total"] == 1  # 링크는 세지 않는다
+        link = cfg.workspace_for(new_id) / "proj" / "ext"
+        assert link.is_symlink() and os.readlink(link) == str(out)
+
+    def test_tree_endpoint_returns_link_entries(self, tmp_path):
+        import os
+
+        cfg, store, c = _client(tmp_path)
+        src = TestClonePost()._seed_source(cfg, store)
+        ws = cfg.workspace_for(src.post_id)
+        os.symlink("/etc", ws / "etc_link")
+        tree = c.get(f"/api/posts/{src.post_id}/tree").json()
+        link = next(e for e in tree if e["name"] == "etc_link")
+        assert link == {
+            "name": "etc_link",
+            "rel": "etc_link",
+            "type": "link",
+            "size": 0,
+            "target": "/etc",
+        }
+        # 밖을 가리키는 링크를 펼치는 일은 종전처럼 400
+        assert (
+            c.get(
+                f"/api/posts/{src.post_id}/tree", params={"path": "etc_link"}
+            ).status_code
+            == 400
+        )
+
+
 class TestCloneUsesSourceSessionId:
     def test_clone_remaps_the_source_posts_session_not_the_first_dir(self, tmp_path):
         """v1.33.1: 원본 워크스페이스에 세션 dir 이 둘(터미널에서 따로 돌린 것 등)

@@ -849,6 +849,12 @@
       }
       if (c && c.state !== "running") {
         cloneWatch.delete(id);
+        if (clonePost !== id && c.state === "failed") {
+          // 모달을 닫은 뒤(또는 페이지를 새로 열어 카드만 보던 중) 실패 — 카드는
+          // 롤백으로 사라지니 사유를 토스트로 (v1.43.0). 모달이 그 글을 보여 주는
+          // 중이면 아래처럼 모달에만(두 번 보이지 않게).
+          toast("Clone failed: " + (c.error || "clone failed"), true);
+        }
         if (clonePost === id) {
           if (c.state === "done") {
             closeCloneDialog();
@@ -964,6 +970,15 @@
     });
     const label = document.createElement("span");
     label.className = "clone-name";
+    if (n.type === "link") {
+      // 🔗 링크는 링크로 복사된다(v1.43.0, 내용은 따라가지 않는다) — 고를 수는 있고
+      // 펼칠 수는 없다(밖을 가리키는 rel 은 트리 엔드포인트가 400).
+      label.textContent = "🔗 " + n.name;
+      label.title = "symlink → " + n.target;
+      row.appendChild(cb);
+      row.appendChild(label);
+      return row;
+    }
     label.textContent =
       (n.type === "dir" ? "📁 " : "📄 ") + n.name + " (" + fmtSize(n.size) + ")";
     row.appendChild(cb);
