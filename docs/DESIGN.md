@@ -102,9 +102,10 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
 | GET | `/api/posts` | 글 목록 — 각 글에 `last_query`·`status`·`force_active`·`viewers`·`knobs`·`model`·`model_bound` 유도 포함 (§16 거울) |
 | GET | `/api/knobs/spec` | agent-cli 의 노브 표(`agent-cli knobs --json`, 프로세스당 1회 캐시) — `{full, knobs}`; 구버전 agent-cli 면 모델만 든 최소 표(`full: false`) (§17) |
 | GET | `/api/posts/{id}/tree` | 원본 글 워크스페이스 한 레벨 목록 (clone 트리 피커 — 보드가 fs 직접 읽음, 인스턴스 미기동도 동작) |
-| POST | `/api/posts` | 새 글 `{topic, knobs{model, …}, clone_from?, clone_paths?}` → 생성 (workspace 자동). `knobs` 는 표(§17)로 검증(400 `bad_knob`), `model` 필수(400 `model_required`/`dialect_unbound`). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) |
+| POST | `/api/posts` | 새 글 `{topic, knobs{model, …}, clone_from?, clone_paths?}` → 생성 (workspace 자동). `knobs` 는 표(§17)로 검증(400 `bad_knob`), `model` 필수(400 `model_required`/`dialect_unbound`). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) **v1.42.0**: clone 은 행 삽입·mkdir·**작업 시작**까지만 하고 바로 돌려준다 — 응답·목록 행의 `cloning`(진행 중일 때 스냅샷, 아니면 `null`), 복사 실패(traversal 등)는 400 대신 작업이 `failed` 로 남긴다(§4). |
+| GET | `/api/posts/{id}/clone` | 복제 작업 스냅샷 (v1.42.0) `{state: running·done·failed, bytes_done, bytes_total, files_done, files_total, current, error}` — 작업이 없으면(복제가 아닌 글·끝난 지 10분·보드 재시작) 404. 모달 250 ms·카드 1 s 폴링 |
 | DELETE | `/api/posts/{id}` | 글 삭제 + 그 글의 워크스페이스 디렉토리 삭제(보드 소유) |
-| POST | `/api/posts/{id}/open` | spawn-or-attach → 라우트 등록 → `{url}` 반환(프론트 리다이렉트) |
+| POST | `/api/posts/{id}/open` | spawn-or-attach → 라우트 등록 → `{url}` 반환(프론트 리다이렉트). 복제 중이면 409 `{reason: "cloning"}`(재시작도 같음, v1.42.0) |
 | POST | `/api/posts/{id}/restart` | 강제 재시작 = stop + respawn → `{url}` 반환. **게이트 없음**(busy/viewer 무시 — 새로 설치한 agent-cli 반영 목적). **토큰 재사용**(열려 있던 뷰어 자동 재연결) + `--resume` 로 같은 세션 유지 |
 | POST | `/api/posts/{id}/force_active` | `{enabled}` 토글 |
 
@@ -122,6 +123,19 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
    치환 — history.jsonl·중첩 agents/*/history.jsonl 등에 박힌 이전 경로가 이어받은
    대화를 혼란시키는 것 방지(워크스페이스 밖 절대경로는 무영향). 프런트는 각 글 카드 `📋 복제` 버튼이
    그 글을 원본으로 모달을 열어 주제·모델·트리 선택.
+   **백그라운드 작업 (v1.42.0)**: POST 는 행·mkdir·작업 시작까지만 하고 바로 돌려준다.
+   작업은 전용 데몬 스레드에서 `clone.plan_paths`(복사와 같은 규칙 — 심링크 따라감·사이드카
+   제외 — 로 파일 수·바이트 합)를 센 뒤 `clone_paths(progress=)` 를 돌린다. 진행은
+   `CloneJobs`(`app.state.clone_jobs`, `post_id → CloneJob` 사전 하나·락) 메모리 상태이고
+   `GET /api/posts/{id}/clone` 이 읽는다(SSE 에는 싣지 않는다 — 라이브 스캔은 상태 파일 mtime
+   기반이라 못 본다). 큰 파일은 4 MiB 조각으로 복사하며 바이트를 올린다(`copy2` 의미 —
+   `copystat` 유지). 실패(ValueError·OSError, 그 밖의 예외도)는 작업 안에서 ws rmtree + 행 삭제로
+   롤백하고 `failed` + `error` 로 남긴다. 복제 도중 지워진 글은 작업이 끝날 때 다시 확인해
+   (`mkdir(parents=True)` 가 지운 워크스페이스를 되살렸을 수 있다) 롤백한다. 끝난 작업은 10분
+   보관 뒤 버린다. 복제 중 `open`·`restart` 는 409 `cloning`. **프로세스 메모리뿐** — 보드가
+   재시작하면 작업은 사라지고 반쪽 방이 남는다(복구 로직 없음). 모달은 진행바, ✕·Close·Esc 는
+   모달만 닫고(바깥 클릭으로는 안 닫힘), 카드가 `Cloning… N%` 로 이어 보여 준다. 복제 취소(서버
+   작업 중단)는 하지 않는다.
 - **사용자 경로 입력 없음** → 임의 경로/traversal 위험 0, 공유 충돌 0(post_id 파생).
 - **DIRECTIVE.md 는 보드가 기록하지 않음** — 세션별 지시는 agent-cli 세션 내 Directives
   드로어 또는 전역 `~/.agent-cli/DIRECTIVE.md` 로 관리(중복·열등한 폼 입력 제거, v1.6.0).

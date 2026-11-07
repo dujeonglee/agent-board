@@ -88,6 +88,24 @@ class FakeKeepalive:
         self.disabled.append(post_id)
 
 
+def _wait_clone(c, post_id, timeout=5.0):
+    """복제는 백그라운드 작업이다 (v1.42.0) — 끝날 때까지 ``GET …/clone`` 을 폴링해
+    마지막 스냅샷을 돌려준다(작업이 이미 버려졌으면 None)."""
+    import time as _t
+
+    end = _t.time() + timeout
+    while True:
+        r = c.get(f"/api/posts/{post_id}/clone")
+        if r.status_code == 404:
+            return None
+        snap = r.json()
+        if snap["state"] != "running":
+            return snap
+        if _t.time() > end:
+            raise AssertionError(f"clone still running: {snap}")
+        _t.sleep(0.02)
+
+
 def _client(tmp_path, *, orch=None, keepalive=None):
     cfg = Config(
         data_dir=tmp_path / "data",
@@ -730,6 +748,7 @@ class TestClonePost:
         )
         assert r.status_code == 200
         new_id = r.json()["post_id"]
+        assert _wait_clone(c, new_id)["state"] == "done"
         new_ws = cfg.workspace_for(new_id)
         assert (new_ws / "main.py").read_text() == "print('hi')"
         # 세션 안 가져옴 → session_id 없음(fresh)
@@ -754,6 +773,7 @@ class TestClonePost:
         )
         assert r.status_code == 200
         new_id = r.json()["post_id"]
+        assert _wait_clone(c, new_id)["state"] == "done"
         # 세션 remap → set_session_id 로 --resume 배선
         assert store.get(new_id).session_id == "2222222222"
         newdir = cfg.workspace_for(new_id) / ".agent-cli" / "sessions" / "2222222222"
@@ -786,6 +806,7 @@ class TestClonePost:
         )
         assert r.status_code == 200  # 크래시 아님
         new_id = r.json()["post_id"]
+        assert _wait_clone(c, new_id)["state"] == "done"
         assert store.get(new_id).session_id is None  # fresh 강등
         # 파일(.agent-cli)은 복사됨
         assert (cfg.workspace_for(new_id) / ".agent-cli").is_dir()
@@ -825,9 +846,15 @@ class TestClonePost:
                 "clone_paths": ["../../secret"],
             },
         )
-        assert r.status_code == 400
+        # v1.42.0: 복제는 백그라운드 작업 — POST 는 받아 두고, 작업이 traversal 을
+        # 실패로 남기며 방·워크스페이스를 롤백한다(종전엔 POST 가 400).
+        assert r.status_code == 200
+        new_id = r.json()["post_id"]
+        snap = _wait_clone(c, new_id)
+        assert snap["state"] == "failed" and "unsafe path" in snap["error"]
         # 방 롤백 (orphan 없음)
         assert len(store.list_posts()) == before
+        assert not cfg.workspace_for(new_id).exists()
 
     def test_plain_create_still_works(self, tmp_path):
         _, store, c = _client(tmp_path)
@@ -1229,6 +1256,110 @@ class TestGrammarBadge:
         assert "grammar-chip" in js and "p.grammar" in js
 
 
+class TestCloneJob:
+    """v1.42.0: 복제는 백그라운드 작업 — POST 는 바로 `cloning` 을 싣고 돌아오고,
+    진행은 ``GET /api/posts/{id}/clone`` 이 읽는다."""
+
+    @staticmethod
+    def _slow_clone(monkeypatch):
+        """``clone_paths`` 를 사건(Event)이 풀릴 때까지 붙잡는다 — running 을 잡는다."""
+        import threading
+
+        from agent_board import clone as clone_mod
+
+        gate = threading.Event()
+        real = clone_mod.clone_paths
+
+        def slow(*a, **k):
+            gate.wait(5)
+            return real(*a, **k)
+
+        monkeypatch.setattr(clone_mod, "clone_paths", slow)
+        return gate
+
+    def _clone(self, c, src_id):
+        return c.post(
+            "/api/posts",
+            json={
+                "knobs": {"model": "m"},
+                "topic": "cloned",
+                "clone_from": src_id,
+                "clone_paths": ["main.py"],
+            },
+        )
+
+    def test_post_returns_at_once_with_cloning(self, tmp_path, monkeypatch):
+        cfg, store, c = _client(tmp_path)
+        src = TestClonePost()._seed_source(cfg, store)
+        gate = self._slow_clone(monkeypatch)
+        r = self._clone(c, src.post_id)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["cloning"]["state"] == "running"
+        new_id = body["post_id"]
+        snap = c.get(f"/api/posts/{new_id}/clone").json()
+        assert snap["state"] == "running" and snap["error"] is None
+        # 목록 행에도 같은 표시 — 페이지를 새로 열어도 카드가 Cloning… 을 그린다
+        row = next(p for p in c.get("/api/posts").json() if p["post_id"] == new_id)
+        assert row["cloning"]["state"] == "running"
+        gate.set()
+        done = _wait_clone(c, new_id)
+        assert done["state"] == "done"
+        assert done["files_done"] == done["files_total"] == 1
+        assert done["bytes_done"] == done["bytes_total"] == len("print('hi')")
+        assert (cfg.workspace_for(new_id) / "main.py").read_text() == "print('hi')"
+        row = next(p for p in c.get("/api/posts").json() if p["post_id"] == new_id)
+        assert row["cloning"] is None
+
+    def test_open_and_restart_are_409_while_cloning(self, tmp_path, monkeypatch):
+        cfg, store, c = _client(tmp_path)
+        src = TestClonePost()._seed_source(cfg, store)
+        gate = self._slow_clone(monkeypatch)
+        new_id = self._clone(c, src.post_id).json()["post_id"]
+        for action in ("open", "restart"):
+            r = c.post(f"/api/posts/{new_id}/{action}")
+            assert r.status_code == 409 and r.json()["detail"] == {"reason": "cloning"}
+        gate.set()
+        _wait_clone(c, new_id)
+        assert c.post(f"/api/posts/{new_id}/open").status_code == 200
+
+    def test_finished_job_is_kept_ten_minutes_then_dropped(self, tmp_path):
+        from agent_board.clone_jobs import KEEP_S
+
+        cfg, store, c = _client(tmp_path)
+        src = TestClonePost()._seed_source(cfg, store)
+        jobs = c.app.state.clone_jobs
+        now = [1000.0]
+        jobs.clock = lambda: now[0]
+        new_id = self._clone(c, src.post_id).json()["post_id"]
+        assert _wait_clone(c, new_id)["state"] == "done"
+        now[0] += KEEP_S - 1
+        assert c.get(f"/api/posts/{new_id}/clone").status_code == 200
+        now[0] += 2
+        assert c.get(f"/api/posts/{new_id}/clone").status_code == 404
+        assert KEEP_S == 600
+
+    def test_no_job_is_404_and_plain_create_has_no_cloning(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        r = c.post("/api/posts", json={"knobs": {"model": "m"}, "topic": "plain"})
+        assert r.status_code == 200 and r.json()["cloning"] is None
+        assert c.get(f"/api/posts/{r.json()['post_id']}/clone").status_code == 404
+
+    def test_delete_while_cloning_leaves_no_orphan(self, tmp_path, monkeypatch):
+        """복제 중 DELETE — 작업이 실패로 끝나고 지워진 행 삭제는 무해, 워크스페이스는
+        다시 생기지 않는다."""
+        cfg, store, c = _client(tmp_path)
+        src = TestClonePost()._seed_source(cfg, store)
+        gate = self._slow_clone(monkeypatch)
+        new_id = self._clone(c, src.post_id).json()["post_id"]
+        assert c.delete(f"/api/posts/{new_id}").status_code == 200
+        gate.set()
+        snap = _wait_clone(c, new_id)
+        assert snap["state"] == "failed"
+        assert store.get(new_id) is None
+        assert not cfg.workspace_for(new_id).exists()
+
+
 class TestCloneUsesSourceSessionId:
     def test_clone_remaps_the_source_posts_session_not_the_first_dir(self, tmp_path):
         """v1.33.1: 원본 워크스페이스에 세션 dir 이 둘(터미널에서 따로 돌린 것 등)
@@ -1261,6 +1392,8 @@ class TestCloneUsesSourceSessionId:
         )
         assert r.status_code == 200
         new_id = r.json()["post_id"]
+        assert _wait_clone(c, new_id)["state"] == "done"
+        assert _wait_clone(c, new_id)["state"] == "done"
         new_sid = store.get(new_id).session_id
         assert new_sid is not None
         hist = (

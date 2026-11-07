@@ -47,8 +47,9 @@
   <main id="posts"></main>
 
   <!-- 대화방 복제 모달 — 각 글 카드의 '복제' 버튼이 그 글을 원본으로 열기.
-       한 창에서 주제·모델·복사 항목을 전부 설정. 닫기(backdrop/Esc)나
-       취소 = 중단. -->
+       한 창에서 주제·모델·복사 항목을 전부 설정. 닫기(✕/Esc)나 취소 = 중단 —
+       바깥 클릭으로는 닫히지 않는다(v1.42.0). 복제 중에는 진행바가 보이고
+       닫기(Close)는 모달만 닫는다(작업은 서버에서 계속, 카드가 진행을 보여 준다). -->
   <dialog id="clone-dlg">
     <div class="clone-dlg-head">
       <div class="clone-dlg-title">📋 Clone room</div>
@@ -63,6 +64,7 @@
     <div id="clone-knobs" class="knob-form" hidden></div>
     <div id="clone-hint" class="clone-hint">Check the files and folders to copy. Include <code>.agent-cli</code> to carry the conversation over.</div>
     <div id="clone-tree" class="clone-tree"></div>
+    <progress id="clone-bar" class="clone-bar" max="100" value="0" hidden></progress>
     <div id="clone-msg" class="clone-msg"></div>
     <div class="clone-dlg-foot">
       <button id="clone-cancel" type="button" class="btn-ghost">Cancel</button>

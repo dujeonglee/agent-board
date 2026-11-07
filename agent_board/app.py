@@ -12,6 +12,7 @@ import json
 import logging
 import shutil
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,6 +32,7 @@ from agent_board import (
     sessions,
 )
 from agent_board import clone as clone_mod
+from agent_board.clone_jobs import CloneJobs
 from agent_board.config import Config
 from agent_board.keepalive import (
     KeepAliveManager,
@@ -244,7 +246,9 @@ def model_problem(config: Config, model_id: str | None) -> dict | None:
     return None
 
 
-def _post_view(config: Config, store: Store, post) -> dict:
+def _post_view(
+    config: Config, store: Store, post, clones: CloneJobs | None = None
+) -> dict:
     """A post + its derived (live) fields for the list.
 
     v1.36.0 거울: 떠 있는 방이 보고한 노브 값(``status.json.knobs``)이 저장값과
@@ -286,6 +290,9 @@ def _post_view(config: Config, store: Store, post) -> dict:
         # 연 agent-cli 프로세스의 것이고(v1.34.0) 보드는 세션 폴더의 파일을
         # 읽기만 한다. 목록·추가·답하기는 방 화면의 ⏰ 서랍에서 한다.
         "schedules": session_schedules.summary(ws, post.session_id),
+        # 📋 복제 진행 (v1.42.0; 진행 중일 때만, 아니면 None) — 카드가 "Cloning… N%"
+        # 와 작은 바를 그리고 Open·🔄·📋 를 숨긴다(open·restart 는 409 cloning).
+        "cloning": clones.view(post.post_id) if clones is not None else None,
     }
 
 
@@ -416,10 +423,12 @@ def create_app(
         if loop is not None:
             loop.call_soon_threadsafe(reviver.revive, post_id)
 
+    # 📋 복제 작업 상태 (v1.42.0) — 프로세스 메모리, 라이브 스캔 행도 이것을 본다.
+    clones = CloneJobs()
     live = LiveEvents(
         config,
         store,
-        lambda p: _post_view(config, store, p),
+        lambda p: _post_view(config, store, p, clones),
         on_death=_on_death,
     )
 
@@ -454,6 +463,7 @@ def create_app(
     # 양쪽 반쪽 유닛만으로는 안 잡힌다.
     app.state.live_events = live
     app.state.schedule_reviver = reviver
+    app.state.clone_jobs = clones  # 테스트가 만료 시계를 당긴다
     router.mount(app)  # /s/<post_id>/* reverse proxy
 
     # no-cache — plain StaticFiles 는 Cache-Control 미설정이라 브라우저가
@@ -566,7 +576,7 @@ def create_app(
     async def list_posts():
         loop = asyncio.get_event_loop()
         posts = await loop.run_in_executor(None, store.list_posts)
-        return [_post_view(config, store, p) for p in posts]
+        return [_post_view(config, store, p, clones) for p in posts]
 
     @app.get("/api/gateway")
     async def gateway_info():
@@ -661,36 +671,81 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"workspace: {e}") from e
 
         if body.clone_from and body.clone_paths:
-            src_ws = config.workspace_for(body.clone_from)
-            # 새 session_id = post 생성 시각 기반(agent-cli 규칙과 동형:
-            # str(int(time))). clone 은 첫 open 전에 배정돼 --resume 된다.
-            new_sid = _new_session_id()
-            loop = asyncio.get_event_loop()
-            try:
-                sid = await loop.run_in_executor(
-                    None,
-                    lambda: clone_mod.clone_paths(
-                        src_ws,
-                        ws,
-                        body.clone_paths,
-                        new_session_id=new_sid,
-                        src_session_id=store.get(body.clone_from).session_id,
-                    ),
-                )
-            except ValueError as e:
-                # traversal 등 — 방·워크스페이스 롤백
-                shutil.rmtree(ws, ignore_errors=True)
-                store.delete(post.post_id)
-                raise HTTPException(status_code=400, detail=str(e)) from e
-            if sid is not None:
-                # 세션까지 복제 → 첫 open 이 --resume <sid> 로 대화 이어받음.
-                try:
-                    store.set_session_id(post.post_id, sid)
-                    post = store.get(post.post_id)
-                except Exception:
-                    pass  # sid 충돌 등 — fresh 로 강등(파일은 이미 복사됨)
+            # 복제는 백그라운드 작업 (v1.42.0) — 행·mkdir·작업 시작까지만 하고 바로
+            # 돌려준다. 진행은 `GET /api/posts/{id}/clone` (모달·카드가 폴링).
+            clones.start(post.post_id)
+            # 전용 데몬 스레드 — 이벤트 루프의 기본 실행기에 맡기면 루프가 닫힐 때
+            # (요청마다 루프를 여는 테스트 클라이언트) 작업이 끝날 때까지 응답이 묶인다.
+            threading.Thread(
+                target=_run_clone,
+                args=(
+                    post.post_id,
+                    config.workspace_for(body.clone_from),
+                    ws,
+                    list(body.clone_paths),
+                    store.get(body.clone_from).session_id,
+                ),
+                name=f"clone-{post.post_id}",
+                daemon=True,
+            ).start()
 
-        return _post_view(config, store, post)
+        return _post_view(config, store, post, clones)
+
+    def _run_clone(post_id, src_ws, ws, paths, src_sid) -> None:
+        """복제 작업 본체 (실행기 스레드). 실패(traversal ValueError·OSError)는 작업
+        안에서 롤백(ws rmtree + 행 삭제)하고 ``failed`` + 사유로 남긴다 — 종전엔
+        POST 가 400 으로 돌려주던 것."""
+        # 새 session_id = post 생성 시각 기반(agent-cli 규칙과 동형:
+        # str(int(time))). clone 은 첫 open 전에 배정돼 --resume 된다.
+        new_sid = _new_session_id()
+
+        def rollback() -> None:
+            wsr = ws.resolve()
+            if config.workspaces_root in wsr.parents and wsr.is_dir():
+                shutil.rmtree(wsr, ignore_errors=True)
+            if store.get(post_id) is not None:
+                store.delete(post_id)
+
+        try:
+            files_total, bytes_total = clone_mod.plan_paths(src_ws, paths)
+            clones.plan(post_id, files_total, bytes_total)
+            sid = clone_mod.clone_paths(
+                src_ws,
+                ws,
+                paths,
+                new_session_id=new_sid,
+                src_session_id=src_sid,
+                progress=lambda f, b, cur: clones.progress(post_id, f, b, cur),
+            )
+        except (
+            Exception
+        ) as e:  # ValueError(traversal)·OSError — 그 밖도 멈춘 채 두지 않는다
+            rollback()
+            clones.finish(post_id, error=str(e) or type(e).__name__)
+            return
+        if store.get(post_id) is None:
+            # 복제 도중 지워진 글 — `mkdir(parents=True)` 가 지운 워크스페이스를 다시
+            # 만들었을 수 있다. 고아 디렉토리를 남기지 않는다.
+            rollback()
+            clones.finish(post_id, error="the post was deleted while cloning")
+            return
+        if sid is not None:
+            # 세션까지 복제 → 첫 open 이 --resume <sid> 로 대화 이어받음.
+            try:
+                store.set_session_id(post_id, sid)
+            except Exception:
+                pass  # sid 충돌 등 — fresh 로 강등(파일은 이미 복사됨)
+        clones.finish(post_id)
+
+    @app.get("/api/posts/{post_id}/clone")
+    async def clone_status(post_id: str):
+        """복제 작업 스냅샷 (v1.42.0) — ``{state, bytes_done, bytes_total, files_done,
+        files_total, current, error}``. 작업이 없거나(복제가 아닌 글·보관 10분이 지남·
+        보드 재시작) 404."""
+        snap = clones.get(post_id)
+        if snap is None:
+            raise HTTPException(status_code=404, detail="no clone job")
+        return snap
 
     @app.delete("/api/posts/{post_id}")
     async def delete_post(post_id: str):
@@ -723,6 +778,9 @@ def create_app(
         post = store.get(post_id)
         if post is None:
             raise HTTPException(status_code=404, detail="no such post")
+        if clones.running(post_id):
+            # 복사가 끝나기 전에 띄우면 반쪽 워크스페이스·세션을 연다 (v1.42.0)
+            raise HTTPException(status_code=409, detail={"reason": "cloning"})
         problem = model_problem(config, post.model)
         if problem is not None:
             raise HTTPException(status_code=409, detail=problem)
