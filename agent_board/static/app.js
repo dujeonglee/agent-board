@@ -362,6 +362,18 @@
     return `<span class="agents-chip" title="${esc(detail)}">🤖 ${a.working}/${a.alive}</span>`;
   }
 
+  // 📋 열린 항목 칩 (v1.44.0, agent-cli ≥ 10.119.0 `open_items`) — 모델이 아직
+  // 갚아야 할 항목(u- 요청 · n- 메일 · r- 회신 빚 · q- 질문)의 수. 보드는 수만
+  // 보이고 title 에 id 를 열린 순서로 잇는다. 상세는 방의 📋 띠. 되묻기 예산이
+  // 바닥나면(budget_left 0) 경고색. 필드가 없거나 0 이면 그리지 않는다.
+  function openItemsChip(p) {
+    const oi = p.open_items;
+    if (!oi || !oi.count) return "";
+    const warn = oi.budget_left === 0 ? " oi-warn" : "";
+    const ids = (oi.ids || []).join(" · ");
+    return ` <span class="badge oi${warn}" title="${esc(ids)}">📋 ${oi.count}</span>`;
+  }
+
   function card(p) {
     const el = document.createElement("div");
     el.dataset.id = p.post_id; // for in-place live updates over SSE
@@ -398,6 +410,7 @@
         ? `<span class="st cloning"><span class="clone-label">${esc(cloneLabel(cl))}</span>` +
           ` <progress class="clone-card-bar" max="100" value="${clonePct(cl)}"></progress>`
         : `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}`) +
+      openItemsChip(p) +
       (up ? ` <span class="viewers" title="viewers">👁 ${p.viewers}</span>` : "") +
       (up ? agentsChip(p) : "") +
       // 📐 문법 제약이 실리는 세션 — 인스턴스의 칩과 같은 값(status.json)

@@ -139,6 +139,14 @@ header h1 { margin: 0; font-size: 18px; }
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 .post-side .knobs { padding: 6px 9px; }
+/* 📋 열린 항목 칩 (v1.44.0) — 모델 칩과 같은 높이·글자 크기. 예산 0 이면 경고색. */
+.badge.oi {
+  font-size: 11px; color: var(--text-2); background: var(--surface-2);
+  border: 1px solid var(--border-2); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 400;
+}
+.badge.oi-warn { color: var(--warn); border-color: var(--warn); }
 /* 읽기 전용 노브 패널 — 카드 아래 폭 전체 */
 .knob-panel:not([hidden]) { flex-basis: 100%; border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 8px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; font-size: 12px; }

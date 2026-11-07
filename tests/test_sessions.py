@@ -239,6 +239,42 @@ class TestStatus:
         self._status_json(ws, knobs="bogus")
         assert "knobs" not in sessions.live_state(ws, "S1")
 
+    def test_live_state_passes_open_items_through_from_status_file(
+        self, tmp_path, monkeypatch
+    ):
+        """v1.44.0: agent-cli ≥10.119.0 의 ``open_items`` (열린 항목 장부 요약) —
+        카드 📋 칩의 소스. 모양이 맞으면 그대로(나머지 키 포함), 없으면 키 없음,
+        깨진 값(dict 아님·count 비정수·ids 비문자열 목록)은 생략."""
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        oi = {
+            "count": 3,
+            "ids": ["u-2", "n-1", "r-1"],
+            "oldest_turns": 7,
+            "budget_left": 6,
+        }
+        self._status_json(ws, open_items=oi)
+        assert sessions.live_state(ws, "S1")["open_items"] == oi
+        # oldest_turns 는 모르면 null — 그대로 통과
+        oi_null = {"count": 0, "ids": [], "oldest_turns": None, "budget_left": 8}
+        self._status_json(ws, open_items=oi_null)
+        assert sessions.live_state(ws, "S1")["open_items"] == oi_null
+        # 구버전(키 없음)
+        self._status_json(ws)
+        assert "open_items" not in sessions.live_state(ws, "S1")
+        # 깨진 값
+        for bad in (
+            "bogus",
+            [1, 2],
+            {"ids": ["u-1"]},
+            {"count": "3", "ids": ["u-1"]},
+            {"count": True, "ids": ["u-1"]},
+            {"count": 1, "ids": "u-1"},
+            {"count": 1, "ids": [1]},
+        ):
+            self._status_json(ws, open_items=bad)
+            assert "open_items" not in sessions.live_state(ws, "S1"), bad
+
     def test_live_state_prefers_status_file_over_health(self, tmp_path, monkeypatch):
         # status.json present (agent-cli >= 4.27.0) → read the file, NEVER HTTP
         ws = self._web_json(tmp_path)
