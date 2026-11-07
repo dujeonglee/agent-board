@@ -8,6 +8,7 @@ agent-cli instances.
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -570,6 +571,10 @@ class TestUiWired:
         css = c.get("/static/style.css").text
         assert "dot.busy" in css
         assert "@media" in css  # responsive (mobile) layout
+        # v1.43.1: 게시글 컨테이너에 폭 상한이 없다 — 상한(880px)이 있으면 .post-side 가
+        # 자기 폭을 다 가져가 넓은 창에서도 제목·시각 열이 눌린다.
+        posts_rule = re.search(r"#posts \{[^}]*\}", css).group(0)
+        assert "max-width" not in posts_rule
         assert 'name="viewport"' in html
         # per-post model selection at creation + knob form from the spec (v1.36.0)
         assert (

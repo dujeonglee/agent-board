@@ -149,7 +149,9 @@ header h1 { margin: 0; font-size: 18px; }
 .kp-unit { color: var(--muted); font-size: 11px; }
 .viewers { font-size: 11px; color: var(--text-2); }
 
-#posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; max-width: 880px; }
+/* 폭 상한 없음 (v1.43.1): 카드의 오른쪽 묶음(.post-side)이 자기 폭을 다 가져가므로
+   컨테이너를 880px 로 묶으면 넓은 창에서도 제목·시각 열이 79px 로 눌렸다. */
+#posts { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
 .empty { color: var(--muted); padding: 24px 0; }
 
 .post {
