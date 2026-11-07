@@ -20,8 +20,17 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+
+#: 진행 콜백 ``progress(files_done, bytes_done, current_rel)`` (v1.42.0) — 복제 작업이
+#: 메모리 상태를 갱신하고 모달·카드가 250 ms 폴링으로 읽는다.
+Progress = Callable[[int, int, "str | None"], None]
+
+#: 이보다 큰 파일은 조각으로 복사하며 바를 움직인다 — 한 파일이 커도 멈춰 보이지 않게.
+CHUNK = 4 * 1024 * 1024
 
 # 복사에서 항상 제외 — 인스턴스 라이브 상태 사이드카. stale pid/port/token
 # 이 새 방을 죽은 인스턴스로 오판하게 만든다(live_state/pid_alive).
@@ -93,6 +102,77 @@ def _dir_size(d: Path) -> int:
     return total
 
 
+def plan_paths(src_ws: Path, paths: list[str]) -> tuple[int, int]:
+    """복사될 ``(파일 수, 바이트 합)`` — :func:`clone_paths` 와 **같은 규칙**으로 센다
+    (v1.42.0): 심링크는 따라간다(``copytree(symlinks=False)`` 와 같음), 사이드카 이름
+    (``_SIDECAR_EXCLUDE``)은 어느 깊이에서든 뺀다, 없는 rel 은 건너뛴다. 못 읽는
+    항목은 세지 않는다(복사 쪽이 그때 실패를 낸다). traversal 이면 ValueError."""
+    src_ws = src_ws.resolve()
+    files = total = 0
+
+    def add_file(p: Path) -> None:
+        nonlocal files, total
+        try:
+            size = p.stat().st_size
+        except OSError:
+            return
+        files += 1
+        total += size
+
+    def walk(d: Path) -> None:
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            return
+        for e in entries:
+            if e.name in _SIDECAR_EXCLUDE:
+                continue
+            p = Path(e.path)
+            if p.is_dir():  # 심링크 dir 도 따라간다 (copytree 와 같음)
+                walk(p)
+            else:
+                add_file(p)
+
+    for rel in paths:
+        s = _safe_join(src_ws, rel)
+        if not s.exists():
+            continue
+        if s.is_dir():
+            walk(s)
+        elif s.name not in _SIDECAR_EXCLUDE:
+            add_file(s)
+    return files, total
+
+
+def _copy_with_progress(src_ws: Path, report: Callable[[int, str], None]):
+    """``copy2`` 와 같은 의미(내용 + ``copystat``)의 복사 함수 — 큰 파일은 ``CHUNK``
+    조각으로 복사하며 ``report(bytes, rel)`` 로 진행을 알리고, 파일을 다 쓰면
+    ``report(0, None)`` 으로 파일 하나 끝을 알린다."""
+
+    def copy(src, dst):
+        src = os.fspath(src)
+        try:
+            rel = Path(src).relative_to(src_ws).as_posix()
+        except ValueError:
+            rel = os.path.basename(src)
+        if os.path.getsize(src) <= CHUNK:
+            shutil.copy2(src, dst)
+            report(os.path.getsize(dst), rel)
+        else:
+            with open(src, "rb") as fi, open(dst, "wb") as fo:
+                while True:
+                    buf = fi.read(CHUNK)
+                    if not buf:
+                        break
+                    fo.write(buf)
+                    report(len(buf), rel)
+            shutil.copystat(src, dst)
+        report(0, None)
+        return dst
+
+    return copy
+
+
 def clone_paths(
     src_ws: Path,
     dst_ws: Path,
@@ -100,6 +180,7 @@ def clone_paths(
     *,
     new_session_id: str,
     src_session_id: str | None = None,
+    progress: Progress | None = None,
 ) -> str | None:
     """선택 ``paths`` 를 ``src_ws`` → ``dst_ws`` 로 복사.
 
@@ -120,9 +201,25 @@ def clone_paths(
     agents/*/history.jsonl·_meta 등에 박힌 이전 workspace 경로가 이어받은
     대화에 새어들어 모델을 혼란시키는 것을 방지(경로 프리픽스 단위라
     워크스페이스 밖 절대경로는 안 건드림).
+
+    ``progress`` (v1.42.0): 파일을 쓸 때마다(큰 파일은 조각마다)
+    ``progress(files_done, bytes_done, current_rel)`` — 전체는 :func:`plan_paths` 가 같은
+    규칙으로 미리 센다. 복사되는 집합은 콜백 유무와 무관하게 같다.
     """
     src_ws = src_ws.resolve()
     dst_ws = dst_ws.resolve()
+    copy_fn = shutil.copy2
+    if progress is not None:
+        done = {"files": 0, "bytes": 0}
+
+        def report(nbytes: int, rel: str | None) -> None:
+            if rel is None:
+                done["files"] += 1
+            else:
+                done["bytes"] += nbytes
+            progress(done["files"], done["bytes"], rel)
+
+        copy_fn = _copy_with_progress(src_ws, report)
     for rel in paths:
         s = _safe_join(src_ws, rel)
         d = _safe_join(dst_ws, rel)
@@ -135,11 +232,12 @@ def clone_paths(
                 d,
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(*_SIDECAR_EXCLUDE),
+                copy_function=copy_fn,
             )
         else:
             if s.name in _SIDECAR_EXCLUDE:
                 continue
-            shutil.copy2(s, d)
+            copy_fn(s, d)
 
     new_sid = _remap_session(dst_ws, new_session_id, src_session_id)
     _rewrite_workspace_paths(dst_ws, str(src_ws), str(dst_ws))

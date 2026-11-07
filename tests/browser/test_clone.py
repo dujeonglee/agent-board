@@ -1,7 +1,7 @@
 """대화방 복제 모달 실브라우저 e2e (v1.21.0).
 
 각 글 카드의 '복제' 버튼 → 모달(주제·모델·트리) → [복제 생성]. 닫기/취소
-= 중단. 트리 lazy 로드·체크박스 dedupe·모달 생명주기는 실 브라우저에서만
+= 중단 — 바깥 클릭으로는 닫히지 않는다(v1.42.0). 복제 중엔 진행바, 닫기는 모달만. 트리 lazy 로드·체크박스 dedupe·모달 생명주기는 실 브라우저에서만
 end-to-end 검증된다.
 """
 
@@ -102,7 +102,9 @@ class TestCloneModal:
         assert not _has_post(board, "취소될 방")
         ctx.close()
 
-    def test_backdrop_click_closes(self, board, browser):
+    def test_backdrop_click_keeps_open(self, board, browser):
+        """v1.42.0 (사용자 요청): 바깥 클릭으로는 닫히지 않는다 — 종전
+        ``test_backdrop_click_closes`` 의 계약 반전. 닫기는 ✕·Cancel·Esc 뿐."""
         src = board.seed_post(topic="원본")
         (board.cfg.workspace_for(src) / "f.py").write_text("x")
         ctx, page = _open_clone_modal(board, browser, src)
@@ -112,7 +114,70 @@ class TestCloneModal:
             " return {x: r.left, y: r.top}; }"
         )
         page.mouse.click(max(0, box["x"] - 20), max(0, box["y"] - 20))
+        page.wait_for_timeout(400)
+        assert page.locator("#clone-dlg[open]").count() == 1
+        ctx.close()
+
+    def test_x_closes(self, board, browser):
+        src = board.seed_post(topic="원본")
+        (board.cfg.workspace_for(src) / "f.py").write_text("x")
+        ctx, page = _open_clone_modal(board, browser, src)
+        page.click("#clone-x")
         assert _wait(lambda: not page.locator("#clone-dlg[open]").count())
+        ctx.close()
+
+    def test_progress_bar_then_the_modal_closes_by_itself(
+        self, board, browser, monkeypatch
+    ):
+        """v1.42.0: 복제는 서버 작업 — 도는 동안 모달에 진행바와 진행 줄, 컨트롤은
+        꺼지고 Cancel 은 Close 가 된다. 끝나면 모달이 저절로 닫힌다."""
+        gate = _hold_clone(monkeypatch)
+        src = board.seed_post(topic="원본")
+        (board.cfg.workspace_for(src) / "main.py").write_text("print('orig')")
+        ctx, page = _open_clone_modal(board, browser, src)
+        page.fill("#clone-topic", "진행본")
+        page.wait_for_selector("#clone-tree .clone-node", timeout=6000)
+        page.locator(
+            "#clone-tree .clone-node:has-text('main.py') input[type=checkbox]"
+        ).check()
+        page.click("#clone-go")
+        page.wait_for_selector("#clone-bar:not([hidden])", timeout=4000)
+        assert page.inner_text("#clone-cancel") == "Close"
+        assert page.is_disabled("#clone-go") and page.is_disabled("#clone-topic")
+        assert "Cloning…" in page.inner_text("#clone-msg")
+        gate.set()
+        assert _wait(lambda: not page.locator("#clone-dlg[open]").count())
+        new_ws = board.cfg.workspace_for(_post_id(board, "진행본"))
+        assert (new_ws / "main.py").read_text() == "print('orig')"
+        ctx.close()
+
+    def test_close_during_clone_hands_over_to_the_card(
+        self, board, browser, monkeypatch
+    ):
+        """복제 중 Close 는 모달만 닫는다 — 카드가 Cloning… 을 보여 주고(Open 숨김),
+        끝나면 그 표시가 사라진다."""
+        gate = _hold_clone(monkeypatch)
+        src = board.seed_post(topic="원본")
+        (board.cfg.workspace_for(src) / "f.py").write_text("x")
+        ctx, page = _open_clone_modal(board, browser, src)
+        page.fill("#clone-topic", "카드로 넘김")
+        page.wait_for_selector("#clone-tree .clone-node", timeout=6000)
+        page.locator(
+            "#clone-tree .clone-node:has-text('f.py') input[type=checkbox]"
+        ).check()
+        page.click("#clone-go")
+        page.wait_for_selector("#clone-bar:not([hidden])", timeout=4000)
+        page.click("#clone-cancel")  # Close
+        assert _wait(lambda: not page.locator("#clone-dlg[open]").count())
+        new_id = _post_id(board, "카드로 넘김")
+        card = f'.post[data-id="{new_id}"]'
+        page.wait_for_selector(f"{card} .clone-label", timeout=4000)
+        assert "Cloning…" in page.inner_text(f"{card} .st")
+        assert page.locator(f"{card} .clone-card-bar").count() == 1
+        assert page.locator(f"{card} .open").is_hidden()
+        gate.set()
+        assert _wait(lambda: page.locator(f"{card} .clone-label").count() == 0)
+        assert page.locator(f"{card} .open").is_visible()
         ctx.close()
 
     def test_empty_source_message(self, board, browser):
@@ -121,6 +186,24 @@ class TestCloneModal:
         ctx, page = _open_clone_modal(board, browser, empty.post_id)
         assert _wait(lambda: "no files to copy" in page.inner_text("#clone-tree"))
         ctx.close()
+
+
+def _hold_clone(monkeypatch):
+    """서버(같은 프로세스의 uvicorn 스레드)의 ``clone_paths`` 를 사건이 풀릴 때까지
+    붙잡는다 — running 상태를 잡아 진행바·카드 표시를 본다."""
+    import threading
+
+    from agent_board import clone as clone_mod
+
+    gate = threading.Event()
+    real = clone_mod.clone_paths
+
+    def slow(*a, **k):
+        gate.wait(8)
+        return real(*a, **k)
+
+    monkeypatch.setattr(clone_mod, "clone_paths", slow)
+    return gate
 
 
 def _has_post(board, topic):

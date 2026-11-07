@@ -364,3 +364,96 @@ class TestClonePathsSafety:
         dst.mkdir()
         sid = clone.clone_paths(src, dst, ["nope.txt"], new_session_id="9")
         assert sid is None
+
+
+class TestProgress:
+    """v1.42.0: 진행 콜백 — 복제 작업이 메모리 상태를 갱신하고 모달·카드가 폴링한다."""
+
+    def _tree(self, src):
+        (src / "a.txt").write_text("aaaa")
+        (src / "sub").mkdir()
+        (src / "sub" / "b.bin").write_bytes(b"\0" * 1000)
+        _mk_session(src, "1111111111")  # 사이드카(web.json·status.json…) 포함
+        return ["a.txt", "sub", ".agent-cli"]
+
+    @staticmethod
+    def _copied(dst):
+        files = [p for p in dst.rglob("*") if p.is_file()]
+        return len(files), sum(p.stat().st_size for p in files)
+
+    def test_totals_match_what_is_copied_and_sidecars_are_excluded(self, tmp_path):
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        paths = self._tree(src)
+        files_total, bytes_total = clone.plan_paths(src, paths)
+        calls = []
+        clone.clone_paths(
+            src,
+            dst,
+            paths,
+            new_session_id="2222222222",
+            progress=lambda f, b, cur: calls.append((f, b, cur)),
+        )
+        # 사이드카는 total 에도 없다
+        sidecar_bytes = sum(
+            (src / ".agent-cli" / "sessions" / "1111111111" / n).stat().st_size
+            for n in ("web.json", "status.json", "instance.log")
+            if (src / ".agent-cli" / "sessions" / "1111111111" / n).exists()
+        )
+        assert sidecar_bytes > 0
+        last = calls[-1]
+        assert last[0] == files_total and last[1] == bytes_total
+        # 복사 직후(재작성 전) 기준이라 _meta 재작성으로 바뀌는 크기와 비교하지 않고
+        # 파일 수로 맞춘다 — 사이드카 제외가 반영됐다
+        assert self._copied(dst)[0] == files_total
+        # a.txt, sub/b.bin, session.jsonl, history.jsonl, agents.json
+        assert files_total == 5
+
+    def test_big_file_reports_many_times(self, tmp_path):
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        src.mkdir()
+        dst.mkdir()
+        size = 10 * 1024 * 1024
+        (src / "big.bin").write_bytes(b"x" * size)
+        calls = []
+        clone.clone_paths(
+            src,
+            dst,
+            ["big.bin"],
+            new_session_id="2",
+            progress=lambda f, b, cur: calls.append((f, b, cur)),
+        )
+        mid = [c for c in calls if c[0] == 0]  # 파일이 끝나기 전의 조각 보고
+        assert len(mid) >= 2 and mid[0][1] < size and mid[-1][2] == "big.bin"
+        assert calls[-1] == (1, size, None)
+        assert (dst / "big.bin").read_bytes() == b"x" * size
+        # copy2 의미 — 수정 시각도 옮겨 온다
+        assert (dst / "big.bin").stat().st_mtime == pytest.approx(
+            (src / "big.bin").stat().st_mtime, abs=1e-3
+        )
+
+    def test_without_callback_the_result_is_the_same(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        paths = self._tree(src)
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        clone.clone_paths(src, a, paths, new_session_id="2222222222")
+        clone.clone_paths(
+            src, b, paths, new_session_id="2222222222", progress=lambda *x: None
+        )
+        rel = lambda root: sorted(
+            (
+                p.relative_to(root).as_posix(),
+                p.read_bytes().replace(str(root).encode(), b"<WS>"),
+            )
+            for p in root.rglob("*")
+            if p.is_file()
+        )
+        assert rel(a) == rel(b)
+
+    def test_plan_rejects_traversal(self, tmp_path):
+        with pytest.raises(ValueError):
+            clone.plan_paths(tmp_path, ["../x"])

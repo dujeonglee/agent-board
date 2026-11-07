@@ -376,6 +376,10 @@
           ? AGENTS_BUSY
           : STATUS[p.status] || STATUS.idle;
     const up = p.status === "running" || p.status === "working";
+    // 📋 복제 중 (v1.42.0) — 상태 자리에 진행, Open·🔄·📋 Clone 은 숨긴다(서버 409 와
+    // 같은 판정). 폴러가 이 글을 맡아 끝나면 목록을 다시 그린다.
+    const cl = p.cloning;
+    if (cl) watchClone(p.post_id);
     el.innerHTML =
       `<div class="post-main">` +
       `<div class="post-topic">${esc(p.topic)}</div>` +
@@ -390,7 +394,10 @@
       `</div>` +
       `</div>` +
       `<div class="post-side">` +
-      `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}` +
+      (cl
+        ? `<span class="st cloning"><span class="clone-label">${esc(cloneLabel(cl))}</span>` +
+          ` <progress class="clone-card-bar" max="100" value="${clonePct(cl)}"></progress>`
+        : `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}`) +
       (up ? ` <span class="viewers" title="viewers">👁 ${p.viewers}</span>` : "") +
       (up ? agentsChip(p) : "") +
       // 📐 문법 제약이 실리는 세션 — 인스턴스의 칩과 같은 값(status.json)
@@ -408,7 +415,7 @@
       // 🔄 restart only when the instance is up — a down room's "열기" already
       // spawns fresh, so restart is the ONLY way to force-replace a running
       // process (e.g. to pick up an agent-cli update).
-      (up
+      (up && !cl
         ? `<button class="restart btn-ghost" type="button" title="Restart — restarts the process (picks up a newly installed agent-cli). The session continues.">🔄</button>`
         : "") +
       // ⏰ 예약 배지 — 예약은 그 방(agent-cli 세션)의 것이다(v1.34.0). 보드는
@@ -416,10 +423,10 @@
       (p.schedules && p.schedules.count
         ? `<button class="sched btn-ghost" type="button" title="${p.schedules.count} schedule(s) — open the room and manage them under ⏰">⏰<span class="scnt">${p.schedules.count}</span></button>`
         : "") +
-      `<button class="clone btn-ghost" type="button" title="Copy this post's files and conversation into a new post">📋 Clone</button>` +
+      `<button class="clone btn-ghost" type="button" title="Copy this post's files and conversation into a new post"${cl ? " hidden" : ""}>📋 Clone</button>` +
       // 모델이 없거나 방언 미설정이면 열 수 없다 — 서버(409)와 같은 판정을
       // 버튼에 먼저 반영하고, 아래 경고 줄이 사유와 ⚙ 링크를 보여 준다.
-      `<button class="open btn-primary" type="button"${p.model_bound ? "" : ' disabled title="Cannot open until a model and dialect are set"'}>Open</button>` +
+      `<button class="open btn-primary" type="button"${cl ? " hidden" : ""}${p.model_bound ? "" : ' disabled title="Cannot open until a model and dialect are set"'}>Open</button>` +
       `<button class="del btn-danger" type="button" title="Delete (permanent)">🗑</button>` +
       `</div>` +
       modelWarning(p) +
@@ -714,8 +721,10 @@
 
   // ── 대화방 복제 모달 (v1.21.0) ─────────────────────────
   // 각 글 카드의 '복제' 버튼이 그 글을 원본으로 이 모달을 연다. 한 창에서
-  // 주제·모델·복사 항목을 다 설정하고 [복제 생성]. 닫기(backdrop/Esc/✕/
-  // 취소) = 중단. dir 체크 = 통째 복사(하위는 백엔드 copytree), 조상이
+  // 주제·모델·복사 항목을 다 설정하고 [복제 생성]. 닫기(✕/취소/Esc) = 중단
+  // — 바깥 클릭으로는 닫히지 않는다(v1.42.0, 사용자 요청: 명시적으로만 닫힌다).
+  // 복제는 서버의 백그라운드 작업이고 모달은 진행바로 그 진행을 보여 준다;
+  // 복제 중 닫기(Close)는 모달만 닫고 카드가 진행을 이어 보여 준다. dir 체크 = 통째 복사(하위는 백엔드 copytree), 조상이
   // 체크되면 자식 rel 은 안 보냄(dedupe). .agent-cli/sessions/… 포함 시
   // 대화까지 이어받음.
   const $cloneDlg = document.getElementById("clone-dlg");
@@ -728,6 +737,8 @@
   const $cloneTree = document.getElementById("clone-tree");
   const $cloneMsg = document.getElementById("clone-msg");
   const $cloneGo = document.getElementById("clone-go");
+  const $cloneBar = document.getElementById("clone-bar");
+  const $cloneCancel = document.getElementById("clone-cancel");
   const cloneChecked = new Set(); // 체크된 rel 들
   let cloneFrom = null;
 
@@ -738,6 +749,10 @@
     $cloneTopic.value = p.topic + " (clone)";
     $cloneMsg.textContent = "";
     $cloneGo.disabled = false;
+    setCloneControls(false);
+    $cloneBar.hidden = true;
+    $cloneCancel.textContent = "Cancel";
+    clonePost = null;
     // 모델 옵션 채우기 (new-model 과 동일 소스 — 바인딩 있는 모델만)
     fillModelPicker($cloneModel, p.model);
     // 노브는 원본 값으로 채운다 — 복제는 설정까지 이어받는다 (비우면 기본값)
@@ -771,6 +786,91 @@
     cloneFrom = null;
     cloneChecked.clear();
     $cloneTree.innerHTML = "";
+    // 복제 중이면 모달만 닫는다 — 서버 작업은 계속되고 폴러가 카드로 넘어간다
+    clonePost = null;
+  }
+
+  // ── 복제 진행 (v1.42.0) ────────────────────────────────
+  // 글 하나당 폴러 하나(`cloneWatch`). 모달이 그 글을 보여 주는 동안 250 ms,
+  // 아니면(카드만) 1 s. 끝나면 목록을 다시 그린다. 폴링 404 = 작업이 이미 버려짐
+  // = 끝난 것으로 본다.
+  let clonePost = null; // 모달이 진행을 보여 주는 글
+  const cloneWatch = new Map(); // post_id → timer
+
+  function clonePct(c) {
+    if (!c.bytes_total) return c.state === "running" ? 0 : 100;
+    return Math.min(100, Math.floor((c.bytes_done * 100) / c.bytes_total));
+  }
+
+  function cloneLabel(c) {
+    return `Cloning… ${c.bytes_total ? clonePct(c) : 100}%`;
+  }
+
+  function cloneLine(c) {
+    return (
+      `Cloning… ${fmtSize(c.bytes_done)} / ${fmtSize(c.bytes_total)}` +
+      ` · ${c.files_done} / ${c.files_total} files` +
+      (c.current ? ` · ${c.current}` : "")
+    );
+  }
+
+  function setCloneControls(disabled) {
+    [$cloneTopic, $cloneModel, $cloneAdv, $cloneGo].forEach((el) => (el.disabled = disabled));
+    $cloneKnobs
+      .querySelectorAll("input, select, textarea, button")
+      .forEach((el) => (el.disabled = disabled));
+    $cloneTree.querySelectorAll("input").forEach((el) => (el.disabled = disabled));
+  }
+
+  function showCloneInModal(c) {
+    $cloneBar.hidden = false;
+    $cloneBar.value = c.bytes_total ? clonePct(c) : 100;
+    $cloneMsg.textContent = cloneLine(c);
+  }
+
+  function showCloneOnCard(id, c) {
+    const el = $posts.querySelector(`[data-id="${id}"]`);
+    if (!el) return;
+    const label = el.querySelector(".clone-label");
+    const bar = el.querySelector(".clone-card-bar");
+    if (label) label.textContent = cloneLabel(c);
+    if (bar) bar.value = clonePct(c);
+  }
+
+  function watchClone(id) {
+    if (cloneWatch.has(id)) return;
+    const tick = async () => {
+      let c = null;
+      try {
+        const r = await fetch(`/api/posts/${id}/clone`);
+        c = r.status === 404 ? { state: "done" } : await r.json();
+      } catch (_e) {
+        c = null; // 잠깐의 네트워크 오류 — 다음 차례에 다시
+      }
+      if (c && c.state !== "running") {
+        cloneWatch.delete(id);
+        if (clonePost === id) {
+          if (c.state === "done") {
+            closeCloneDialog();
+          } else {
+            // 실패 — 작업이 방을 롤백했다. 모달은 다시 고칠 수 있게 연다.
+            clonePost = null;
+            $cloneBar.hidden = true;
+            $cloneMsg.textContent = "Failed: " + (c.error || "clone failed");
+            $cloneCancel.textContent = "Cancel";
+            setCloneControls(false);
+          }
+        }
+        load();
+        return;
+      }
+      if (c) {
+        if (clonePost === id) showCloneInModal(c);
+        showCloneOnCard(id, c);
+      }
+      cloneWatch.set(id, setTimeout(tick, clonePost === id ? 250 : 1000));
+    };
+    cloneWatch.set(id, setTimeout(tick, clonePost === id ? 250 : 1000));
   }
 
   function cloneSelection() {
@@ -797,7 +897,7 @@
       return;
     }
     cloning = true;
-    $cloneGo.disabled = true;
+    setCloneControls(true);
     $cloneMsg.textContent = "Cloning…";
     const r = await fetch("/api/posts", {
       method: "POST",
@@ -812,13 +912,27 @@
     if (!r.ok) {
       const detail = await r.json().catch(() => ({}));
       $cloneMsg.textContent = "Failed: " + (modelProblemText(detail.detail) || detail.detail || r.status);
-      $cloneGo.disabled = false;
+      setCloneControls(false);
       cloning = false;
       return;
     }
+    const post = await r.json();
+    if (!post.cloning) {
+      // 복사할 것이 없었다(선택 없음) — 종전처럼 바로 끝
+      cloning = false;
+      closeCloneDialog();
+      load();
+      return;
+    }
+    // 서버 작업이 돈다 — 모달은 진행을 보여 주고, 닫기는 이제 모달만 닫는다.
+    // 중복 제출 막기(`cloning`)는 POST 까지만 — 작업 중엔 컨트롤이 꺼져 있고, 모달을
+    // 닫은 뒤 다른 복제를 막으면 안 된다.
     cloning = false;
-    closeCloneDialog();
-    load();
+    clonePost = post.post_id;
+    $cloneCancel.textContent = "Close";
+    showCloneInModal(post.cloning);
+    load(); // 카드가 Cloning… 으로 나타난다
+    watchClone(post.post_id);
   }
 
   // {ok, status, nodes} — 부재/에러(404 등)를 빈 디렉토리와 구분한다.
@@ -883,14 +997,12 @@
     .getElementById("clone-cancel")
     .addEventListener("click", closeCloneDialog);
   document.getElementById("clone-x").addEventListener("click", closeCloneDialog);
-  // backdrop 클릭(다이얼로그 바깥) = 닫기
-  $cloneDlg.addEventListener("click", (e) => {
-    if (e.target === $cloneDlg) closeCloneDialog();
-  });
-  // Esc(native cancel) 로 닫을 때도 상태 정리
+  // 바깥 클릭으로는 닫히지 않는다 (v1.42.0 — 종전의 backdrop 클릭 닫기를 지웠다).
+  // Esc(native cancel) 로 닫을 때도 상태 정리 — 복제 중이면 모달만 닫힌다
   $cloneDlg.addEventListener("close", () => {
     cloneFrom = null;
     cloneChecked.clear();
+    clonePost = null;
   });
   // `isComposing` — 한글/일어 입력에서 조합 확정 Enter 와 제출 Enter 가
   // **각각** keydown 을 낸다. 확정 쪽을 걸러야 한 번만 제출된다.
