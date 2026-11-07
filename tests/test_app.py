@@ -592,6 +592,8 @@ class TestUiWired:
         assert "post-meta" in js and "created_at" in js and "last_query_at" in js
         # "needs your answer" indicator for pending ask/confirm
         assert "awaiting_input" in js and "Needs your reply" in js
+        # 📋 열린 항목 칩 (v1.44.0)
+        assert "badge oi" in js and "open_items" in js
         # open in new tab by default + "현재 페이지에서 열기" toggle
         assert 'id="same-tab"' in html and "Open in this page" in html
         assert "window.open" in js
@@ -1259,6 +1261,54 @@ class TestGrammarBadge:
         assert p["grammar"] is True
         js = c.get("/static/app.js").text
         assert "grammar-chip" in js and "p.grammar" in js
+
+
+class TestOpenItemsChip:
+    """v1.44.0: 📋 열린 항목 칩 — status.json 의 additive `open_items` 가 post 로
+    그대로 나오고(구버전·다운은 None), 카드가 `📋 N` 칩을 그린다."""
+
+    def test_post_carries_open_items(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        oi = {
+            "count": 3,
+            "ids": ["u-2", "n-1", "r-1"],
+            "oldest_turns": 7,
+            "budget_left": 0,
+        }
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "running",
+                "awaiting_input": False,
+                "viewers": 0,
+                "open_items": oi,
+            },
+        )
+        (p,) = c.get("/api/posts").json()
+        assert p["open_items"] == oi
+
+    def test_post_without_open_items_is_null(self, tmp_path):
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")  # 방 없음 → _IDLE
+        (p,) = c.get("/api/posts").json()
+        assert p["open_items"] is None
+
+    def test_card_wiring(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        css = c.get("/static/style.css").text
+        assert "badge oi" in js and "p.open_items" in js
+        assert "oi-warn" in js and "budget_left === 0" in js
+        assert 'join(" · ")' in js
+        # 상태 배지 다음·모델 칩 앞
+        card_src = js[js.index("function card(p)") :]
+        assert card_src.index("${st.label}") < card_src.index("openItemsChip(p)")
+        assert card_src.index("openItemsChip(p)") < card_src.index('class="model-chip"')
+        assert ".badge.oi {" in css and ".badge.oi-warn" in css and "var(--warn)" in css
 
 
 class TestCloneJob:

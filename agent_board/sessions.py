@@ -61,6 +61,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     - viewers: live browser subscribers on the instance (0 when down),
     - auditing (v1.35.0, additive): a session-audit run is in flight,
     - knobs (v1.36.0, additive): the session's current knob values.
+    - open_items (v1.44.0, additive): the ledger summary
+      ``{count, ids, oldest_turns, budget_left}`` (agent-cli >= 10.119.0).
 
     agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
     path is a file read (no HTTP). Older instances have no file → fall back to
@@ -102,7 +104,25 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     # 보드가 거울처럼 기록해 다음 spawn 에 돌려준다. 구버전은 미기록 → 키 생략.
     if isinstance(live.get("knobs"), dict):
         out["knobs"] = live["knobs"]
+    # v1.44.0: 📋 열린 항목 장부 요약 (agent-cli ≥10.119.0 additive 필드
+    # `open_items` = {count, ids, oldest_turns, budget_left}). 카드 칩의 소스 —
+    # 모양이 맞을 때만(count 는 int, ids 는 문자열 목록) 그대로 옮기고, 나머지
+    # 키는 있으면 손대지 않는다. 구버전·깨진 값은 키 생략 → 칩 없음.
+    oi = live.get("open_items")
+    if _open_items_ok(oi):
+        out["open_items"] = oi
     return out
+
+
+def _open_items_ok(oi) -> bool:
+    """``open_items`` 의 최소 모양 검사 — dict, ``count`` 는 int(bool 아님),
+    ``ids`` 는 문자열 목록."""
+    if not isinstance(oi, dict):
+        return False
+    count, ids = oi.get("count"), oi.get("ids")
+    if not isinstance(count, int) or isinstance(count, bool):
+        return False
+    return isinstance(ids, list) and all(isinstance(i, str) for i in ids)
 
 
 def status(workspace: Path, session_id: str | None) -> str:
