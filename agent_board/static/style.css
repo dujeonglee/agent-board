@@ -147,6 +147,15 @@ header h1 { margin: 0; font-size: 18px; }
   font-weight: 400;
 }
 .badge.oi-warn { color: var(--warn); border-color: var(--warn); }
+/* 🔁 제자리 배지 (v1.45.0) — .badge.oi 와 같은 높이·글자 크기, 배경 없이
+   --fail 테두리·글자. 방이 Continue/Stop 을 묻는 중이면 --warn. */
+.badge.stuck {
+  font-size: 11px; color: var(--fail); background: none;
+  border: 1px solid var(--fail); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 400;
+}
+.badge.stuck-ask { color: var(--warn); border-color: var(--warn); }
 /* 읽기 전용 노브 패널 — 카드 아래 폭 전체 */
 .knob-panel:not([hidden]) { flex-basis: 100%; border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 8px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; font-size: 12px; }

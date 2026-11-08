@@ -63,6 +63,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     - knobs (v1.36.0, additive): the session's current knob values.
     - open_items (v1.44.0, additive): the ledger summary
       ``{count, ids, oldest_turns, budget_left}`` (agent-cli >= 10.119.0).
+    - stuck (v1.45.0, additive): the main run has gone ``turns`` turns with no
+      new result ``{turns, since_turn, asking}`` (agent-cli >= 10.120.0).
 
     agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
     path is a file read (no HTTP). Older instances have no file → fall back to
@@ -111,6 +113,13 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     oi = live.get("open_items")
     if _open_items_ok(oi):
         out["open_items"] = oi
+    # v1.45.0: 🔁 제자리 (agent-cli ≥10.120.0 additive 필드 `stuck` =
+    # {turns, since_turn, asking}) — main 런이 새 결과 없이 turns 턴째. 카드
+    # 배지의 소스. open_items 와 같은 꼴: 모양이 맞을 때만(turns 는 int) 그대로
+    # 옮기고, 구버전·깨진 값은 키 생략 → 배지 없음.
+    st = live.get("stuck")
+    if _stuck_ok(st):
+        out["stuck"] = st
     return out
 
 
@@ -123,6 +132,14 @@ def _open_items_ok(oi) -> bool:
     if not isinstance(count, int) or isinstance(count, bool):
         return False
     return isinstance(ids, list) and all(isinstance(i, str) for i in ids)
+
+
+def _stuck_ok(st) -> bool:
+    """``stuck`` 의 최소 모양 검사 — dict, ``turns`` 는 int(bool 아님)."""
+    if not isinstance(st, dict):
+        return False
+    turns = st.get("turns")
+    return isinstance(turns, int) and not isinstance(turns, bool)
 
 
 def status(workspace: Path, session_id: str | None) -> str:

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.45.0] - 2026-11-08
+
+### Added — 🔁 제자리 배지
+
+방이 `status.json` 에 쓰는 제자리 요약(`stuck: {turns, since_turn, asking}`, agent-cli
+v10.120.0)을 카드에 `🔁 N turns` 배지로 보입니다. 방의 main 런이 새 결과 없이 N 턴째 돌고
+있다는 뜻이고, 마우스를 올리면 `No new results for N turns` 가 나옵니다. 방이 멈춰 사람에게
+Continue/Stop 을 묻는 중이면(`asking: true`) 배지가 경고색이 되고 툴팁에
+`— waiting for your answer in the room` 이 붙습니다. 배지는 상태 라벨 바로 뒤·📋 칩 앞에
+서고, `status.json` 이 바뀌면 다른 배지처럼 실시간으로 따라 바뀝니다. 필드가 없는 방(구버전
+agent-cli·꺼진 방·제자리 아님)은 배지가 없고, 모양이 깨진 값(`turns` 가 정수가 아님)은
+무시합니다. 답은 방에서 합니다 — 보드는 방에 쓰지 않습니다. `/api/posts` 의 각 글에
+`stuck`(없으면 `null`)이 실립니다.
+
 ## [1.44.0] - 2026-11-08
 
 ### Added — 📋 열린 항목 칩

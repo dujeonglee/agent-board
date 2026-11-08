@@ -275,6 +275,38 @@ class TestStatus:
             self._status_json(ws, open_items=bad)
             assert "open_items" not in sessions.live_state(ws, "S1"), bad
 
+    def test_live_state_passes_stuck_through_from_status_file(
+        self, tmp_path, monkeypatch
+    ):
+        """v1.45.0: agent-cli ≥10.120.0 의 ``stuck`` (main 런이 새 결과 없이 N 턴째)
+        — 카드 🔁 배지의 소스. 모양이 맞으면 그대로(나머지 키 포함), 없으면 키 없음,
+        깨진 값(dict 아님·turns 비정수·bool)은 생략."""
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        st = {"turns": 4, "since_turn": 31, "asking": False}
+        self._status_json(ws, stuck=st)
+        assert sessions.live_state(ws, "S1")["stuck"] == st
+        st_ask = {"turns": 6, "since_turn": 31, "asking": True}
+        self._status_json(ws, stuck=st_ask, awaiting_input=True)
+        assert sessions.live_state(ws, "S1")["stuck"] == st_ask
+        # 구버전(키 없음)·null(제자리 아님)
+        self._status_json(ws)
+        assert "stuck" not in sessions.live_state(ws, "S1")
+        self._status_json(ws, stuck=None)
+        assert "stuck" not in sessions.live_state(ws, "S1")
+        # 깨진 값
+        for bad in (
+            "bogus",
+            [4],
+            4,
+            {"since_turn": 31},
+            {"turns": "4"},
+            {"turns": True},
+            {"turns": 4.0},
+        ):
+            self._status_json(ws, stuck=bad)
+            assert "stuck" not in sessions.live_state(ws, "S1"), bad
+
     def test_live_state_prefers_status_file_over_health(self, tmp_path, monkeypatch):
         # status.json present (agent-cli >= 4.27.0) → read the file, NEVER HTTP
         ws = self._web_json(tmp_path)

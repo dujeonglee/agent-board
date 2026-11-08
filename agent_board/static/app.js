@@ -374,6 +374,19 @@
     return ` <span class="badge oi${warn}" title="${esc(ids)}">📋 ${oi.count}</span>`;
   }
 
+  // 🔁 제자리 배지 (v1.45.0, agent-cli ≥ 10.120.0 `stuck`) — 방의 main 런이 새
+  // 결과 없이 turns 턴째 돌고 있다. asking 이면 방이 멈춰 사람에게 Continue/Stop
+  // 을 묻는 중 → 경고색(stuck-ask). 필드가 없거나 turns 가 0 이면 그리지 않는다.
+  function stuckBadge(p) {
+    const s = p.stuck;
+    if (!s || !s.turns) return "";
+    const ask = s.asking ? " stuck-ask" : "";
+    const title =
+      `No new results for ${s.turns} turns` +
+      (s.asking ? " — waiting for your answer in the room" : "");
+    return ` <span class="badge stuck${ask}" title="${esc(title)}">🔁 ${s.turns} turns</span>`;
+  }
+
   function card(p) {
     const el = document.createElement("div");
     el.dataset.id = p.post_id; // for in-place live updates over SSE
@@ -410,6 +423,7 @@
         ? `<span class="st cloning"><span class="clone-label">${esc(cloneLabel(cl))}</span>` +
           ` <progress class="clone-card-bar" max="100" value="${clonePct(cl)}"></progress>`
         : `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}`) +
+      stuckBadge(p) +
       openItemsChip(p) +
       (up ? ` <span class="viewers" title="viewers">👁 ${p.viewers}</span>` : "") +
       (up ? agentsChip(p) : "") +

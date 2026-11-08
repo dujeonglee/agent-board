@@ -594,6 +594,8 @@ class TestUiWired:
         assert "awaiting_input" in js and "Needs your reply" in js
         # 📋 열린 항목 칩 (v1.44.0)
         assert "badge oi" in js and "open_items" in js
+        # 🔁 제자리 배지 (v1.45.0)
+        assert "badge stuck" in js and "p.stuck" in js
         # open in new tab by default + "현재 페이지에서 열기" toggle
         assert 'id="same-tab"' in html and "Open in this page" in html
         assert "window.open" in js
@@ -1309,6 +1311,53 @@ class TestOpenItemsChip:
         assert card_src.index("${st.label}") < card_src.index("openItemsChip(p)")
         assert card_src.index("openItemsChip(p)") < card_src.index('class="model-chip"')
         assert ".badge.oi {" in css and ".badge.oi-warn" in css and "var(--warn)" in css
+
+
+class TestStuckBadge:
+    """v1.45.0: 🔁 제자리 배지 — status.json 의 additive `stuck` 이 post 로
+    그대로 나오고(구버전·다운은 None), 카드가 `🔁 N turns` 배지를 그린다."""
+
+    def test_post_carries_stuck(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        st = {"turns": 4, "since_turn": 31, "asking": True}
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "running",
+                "awaiting_input": True,
+                "viewers": 0,
+                "stuck": st,
+            },
+        )
+        (p,) = c.get("/api/posts").json()
+        assert p["stuck"] == st
+
+    def test_post_without_stuck_is_null(self, tmp_path):
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")  # 방 없음 → _IDLE
+        (p,) = c.get("/api/posts").json()
+        assert p["stuck"] is None
+
+    def test_card_wiring(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        css = c.get("/static/style.css").text
+        assert "badge stuck" in js and "p.stuck" in js and "stuck-ask" in js
+        assert "No new results for ${s.turns} turns" in js
+        assert "waiting for your answer in the room" in js
+        assert "🔁 ${s.turns} turns" in js
+        # 상태 라벨 다음·📋 칩 앞
+        card_src = js[js.index("function card(p)") :]
+        assert card_src.index("${st.label}") < card_src.index("stuckBadge(p)")
+        assert card_src.index("stuckBadge(p)") < card_src.index("openItemsChip(p)")
+        assert ".badge.stuck {" in css and ".badge.stuck-ask" in css
+        stuck_css = css[css.index(".badge.stuck {") :]
+        assert "var(--fail)" in stuck_css[: stuck_css.index("}")]
+        assert "var(--warn)" in css[css.index(".badge.stuck-ask") :][:80]
 
 
 class TestCloneJob:
