@@ -307,6 +307,45 @@ class TestStatus:
             self._status_json(ws, stuck=bad)
             assert "stuck" not in sessions.live_state(ws, "S1"), bad
 
+    def test_live_state_passes_jobs_through_from_status_file(
+        self, tmp_path, monkeypatch
+    ):
+        """v1.46.0: agent-cli ≥10.121.0 의 ``jobs`` (돌고 있는 백그라운드 작업) — 카드
+        🧵 칩의 소스. 모양이 맞으면 그대로, 없으면 키 없음, 깨진 값은 생략."""
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        jb = {
+            "count": 1,
+            "list": [
+                {
+                    "id": 3,
+                    "pid": 4242,
+                    "owner": "main",
+                    "command": "python3 -m http.server",
+                    "started_at": 1794285259.5,
+                }
+            ],
+        }
+        self._status_json(ws, jobs=jb)
+        assert sessions.live_state(ws, "S1")["jobs"] == jb
+        self._status_json(ws)  # 구버전·작업 없음(키 생략)
+        assert "jobs" not in sessions.live_state(ws, "S1")
+        self._status_json(ws, jobs=None)
+        assert "jobs" not in sessions.live_state(ws, "S1")
+        for bad in (
+            "bogus",
+            [jb],
+            2,
+            {"list": []},
+            {"count": "1", "list": []},
+            {"count": True, "list": []},
+            {"count": 1},
+            {"count": 1, "list": "x"},
+            {"count": 1, "list": [3]},
+        ):
+            self._status_json(ws, jobs=bad)
+            assert "jobs" not in sessions.live_state(ws, "S1"), bad
+
     def test_live_state_prefers_status_file_over_health(self, tmp_path, monkeypatch):
         # status.json present (agent-cli >= 4.27.0) → read the file, NEVER HTTP
         ws = self._web_json(tmp_path)

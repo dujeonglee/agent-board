@@ -156,6 +156,14 @@ header h1 { margin: 0; font-size: 18px; }
   font-weight: 400;
 }
 .badge.stuck-ask { color: var(--warn); border-color: var(--warn); }
+/* 🧵 작업 칩 (v1.46.0) — .badge.oi 와 같은 모양(중립색). 경고가 아니다 — 방에 돌고 있는
+   것이 있다는 사실. */
+.badge.jobs {
+  font-size: 11px; color: var(--text-2); background: var(--surface-2);
+  border: 1px solid var(--border-2); border-radius: 999px; padding: 1px 8px;
+  white-space: nowrap; font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 400;
+}
 /* 읽기 전용 노브 패널 — 카드 아래 폭 전체 */
 .knob-panel:not([hidden]) { flex-basis: 100%; border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 8px;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 16px; font-size: 12px; }

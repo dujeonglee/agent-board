@@ -109,12 +109,14 @@ class BoardStack:
         live_knobs=None,
         open_items=None,
         stuck=None,
+        jobs=None,
     ):
         """게시글 + 라이브 인스턴스 사이드카. ``agents``=status.json 의
         상주 에이전트 요약, ``alive_pid``=pid_alive 통과용(기본 이 프로세스),
         ``knobs``=저장 노브(모델 포함), ``live_knobs``=status.json 의 ``knobs``,
         ``open_items``=status.json 의 ``open_items`` (v1.44.0),
-        ``stuck``=status.json 의 ``stuck`` (v1.45.0).
+        ``stuck``=status.json 의 ``stuck`` (v1.45.0),
+        ``jobs``=status.json 의 ``jobs`` (v1.46.0).
         반환: post_id."""
         post = self.store.create_post(topic=topic, knobs=knobs or {"model": "m"})
         sid = str(int_from(post.post_id))
@@ -142,6 +144,8 @@ class BoardStack:
             status["open_items"] = open_items
         if stuck is not None:
             status["stuck"] = stuck
+        if jobs is not None:
+            status["jobs"] = jobs
         (sdir / "status.json").write_text(json.dumps(status))
         return post.post_id
 

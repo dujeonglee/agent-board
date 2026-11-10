@@ -65,6 +65,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
       ``{count, ids, oldest_turns, budget_left}`` (agent-cli >= 10.119.0).
     - stuck (v1.45.0, additive): the main run has gone ``turns`` turns with no
       new result ``{turns, since_turn, asking}`` (agent-cli >= 10.120.0).
+    - jobs (v1.46.0, additive): running background jobs
+      ``{count, list: [{id, pid, owner, command, started_at}]}`` (agent-cli >= 10.121.0).
 
     agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
     path is a file read (no HTTP). Older instances have no file → fall back to
@@ -120,6 +122,13 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     st = live.get("stuck")
     if _stuck_ok(st):
         out["stuck"] = st
+    # v1.46.0: 🧵 돌고 있는 백그라운드 작업 (agent-cli ≥10.121.0 additive 필드
+    # `jobs` = {count, list: [{id, pid, owner, command, started_at}]}) — "뷰어 0 인데
+    # 안 꺼지는 방" 의 이유. 카드 칩의 소스. 같은 꼴: 모양이 맞을 때만(count int,
+    # list 는 dict 목록) 그대로 옮기고, 구버전·깨진 값은 키 생략 → 칩 없음.
+    jb = live.get("jobs")
+    if _jobs_ok(jb):
+        out["jobs"] = jb
     return out
 
 
@@ -140,6 +149,17 @@ def _stuck_ok(st) -> bool:
         return False
     turns = st.get("turns")
     return isinstance(turns, int) and not isinstance(turns, bool)
+
+
+def _jobs_ok(jb) -> bool:
+    """``jobs`` 의 최소 모양 검사 — dict, ``count`` 는 int(bool 아님), ``list`` 는
+    dict 목록."""
+    if not isinstance(jb, dict):
+        return False
+    count, items = jb.get("count"), jb.get("list")
+    if not isinstance(count, int) or isinstance(count, bool):
+        return False
+    return isinstance(items, list) and all(isinstance(j, dict) for j in items)
 
 
 def status(workspace: Path, session_id: str | None) -> str:
