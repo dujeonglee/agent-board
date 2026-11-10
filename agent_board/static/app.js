@@ -387,6 +387,23 @@
     return ` <span class="badge stuck${ask}" title="${esc(title)}">🔁 ${s.turns} turns</span>`;
   }
 
+  // 🧵 백그라운드 작업 칩 (v1.46.0, agent-cli ≥ 10.121.0 `jobs`) — 방에서 돌고 있는
+  // 작업의 수. "뷰어 0 인데 안 꺼지는 방" 의 이유가 이것이다. title 은 작업마다
+  // `#N cmd — started HH:MM`(경과가 아니라 시작 시각 — 툴팁은 다시 그려질 때까지
+  // 낡는다). 멈추는 곳은 방의 🧵 칩 ■ — 보드는 거울이다. 필드가 없거나 0 이면 없음.
+  function jobsChip(p) {
+    const jb = p.jobs;
+    if (!jb || !jb.count) return "";
+    const lines = (jb.list || []).map((j) => {
+      const at = j.started_at
+        ? new Date(j.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : "";
+      return `#${j.id} ${j.command || ""}` + (at ? ` — started ${at}` : "");
+    });
+    const title = ["Background jobs running — stop them from the 🧵 chips in the room", ...lines].join("\n");
+    return ` <span class="badge jobs" title="${esc(title)}">🧵 ${jb.count}</span>`;
+  }
+
   function card(p) {
     const el = document.createElement("div");
     el.dataset.id = p.post_id; // for in-place live updates over SSE
@@ -425,6 +442,7 @@
         : `<span class="st ${p.awaiting_input ? "await" : ""}"><span class="dot ${st.cls}"></span>${st.label}`) +
       stuckBadge(p) +
       openItemsChip(p) +
+      jobsChip(p) +
       (up ? ` <span class="viewers" title="viewers">👁 ${p.viewers}</span>` : "") +
       (up ? agentsChip(p) : "") +
       // 📐 문법 제약이 실리는 세션 — 인스턴스의 칩과 같은 값(status.json)

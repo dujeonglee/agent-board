@@ -596,6 +596,8 @@ class TestUiWired:
         assert "badge oi" in js and "open_items" in js
         # 🔁 제자리 배지 (v1.45.0)
         assert "badge stuck" in js and "p.stuck" in js
+        # 🧵 작업 칩 (v1.46.0)
+        assert "badge jobs" in js and "p.jobs" in js
         # open in new tab by default + "현재 페이지에서 열기" toggle
         assert 'id="same-tab"' in html and "Open in this page" in html
         assert "window.open" in js
@@ -1358,6 +1360,61 @@ class TestStuckBadge:
         stuck_css = css[css.index(".badge.stuck {") :]
         assert "var(--fail)" in stuck_css[: stuck_css.index("}")]
         assert "var(--warn)" in css[css.index(".badge.stuck-ask") :][:80]
+
+
+class TestJobsChip:
+    """v1.46.0: 🧵 작업 칩 — status.json 의 additive `jobs` 가 post 로 그대로
+    나오고(구버전·다운은 None), 카드가 `🧵 N` 칩을 그린다. 멈춤 버튼은 없다(거울)."""
+
+    def test_post_carries_jobs(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        jb = {
+            "count": 1,
+            "list": [
+                {
+                    "id": 1,
+                    "pid": 9,
+                    "owner": "main",
+                    "command": "sleep 600",
+                    "started_at": 1794285259.5,
+                }
+            ],
+        }
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "running",
+                "awaiting_input": False,
+                "viewers": 0,
+                "jobs": jb,
+            },
+        )
+        (p,) = c.get("/api/posts").json()
+        assert p["jobs"] == jb
+
+    def test_post_without_jobs_is_null(self, tmp_path):
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        (p,) = c.get("/api/posts").json()
+        assert p["jobs"] is None
+
+    def test_card_wiring(self, tmp_path):
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        css = c.get("/static/style.css").text
+        assert "badge jobs" in js and "p.jobs" in js and "🧵 ${jb.count}" in js
+        assert "stop them from the 🧵 chips in the room" in js
+        assert "started ${at}" in js  # 경과가 아니라 시작 시각 — 툴팁이 낡지 않는다
+        card_src = js[js.index("function card(p)") :]
+        assert card_src.index("openItemsChip(p)") < card_src.index("jobsChip(p)")
+        assert card_src.index("jobsChip(p)") < card_src.index('class="viewers"')
+        assert ".badge.jobs {" in css
+        # 보드는 거울 — 멈추는 API 가 없다
+        assert "jobs/stop" not in js
 
 
 class TestCloneJob:

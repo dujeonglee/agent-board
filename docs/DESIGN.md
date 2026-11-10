@@ -99,7 +99,7 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
 | 메서드 | 경로 | 동작 |
 |---|---|---|
 | GET | `/` | 보드 UI(글 목록) |
-| GET | `/api/posts` | 글 목록 — 각 글에 `last_query`·`status`·`force_active`·`viewers`·`knobs`·`model`·`model_bound`·`open_items`·`stuck` 유도 포함 (§16 거울) |
+| GET | `/api/posts` | 글 목록 — 각 글에 `last_query`·`status`·`force_active`·`viewers`·`knobs`·`model`·`model_bound`·`open_items`·`stuck`·`jobs` 유도 포함 (§16 거울) |
 | GET | `/api/knobs/spec` | agent-cli 의 노브 표(`agent-cli knobs --json`, 프로세스당 1회 캐시) — `{full, knobs}`; 구버전 agent-cli 면 모델만 든 최소 표(`full: false`) (§17) |
 | GET | `/api/posts/{id}/tree` | 원본 글 워크스페이스 한 레벨 목록 (clone 트리 피커 — 보드가 fs 직접 읽음, 인스턴스 미기동도 동작) 심링크는 `{type: "link", size: 0, target}` 로 — 따라가지 않고 크기도 더하지 않는다(v1.43.0); 밖을 가리키는 링크 rel 로 펼치면 400 |
 | POST | `/api/posts` | 새 글 `{topic, knobs{model, …}, clone_from?, clone_paths?}` → 생성 (workspace 자동). `knobs` 는 표(§17)로 검증(400 `bad_knob`), `model` 필수(400 `model_required`/`dialect_unbound`). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) **v1.42.0**: clone 은 행 삽입·mkdir·**작업 시작**까지만 하고 바로 돌려준다 — 응답·목록 행의 `cloning`(진행 중일 때 스냅샷, 아니면 `null`), 복사 실패(traversal 등)는 400 대신 작업이 `failed` 로 남긴다(§4). |
@@ -389,6 +389,13 @@ agent-cli 의 sticky `knob:<name>` 한 길(마지막 쓴 사람이 이긴다)이
   `🔁 N turns` 배지(title `No new results for N turns`, `asking` 이면 방이 Continue/Stop 을
   묻는 중이라 `stuck-ask` 경고색과 `— waiting for your answer in the room`, 필드 없음이면
   없음)를 그린다. 묻고 답하는 곳은 방이다 — 보드는 방에 쓰지 않는다.
+- **🧵 작업** (v1.46.0, agent-cli ≥ 10.121.0): `status.json` 의
+  `jobs: {count, list: [{id, pid, owner, command, started_at}]}`(돌고 있는 백그라운드 작업 —
+  방이 `--idle-timeout` 으로 자기를 거두지 않는 이유)를 같은 꼴로 모양만 보고(`count` int·`list`
+  dict 목록, 아니면 생략) 옮기고, 📋 칩 뒤에 `🧵 N` 칩(title 첫 줄 `Background jobs running —
+  stop them from the 🧵 chips in the room`, 이어 작업마다 `#N cmd — started HH:MM`; 경과가 아니라
+  시작 시각 — 툴팁은 다시 그려질 때까지 낡는다; 필드 없음·0 이면 없음)을 그린다. 멈춤 버튼은
+  없다 — 멈추는 곳은 방의 🧵 칩 ■(`POST /api/jobs/stop`, 방의 API)이고 보드는 거울이다.
 
 ## 17. 노브 표 (`agent_board/knobs_spec.py`)
 
