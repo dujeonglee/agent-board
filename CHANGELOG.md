@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.46.1] - 2026-11-13
+
+### Changed — README 는 설치·사용 예시만
+
+`README.md` 를 처음 온 사람이 읽을 순서로 줄였습니다: 무엇인가 → 요구사항 → 설치·실행 →
+글 만들기·방 열기·카드 읽기·관리(스크린 캡처 세 장, `docs/images/`) → 더 보기. 사용자 설치
+명령(`pip install "git+ssh://…/agent-board.git"`)을 먼저 적고 개발 설치는 "개발" 절로 옮겼습니다.
+레퍼런스(상태·칩, 새 글과 노브, 열기·재실행·유지·삭제, 복제, 예약, admin, 탭 가드, 환경변수,
+로그, agent-cli 버전별 기능)는 `docs/REFERENCE.md`, 게이트웨이와 caddy 배포는 `docs/DEPLOY.md`
+로 옮겼습니다. 옮기면서 지금 코드와 어긋난 서술을 고쳤습니다 — 없어진 카드 모델 드롭다운과
+"모델 변경" 항목을 지우고, 화면 라벨을 실제 문자열(`Create clone`·`Cancel`·`Open`·`Keep`·
+`🔍 Detect`·`🗑 Clean up all missing`·`Answer in the room`·admin 표의 `grammar` 열)로 맞추고,
+`❗ Needs your reply` 상태와 환경변수 `AGENT_BOARD_ALLOW_UNAUTH_LAN`·`AGENT_BOARD_AGENT_CLI_CONFIG`
+를 더했습니다. 가드 `tests/test_readme_brief.py` 가 README 길이(150줄)·버전 이력 없음·그림(있고
+1 MB 이하, 안 쓰는 그림 없음)·세 문서의 상대 링크와 앵커를 지킵니다. 제품 동작은 바뀌지 않았습니다.
+
 ## [1.46.0] - 2026-11-10
 
 ### Added — 🧵 작업 칩
