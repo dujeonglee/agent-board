@@ -1,205 +1,105 @@
 # agent-board
 
-게시판형 웹 서비스 — **글 하나 = [agent-cli](https://github.com/dujeonglee/agent-cli)
-세션 하나 + 워크스페이스 + 주제**. 글을 클릭하면 그 세션의 agent-cli web UI 에 접속한다.
+[agent-cli](https://github.com/dujeonglee/agent-cli) 방들의 게시판이다.
+글 하나가 방 하나다 — agent-cli 세션 하나, 워크스페이스 하나, 주제 하나.
+글을 열면 그 방의 agent-cli 웹 화면으로 들어간다.
+방은 열 때 뜨고, 아무도 보지 않으면 스스로 꺼진다.
+다시 열면 대화를 이어서 뜬다.
 
-- 인스턴스는 **온디맨드로 떴다가 idle 시 스스로 종료**(agent-cli `--idle-timeout`),
-  다음 접속에 `--resume` 으로 재기동. 보드를 재시작해도 살아있는 인스턴스에 재attach.
-- 게시글마다 **상태 표시**: 🔵 Responding(main LLM 생성) / 🟠 Checking result(main 유휴,
-  세션 감사 런 진행 — agent-cli ≥ 10.42.0) / 🟣 Agents working(main 유휴,
-  상주 에이전트 가동 — agent-cli ≥ 7.10.0) / 🟢 Idle / ⚪ Off, **실시간 접속자 수**(👁),
-  **상주 에이전트 칩**(`🤖 작업중/전체`, hover 시 에이전트별 상태 — 없으면 숨김),
-  그리고 **게시물별 모델 드롭다운**(아무도 안 볼 때만 변경 가능 — 아래 참고).
-- 목록은 **SSE 라이브 push** 로 갱신 — 프론트가 주기적으로 폴링하지 않고, 보드가 각 글의
-  on-disk 상태(mtime)를 감시해 바뀐 행만 즉시 밀어준다.
-- **탭 가드 (v1.16.0)** — board-proxy 게이트웨이에서는 모든 방이 한 origin 으로
-  프록시되고 방/대시보드 탭이 각각 SSE 연결 1개를 점유하는데, 브라우저는 HTTP/1.1
-  origin 당 동시 연결이 **6개**(프로필 전체 합산)뿐이라 6개가 차면 승인 클릭까지 모든
-  요청이 조용히 멈춘다. **운용 전제: 방은 항상 board 열기 버튼으로 접근** — 열기 전에
-  BroadcastChannel 로 연결 보유 탭(방 + 대시보드)을 세어(샘플링 창 100ms —
-  v1.22.2, pong 은 같은 브라우저 전달이라 유휴 탭이 ~5ms 에 답하므로 충분)
-  **4개째 경고, 5개째 차단**(6이 되는 순간 포화라 1슬롯 예약). 게이트·POST
-  로 방 URL 을 완성한 뒤 **새 탭을 그 URL 로 바로** 연다(v1.22.3 — 예전엔
-  빈 탭 `window.open("")` 을 먼저 열고 나중에 navigate 했는데 그 about:blank→
-  실URL 전환이 재열기를 ~1초 굼뜨게 해, 직접 열기로 교체). 같은 글을 다시
-  열면 새 탭 대신 **기존 창을 재사용**(named window — 연결이 안 늘어 가드 면제). gateway=caddy(h2)
-  모드에선 가드가 자동 해제된다(`/api/gateway`). URL 직접 진입·브라우저 세션 복원은
-  게이트 밖(운용 정책상 범위 밖 — 세션 복원으로 탭이 대량 재진입하면 포화가 재현될
-  수 있고, 그때는 탭을 닫으면 된다).
-- **대화방 복제 (v1.21.0)**: 각 글 카드의 `📋 Clone` 버튼(열기 옆)이 그 글을 원본으로 **모달**을 연다. 대화를 이어받을 세션은 **원본 글에 저장된 session_id** 의 디렉터리다(v1.33.1 — 종전엔 정렬상 첫 디렉터리를 집어, 터미널에서 따로 돌린 세션이 섞인 워크스페이스에서 엉뚱한 세션을 이어받을 수 있었다; 원본 글에 세션이 없으면 복사된 세션 디렉터리가 하나일 때만 그것을 쓰고, 여럿이면 고르지 않고 fresh) — 한 창에서 새 주제·모델·복사할 파일/폴더(체크박스 트리)를 다 설정하고 `복제 생성`. 닫기(✕/Esc)나 `취소` = 중단 — 바깥 클릭으로는 닫히지 않는다(v1.42.0). **진행바 (v1.42.0)**: 복제는 서버의 백그라운드 작업이라 `복제 생성` 뒤 모달에 진행바와 `Cloning… 12.3M / 48.0M · 37 / 120 files · <지금 파일>` 줄이 나오고, 끝나면 모달이 저절로 닫힌다. 복제 중 `Close`(✕·Esc 도 같음)는 모달만 닫고 작업은 계속된다 — 그 글의 카드가 `Cloning… N%` 와 작은 바를 보여 주며, 끝날 때까지 열기·🔄·📋 Clone 은 숨는다(서버도 409 `cloning`). 실패하면 방은 롤백되고 모달에 사유가 나온다 — 모달을 닫은 뒤의 실패는 토스트 `Clone failed: <사유>` 로 알린다(v1.43.0). **심링크는 링크로 복사된다 (v1.43.0)**: 링크가 가리키는 내용은 따라가지 않고 대상 문자열 그대로 다시 만든다 — 안·밖·깨진 링크 모두 같다(종전엔 폴더 안의 링크를 따라가 워크스페이스 밖 내용까지 실제 파일로 복사했다). 트리에서는 🔗 로 보이고 고를 수 있지만 펼칠 수는 없다; 상대 링크는 대상도 함께 고르면 새 방 안에서 풀린다. 보드를 재시작하면 진행 중 작업은 사라지고 반쪽 방이 남는다(복구 없음). `.agent-cli/sessions/…` 를 포함하면 **대화까지 이어받고**(세션 remap: 새 sid + `_meta` 재작성, stale 사이드카 제외), 안 고르면 **파일만 가져온 새 대화**.
-- **버전 표시 (v1.23.0)**: 헤더에 `v<board> · cli <agent-cli>` 를 표시한다 — board 자신과 board 가 방을 spawn 하는 `agent-cli` 바이너리 버전(`GET /api/version`; cli 는 `agent-cli --version` 을 프로세스당 1회 캐시, 부재/미인식이면 board 만).
-- agent-cli 는 **외부 CLI 로만 호출**하며 수정하지 않는다.
+![글 목록](docs/images/board-list.png)
+
+카드 하나가 글 하나다.
+카드에는 상태(`Idle`·`Responding`·`Off` …), 👁 접속자 수, 칩이 붙는다.
+위 그림에서 첫 글은 대기 중, 둘째 글은 응답 중이고 열린 항목 칩(📋 1)이 있다. 셋째 글은 꺼져 있다.
 
 ## 요구사항
-- Python 3.10+
-- **`agent-cli` 가 PATH 에 있어야 함** (보드가 `agent-cli web ...` 를 spawn). agent-cli ≥ 10.71.0 이면 글의 **제목(topic)을 `--title` 로 넘겨** 방의 헤더 첫 자리·브라우저 탭(`<제목> · agent-cli`)·배너에 보인다(v1.40.0). 제목의 주인은 글이고 spawn 마다 넘기므로, 제목을 바꾸면 다음 🔄 재시작에 들어온다 — 떠 있는 방엔 쓰지 않는다(거울 규칙). 구버전 agent-cli 엔 넘기지 않는다.
-  상태 표시(busy)·뒤로가기 정리까지 쓰려면 **agent-cli ≥ 4.17.3**, **접속자 수 표시 +
-  게시물별 모델 변경**까지 쓰려면 **agent-cli ≥ 4.17.11**(`/api/health` 의 `viewers`) 권장.
-  **≥ 4.27.0** 이면 라이브 상태를 `status.json` 파일에서 읽어 **`/api/health` 폴링을 안 함**
-  (그 미만은 자동으로 health 폴백).
-- 모델 백엔드(omlx-server 등)는 agent-cli 설정을 그대로 사용.
+
+- Python 3.10 이상
+- PATH 에 `agent-cli` (≥ 10.121.0 권장 — 그보다 낮으면 카드의 일부 표시가 빠진다.
+  버전별 기능은 [REFERENCE](docs/REFERENCE.md#agent-cli-버전별-기능))
+- agent-cli 의 `models.json` 에 dialect 가 정해진 모델이 하나 이상
 
 ## 설치 · 실행
-```bash
-pip install -e ".[dev]"
-# 실브라우저 테스트(탭 가드·에이전트 칩): AGENT_BOARD_BROWSER_TESTS=1 pytest tests/browser/ (playwright+chromium)
 
-python -m agent_board.app          # → http://localhost:51966
-# 또는 콘솔 스크립트
-agent-board
+```bash
+pip install "git+ssh://git@github.com/dujeonglee/agent-board.git"
+agent-board          # → http://localhost:51966
 ```
 
-> **한 `data_dir` = 보드 1개.** 같은 data_dir 에서 보드를 두 번 띄우면 둘째는
-> `board.lock`(flock) 에 걸려 즉시 거부된다(공유 `board.db` 경쟁 + 인스턴스 이중 spawn
-> 방지). 여러 보드가 필요하면 `AGENT_BOARD_DATA`/`AGENT_BOARD_WORKSPACES` 를 분리할 것.
+글과 워크스페이스는 실행한 디렉터리의 `./data` 아래에 쌓인다.
+포트와 데이터 자리는 환경변수로 바꾼다.
 
-### 설정 (환경변수)
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| **─ 네트워크 ─** | | |
-| `AGENT_BOARD_HOST` | `127.0.0.1` | 바인드 호스트. board-proxy(기본)는 인증이 없어 비-loopback 바인드를 거부한다 — LAN 노출은 `gateway=caddy`(인증) 또는 `AGENT_BOARD_ALLOW_UNAUTH_LAN=1`(명시 위험 감수) |
-| `AGENT_BOARD_PORT` | `51966` (0xCAFE) | 보드 포트 (생략 시 fallback 다이나믹·인스턴스 50000~60000·omlx 8000·cli 0xC0DE 회피) |
-| **─ 경로 · 저장 ─** | | |
-| `AGENT_BOARD_HOME` | `./data` | 데이터 루트 base (아래 DATA·WORKSPACES 의 기본값 base) |
-| `AGENT_BOARD_DATA` | `= HOME`(`./data`) | `board.db`·`board.log`·`board.lock` 위치 (data_dir) |
-| `AGENT_BOARD_WORKSPACES` | `<base>/ws` | 글별 워크스페이스 루트 (`<root>/<post_id>`) |
-| `AGENT_BOARD_MODELS_JSON` | `~/.agent-cli/models.json` | 모델 드롭다운 목록 소스(agent-cli 레지스트리) |
-| **─ 인스턴스 spawn ─** | | |
-| `AGENT_BOARD_CLI` | `agent-cli` | spawn 바이너리 (PATH 또는 절대경로) |
-| `AGENT_BOARD_IDLE_TIMEOUT` | `300` | 인스턴스 `--idle-timeout` (초). viewer 0 이 이만큼 지속되면 자가종료 |
-| **─ 게이트웨이 (라우팅) ─** | | |
-| `AGENT_BOARD_GATEWAY` | `board-proxy` | 라우팅 데이터 플레인: `board-proxy`(보드 in-process 프록시) 또는 `caddy`(외부 Caddy). ⚠️ 아래 주의 |
-| `AGENT_BOARD_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API (`gateway=caddy` 일 때만) |
-| `AGENT_BOARD_CADDY_BASIC_AUTH` | `""` | Caddy 라우트 basic-auth `user:bcrypt` (`gateway=caddy` 일 때만) |
+```bash
+AGENT_BOARD_PORT=8080 AGENT_BOARD_HOME=~/agent-board-data agent-board
+```
 
-> **두 게이트웨이는 동작 파리티가 맞춰져 있다** — idle-reap 된 방을 직접 URL 재접속만으로
-> 자동 재기동(revive)하는 것은 이제 **양쪽 다** 된다(board-proxy 는 in-process,
-> caddy 는 death 엣지에 라우트 삭제→보드 revive 핸들러로 fall-through). 남는 차이는 전송 특성:
-> `caddy` 만 **TLS·단일포트·`/s/<id>` basic-auth** 를 준다. 기동 로그에 활성 게이트웨이가
-> 표시되고, `Router` ABC + `tests/test_router_parity.py` 가 두 구현의 파리티를 강제한다.
-> 자세히는 `docs/DESIGN.md` §9.
-
-> 로그는 콘솔이 아니라 파일로 빠집니다 — 콘솔엔 startup·에러만:
-> access 로그 → **`<DATA_DIR>/board.log`**(회전 5MB×3),
-> spawn 된 인스턴스 출력(배너 등) → **`<workspace>/.agent-cli/instance.log`**.
+보드는 기본으로 `127.0.0.1` 에만 열린다.
+다른 기기에서 쓰려면 [DEPLOY.md](docs/DEPLOY.md) 를 본다.
+환경변수 전부는 [REFERENCE](docs/REFERENCE.md#환경변수) 에 있다.
 
 ## 사용
-1. **새 글**: 주제 + **모델(필수)** + `⚙ Advanced`(선택) → 빈 워크스페이스 자동 생성.
-   모델 드롭다운은 agent-cli 레지스트리(`~/.agent-cli/models.json`,
-   `AGENT_BOARD_MODELS_JSON` 로 변경)에서 채워지며, 고른 id 가 spawn 시 `--model` 로
-   전달됨(키/정의는 agent-cli 가 자기 레지스트리에서 해석 — 보드에 안 흩어짐).
-   **v1.36.0 (agent-cli ≥ 10.46.0 짝) — 보드는 방의 거울**: `⚙ Advanced` 을 펼치면 사고·문법·
-   샘플링·에이전트 상한·압축 비율·무진전 한도/시도·자동 승인·감사 노브를 줄 수 있다
-   (컨트롤은 `agent-cli knobs --json` 의 표에서 그려지고, 비우면 agent-cli 기본값). 노브
-   입력은 **여기 한 번**뿐이다. 만든 뒤에는 방 안의 칩(🤖 🧠 📐 👥 🗜️ ⏳ 🔎 ⚡)에서
-   바꾸고, 보드는 방이 `status.json` 에 보고한 값을 카드에 🤖 모델 칩·노브 칩·`⚙`
-   읽기 전용 패널로 보여 주며 **기록**한다 — 그래서 방에서 🤖 로 바꾼 모델이 재시작
-   뒤에도 남는다. 카드의 모델 드롭다운과 "아무도 안 볼 때만 변경" 게이트는 없어졌다.
-   뜰 수 없는 방(모델 삭제·방언 미설정)은 📋 복제로 다른 모델을 골라 이어간다. 복제
-   폼은 원본의 노브로 채워진다. 구버전 agent-cli(< 10.45.0)에서는 `⚙ Advanced` 이 안 보이고
-   모델만 넘긴다.
-   **v1.33.0 (agent-cli ≥ 10.4.0 짝)**: 드롭다운에는 **방언(dialect) 바인딩이 있는 모델만**
-   보인다 — agent-cli v10.3.0 부터 바인딩 없는 모델은 부트에서 거부되므로, 보드는 같은
-   판정으로 선택지에서 빼고(하나뿐이면 미리 고름, 없으면 "⚙ 어드민에서 설정" 안내로
-   만들기 비활성), 서버도 생성(400)과 열기·🔄 재실행(409)을 사유와 함께 거절한다.
-   "(기본)" 선택지는 없다 — agent-cli `config.json` 의 `default_model` 에 기대지 않는다.
-   모델이 없거나(v1.33.0 전 "(기본)" 글) 바인딩이 빠진 글은 카드에 ⚠ 경고 줄과
-   **⚙ Set up** 링크(`/admin#model=<id>` — 그 모델의 편집 창이 바로 열림)가 뜨고 열기가
-   비활성이다. 인스턴스가 준비되지 못하면(부트 fail-fast) 열기 실패 토스트에
-   `instance.log` 꼬리의 사유가 실린다(502).
-   기존 코드는 글을 연 뒤 📁 업로드 또는 에이전트에게 `git clone` 으로 투입.
-2. **열기**: spawn-or-attach 후 `/s/<post_id>/` 로 접속 → agent-cli UI.
-3. **모델 변경**: 게시글 행의 모델 드롭다운으로 언제든 바꿀 수 있다 — 단 **아무도 보고 있지
-   않을 때만**(인스턴스가 꺼져 있거나, 떠 있어도 접속자 0 + 응답 중 아님). 응답 중이거나
-   접속자가 있으면 드롭다운이 **비활성**된다(👁 접속자 수로 확인). 변경 시: 꺼진 글은
-   다음 열기에 새 모델로, 떠 있는 글은 인스턴스를 멈춰(⚪) 다음 열기에 적용 — 단
-   **force-active 글은 즉시 새 모델로 재시작**(유지 약속 보존). 세션은 `--resume` 으로
-   이어지므로 대화 맥락은 유지된 채 모델만 교체된다.
-4. **🔄 재실행**: 떠 있는 인스턴스를 **강제 재시작**(stop → respawn) — 새로 설치한
-   agent-cli 를 반영할 때 쓴다. **게이트 없이 언제든** 동작하며(응답 중·접속자 있어도),
-   **토큰을 재사용**해 이미 열려 있던 뷰어는 그대로 재연결되고 세션은 `--resume` 으로
-   이어진다(대화 맥락 유지). 버튼은 인스턴스가 떠 있을 때만 보인다(꺼진 글은 "열기"가
-   이미 새로 spawn 하므로).
-5. **유지(force-active)**: 접속자 0 이어도 인스턴스를 살려둠(idle 종료 방지).
-6. **🗑 삭제**: 글 + 인스턴스 종료 + 워크스페이스 삭제.
-7. **⚙ admin** (`/admin`, 헤더 우측): agent-cli 의 `config.json`/`models.json` 편집 페이지.
-   - **config.json**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
-     화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 외 키는 보존.
-     변경은 **새로 여는 인스턴스부터** 적용(떠 있는 방은 🔄 재실행).
-   - **models.json**: 표에 `문법` 열(`supports_grammar` ✓/✗/`?`=키 없음), 편집 폼에 3값 선택(미기록 → 인스턴스에서 미확인으로 잠김, 감지(프로브)가 판정해 채움 / true / false) — v1.31.0. `vision` 열·`supports_vision` 3값 선택도 같은 모양(v1.38.0) — 미기록이면 인스턴스가 첫 이미지에서 한 번 프로브해 판정을 엔트리에 적는다(agent-cli ≥ 10.68.0). `sampling` 열(`T 0.2 · p 0.95` / `—`)과 편집 폼의 `temperature`(0~2)·`top_p`(0~1) 숫자 칸은 **이 모델의 기본 샘플링**(v1.39.0, agent-cli ≥ 10.69.0) — 방이 자기 🎲 노브로 정하지 않은 키에 매 요청 실리고, 빈 칸 = 키 미기록(서버 기본), 범위 밖은 저장 거절(400). 이 두 키는 하니스의 프로브가 채우지 않는 사용자 결정값이다. 글 카드에는 문법 제약이 실리는 세션에 📐 배지(status.json·health 의 `grammar`, agent-cli ≥ 9.24.0). 모델이 아직 갚을 열린 항목이 있으면 `📋 N` 칩(status.json 의 `open_items`, agent-cli ≥ 10.119.0 — 툴팁에 id, 되묻기 예산 0 이면 주황; 상세는 방의 📋 띠, v1.44.0). main 런이 새 결과 없이 여러 턴째 돌면 `🔁 N turns` 배지(status.json 의 `stuck`, agent-cli ≥ 10.120.0 — 방이 Continue/Stop 을 묻는 중이면 주황, v1.45.0). 방에 백그라운드 작업이 돌고 있으면 `🧵 N` 칩(status.json 의 `jobs`, agent-cli ≥ 10.121.0 — 툴팁에 작업마다 명령과 시작 시각; 뷰어 0 인데 방이 안 꺼지는 이유; 멈추는 곳은 방의 🧵 칩 ■, v1.46.0).
-   - **models.json**: config 의 endpoint 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
-     `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 "missing 전체 정리") /
-     `NEW`(서버에만 있음 — **🔍 탐지** 버튼이 agent-cli 의 capability 자동 탐지를 돌려
-     entry 초안을 채우고, 검토·수정 후 저장; 탐지 실패 시 수동 입력). 편집은 ✎ 다이얼로그
-     (context_window/max_output_tokens/thinking/budget/format +
-     **dialect(방언) 바인딩 드롭다운 — 필수(v1.33.0)** — 이 모델의 응답 tool-call 모양
-     (agent-cli 모델별 바인딩, 키 `dialect`). 없으면 agent-cli 가 그 모델을 실행하지 않으므로
-     저장이 거절되고(400), 표에는 ⚠ 미설정 배지가, 편집 창에는 선택지별 한 줄 가이드
-     (`json_fc` 일반 권장 / `native_fc` 서버가 tool_calls 를 직접 파싱할 때 / `xml_fc` 태그
-     모양 선호 모델 …)가 보인다. `auto` 선택지와 옛 키 `wire_format` 읽기는 없다(agent-cli
-     v10.4.0 과 같은 판정). 옵션은 agent-cli 등록 방언명만(자유입력 금지 — 오타는
-     agent-cli 부트 fail-fast 대상).
-   - 자동 삭제는 없음 — 모든 파괴적 동작은 confirm 클릭으로. 쓰기는 원자적(temp+replace)이라
-     agent-cli 인스턴스의 auto-detect 저장과 겹쳐도 안전.
-8. **⏰ 예약** (v1.34.0 — agent-cli 의 기능): 예약은 그 방의 agent-cli 세션이
-   소유하고 **그 프로세스가 발화**한다. 목록·추가·"지금 실행/건너뛰기" 는 방
-   화면 헤더의 ⏰ 서랍에서 하고, 대화 중 에이전트에게 "매주 월요일 9시에 주간
-   보고 써줘" 처럼 말해도 된다. 보드가 하는 일은 셋뿐이다:
-   - **배지**: 카드의 ⏰ 숫자(그 방의 예약 수). 누르면 방을 연다.
-   - **놓친 예약 안내**: 방이 꺼져 있던 동안 지난 발화는 자동 실행되지 않는다.
-     카드에 안내가 뜨고 "방에서 답하기" 로 들어가 실행/건너뛰기를 고른다.
-   - **다시 띄우기**: 켜진 예약이 있는 방은 스스로 꺼지지 않는다("유지" 와 같은
-     효과). 그래도 죽으면(재부팅·크래시) 보드가 기동 때와 죽음을 감지했을 때
-     다시 띄운다(방 하나당 60초에 한 번).
 
-   v1.33 까지는 보드가 스케줄러였다(DB 테이블 + 워크스페이스 파일 계약). 그
-   예약은 v1.34.0 첫 기동 때 각 방의 세션 폴더로 옮겨지고 테이블은 지워진다
-   (한 번도 연 적 없는 방의 예약은 옮길 세션이 없어 로그에 남기고 버린다).
-   **agent-cli 10.12.0 이상이 필요하다** — 그 전 버전에는 예약 기능이 없다.
-   설계: agent-cli 의 `docs/schedule/DESIGN.md` (종전 설계 `docs/schedule-design.md`
-   는 기록으로 남긴다).
+### 1. 글 만들기
 
-## 아키텍처 · 게이트웨이
-`AGENT_BOARD_GATEWAY` 로 라우팅 데이터 평면을 고른다:
+![새 글](docs/images/board-new-post.png)
 
-- **`board-proxy`(기본)** — 보드가 직접 `/s/<id>/*` 를 SSE 무버퍼로 프록시. 무의존,
-  로컬/소규모. 보드가 데이터 경로에 있음(재시작 시 연결 끊김→자동 재연결).
-- **`caddy`(프로덕션)** — 보드가 Caddy admin API 로 `/s/<id>` 라우트를 등록, **Caddy 가
-  인스턴스로 직접 프록시**. 보드는 데이터 경로 밖(TLS·단일포트·재시작 견고).
+1. 주제를 적는다.
+2. 모델을 고른다. dialect 가 정해진 모델만 목록에 나온다.
+3. `⚙ Advanced` 는 선택이다. 사고·문법·샘플링·에이전트 상한·자동 승인 같은 노브가 펼쳐진다.
+   비워 두면 agent-cli 기본값을 쓴다.
+4. `+ New post` 를 누른다. 빈 워크스페이스가 함께 만들어진다.
 
-### 프로덕션 배포 (caddy)
-```bash
-# 1) 비밀번호 해시 생성
-caddy hash-password --plaintext 'secret'      # → $2a$14$...
+노브는 만들 때 한 번만 준다. 그 뒤에는 방 안의 칩에서 바꾼다.
 
-# 2) deploy/Caddyfile 의 도메인·해시 수정 후 Caddy 기동 (admin 127.0.0.1:2019)
-#    도메인 없는 LAN 이면 deploy/Caddyfile.lan 사용:
-#      <LAN_IP> 치환 → caddy run --config deploy/Caddyfile.lan
-#      접속: https://<LAN_IP>:8443 (h2 — 연결 6개 제한 소멸, 탭 가드 자동 해제)
-#      기기당 1회 CA 신뢰: 이 맥 `caddy trust`, 타 기기는 root.crt 설치(또는 경고 클릭스루)
-# 3) 보드를 caddy 모드로 (★ loopback 바인드 필수 — 아래 주의)
-AGENT_BOARD_GATEWAY=caddy \
-AGENT_BOARD_HOST=127.0.0.1 \
-AGENT_BOARD_CADDY_BASIC_AUTH='alice:$2a$14$...' \
-agent-board
-```
-- 동봉: `deploy/Caddyfile`, `deploy/agent-board.service`(systemd, 이미 `127.0.0.1` 바인드).
-- **★ caddy 모드는 보드를 `AGENT_BOARD_HOST=127.0.0.1` 로 바인드**하라. Caddy 가 앞단에서
-  `/s/<id>` 를 인스턴스로 직결하는데, 보드 포트를 `0.0.0.0`/외부로도 열어두고 **그 포트에 직접
-  접속하면 Caddy 를 우회**해 revive fall-through 가 같은 origin 으로 리다이렉트→503 루프가 된다.
-  비-loopback 바인드 시 기동 로그가 경고한다(브라우저는 항상 Caddy 주소로 접속).
-- **보안**: 각 `/s/<id>` 동적 라우트에 **basic_auth 핸들러가 직접 포함**되어(보드가 삽입)
-  삽입 순서와 무관하게 **인증 우회 불가**. 단 단위테스트는 admin API 호출만 검증하므로,
-  배포 후 **반드시** `curl` 로 인증을 실측하라(Caddyfile 하단 체크리스트 — 토큰 없이
-  `/s/<id>/api/health` → 401 이어야 함).
+### 2. 방 열기
 
-## 설계 문서
+![방](docs/images/board-room.png)
+
+`Open` 을 누르면 새 탭에 그 방의 agent-cli 웹 화면이 열린다.
+헤더의 `Open in this page` 를 켜면 지금 탭에서 연다.
+방 안에서 하는 일은 [agent-cli README](https://github.com/dujeonglee/agent-cli#readme) 를 본다.
+
+### 3. 카드 읽기
+
+| 표시 | 뜻 |
+|---|---|
+| `Responding` | 모델이 답을 만드는 중 |
+| `Checking result` | 방금 끝난 런의 결과를 확인하는 중 |
+| `Agents working` | 방의 에이전트가 일하는 중 (main 은 비어 있다) |
+| `Idle` | 방이 떠 있고 기다리는 중 |
+| `Off` | 방이 꺼져 있다. `Open` 하면 뜬다 |
+| `❗ Needs your reply` | 방이 사람의 답을 기다린다 |
+| `👁 N` | 지금 방을 보고 있는 사람 수 |
+| `🤖 모델` | 방이 쓰는 모델 |
+| `🤖 N/M` | 방의 에이전트 — 일하는 수 / 전체 |
+| `⏰ N` | 방의 예약 수. 누르면 방이 열린다 |
+| `📋 N` | 모델이 아직 처리하지 않은 열린 항목 수 |
+| `🧵 N` | 방에서 돌고 있는 백그라운드 작업 수 |
+
+배지와 칩 전부는 [REFERENCE](docs/REFERENCE.md#카드와-상태) 에 있다.
+
+### 4. 관리
+
+- `🔄` — 떠 있는 방을 다시 띄운다. 대화는 이어진다. 새로 깐 agent-cli 를 반영할 때 쓴다.
+- `Keep` — 보는 사람이 없어도 방을 끄지 않는다.
+- `📋 Clone` — 파일과 대화를 골라 새 글로 복사한다. 다른 모델로 이어갈 때도 쓴다.
+- `🗑` — 글, 방, 워크스페이스를 지운다. 되돌릴 수 없다.
+- 헤더의 `⚙` — admin 페이지. agent-cli 의 `config.json`·`models.json` 을 고친다.
+
+## 더 보기
+
+- [docs/REFERENCE.md](docs/REFERENCE.md) — 상태·칩·복제·예약·admin·탭 가드·환경변수·로그
+- [docs/DEPLOY.md](docs/DEPLOY.md) — LAN·인증·TLS 로 내놓기 (caddy)
+- [docs/DESIGN.md](docs/DESIGN.md) — 모듈·API·DB·라이프사이클 설계
 - [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) — 요구사항
-- [docs/DESIGN.md](docs/DESIGN.md) — 모듈/API/DB/라이프사이클 설계
-- [docs/schedule-design.md](docs/schedule-design.md) — ⏰ 보드 내부 스케줄러 설계 (v1.26.0~v1.33, **v1.34.0 에서 agent-cli 로 이전** — 기록용)
+- [CHANGELOG.md](CHANGELOG.md) — 변경 기록
+- [agent-cli](https://github.com/dujeonglee/agent-cli)
 
 ## 개발
+
 ```bash
-pytest          # 전체 테스트
+pip install -e ".[dev]"
+pytest
 ruff check agent_board/ tests/ && ruff format --check agent_board/ tests/
+AGENT_BOARD_BROWSER_TESTS=1 pytest tests/browser/   # 실브라우저 테스트 (playwright + chromium)
 ```
