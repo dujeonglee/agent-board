@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.46.2] - 2026-11-14
+
+### Changed — 교차 저장소 계약 테스트가 agent-cli 의 새 모듈 경로를 읽는다
+
+agent-cli v10.133.12 가 `web.json`·`status.json` 을 쓰는 모듈을 `agent_cli.web.instance_file`
+에서 `agent_cli.instance_file` 로 옮겼습니다(렌더러가 web 패키지를 지연 import 하던 매듭을 푼 것).
+보드 제품 코드는 이 모듈을 import 하지 않고 파일만 읽으므로 동작은 그대로이고, agent-cli 가 쓴
+`status.json` 을 보드 파서로 읽어 보는 계약 테스트 둘(`tests/test_sessions.py`)의 import 경로만
+바꿨습니다. 이 두 테스트는 같이 깔린 agent-cli 가 v10.133.12 이상이어야 돕니다.
+
 ## [1.46.1] - 2026-11-13
 
 ### Changed — README 는 설치·사용 예시만

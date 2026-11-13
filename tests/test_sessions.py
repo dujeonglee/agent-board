@@ -411,7 +411,7 @@ class TestStatusFileCrossRepoContract:
         return ws, sdir
 
     def test_agent_cli_written_status_parses(self, tmp_path, monkeypatch):
-        from agent_cli.web.instance_file import write_status_file
+        from agent_cli.instance_file import write_status_file
 
         ws, sdir = self._ws(tmp_path)
         monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
@@ -437,8 +437,8 @@ class TestStatusFileCrossRepoContract:
     def test_agent_cli_summary_builder_end_to_end(self, tmp_path, monkeypatch):
         """한 단계 더 실물로: agent-cli 렌더러의 요약 빌더 출력(실어휘
         busy 포함)이 board 파서·프런트 계약을 그대로 만족."""
+        from agent_cli.instance_file import write_status_file
         from agent_cli.render.web import WebRenderer
-        from agent_cli.web.instance_file import write_status_file
 
         ws, sdir = self._ws(tmp_path)
         monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
