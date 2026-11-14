@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.47.1] - 2026-11-14
+
+### Changed — admin 화면 다듬기 (여백·입력 컨트롤)
+
+`/admin` 본문이 화면 왼쪽 끝에 붙어 있던 것과 브라우저 기본 모양 입력칸을 고쳤습니다. CSS 와 감싸는
+요소 둘(`<main class="adm-main">`, 모델 표의 `.adm-table-wrap`)만 바뀌었고 `admin.js`·API 는 그대로입니다.
+
+- 본문 좌우 20px(640px 이하 14px — 머리줄과 같은 거터), 최대 폭 72rem 왼쪽 정렬.
+- config.json·models.json 두 섹션을 `--surface` 판(테두리·radius 10px)으로. 경로 노트는 제목 아래 고정폭 한 줄.
+- 입력 한 벌: text·password·number·select(dialog 포함)가 메인 새 글 입력과 같은 모양 — hover 테두리,
+  `:focus-visible` 은 `--focus-ring` 테두리 + `--accent-soft` 3px 그림자, placeholder `--muted`,
+  select 는 인라인 SVG 화살표(어두운 테마 넷·light 각각), 체크박스 `accent-color`, `color-scheme` 으로
+  스피너·빈 체크박스도 테마 명암을 따름. 같은 줄 버튼은 입력과 같은 높이.
+- 표 머리 11.5px 대문자·`--text-2`, 행 hover `--surface-2`, 숫자 열 `tabular-nums`.
+- 400px 폭에서 모델 표가 페이지를 가로로 밀던 것(scrollWidth 717)을 표 안 가로 스크롤로 — 페이지는 400.
+- 좁은 화면에서 폼·dialog 는 라벨 위·입력 아래 한 열.
+
 ## [1.47.0] - 2026-11-14
 
 ### Added — admin 의 Extra headers (agent-cli `extra_headers`)
