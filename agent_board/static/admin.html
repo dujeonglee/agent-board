@@ -42,6 +42,12 @@
     dialog#entry-dlg { max-width: 34rem; width: 90%; border: 1px solid var(--border-2); border-radius: .5rem; background: var(--surface); color: inherit; }
     dialog#entry-dlg::backdrop { background: #0008; }
     #entry-form { display: grid; grid-template-columns: 14rem 1fr; gap: .4rem .7rem; align-items: center; margin: .8rem 0; }
+    /* extra_headers — 모델 서버로 가는 요청에 붙는 사용자 헤더 (값은 *** 로만 보인다) */
+    .adm-hdrs { margin-top: .9rem; max-width: 44rem; }
+    .adm-hdrs h3 { font-size: .95rem; margin: 0 0 .35rem; }
+    table.adm-hdrs-table { border-collapse: collapse; width: 100%; }
+    table.adm-hdrs-table th, table.adm-hdrs-table td { padding: .25rem .4rem; text-align: left; font-size: .9rem; }
+    table.adm-hdrs-table input[type=text], table.adm-hdrs-table input[type=password] { width: 100%; padding: .3rem .45rem; box-sizing: border-box; }
     
   </style>
 </head>
@@ -64,6 +70,17 @@
       <input id="cfg-api-key" type="text" placeholder="(set: *** — enter only to change)" autocomplete="off">
       <label for="cfg-default-model">default_model</label>
       <input id="cfg-default-model" type="text" placeholder="model id">
+    </div>
+    <div class="adm-hdrs" id="cfg-hdrs">
+      <h3>Extra headers</h3>
+      <table class="adm-hdrs-table">
+        <thead><tr><th>on</th><th>name</th><th>value</th><th></th></tr></thead>
+        <tbody id="cfg-hdrs-body"></tbody>
+      </table>
+      <div class="adm-actions">
+        <button id="cfg-hdr-add" type="button" class="btn-ghost">+ Add header</button>
+      </div>
+      <p class="adm-note">Sent with every request to the model server, like the API key — only checked rows. Values show as *** after saving; leave *** as is to keep the saved value.</p>
     </div>
     <div class="adm-actions">
       <button id="cfg-save" type="button" class="btn-primary">💾 Save</button>

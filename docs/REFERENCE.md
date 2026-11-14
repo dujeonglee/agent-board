@@ -134,6 +134,15 @@ v1.33 까지는 보드가 스케줄러였다(DB 테이블 + 워크스페이스 �
 - **config.json**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
   화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 외 키는 보존.
   변경은 **새로 여는 인스턴스부터** 적용(떠 있는 방은 🔄 재실행).
+- **config.json** — Extra headers: 폼 아래 표. 행마다 체크박스(켬)·name·value·Remove, 아래
+  `+ Add header`, 저장은 같은 `💾 Save`. agent-cli 의 `extra_headers` 를 편집한다 — 켜진 헤더는
+  agent-cli 가 키와 함께 모델 서버로 가는 모든 요청에 싣는다. 값은 api_key 처럼 저장 뒤 `***` 로만
+  보이고, `***` 를 그대로 두면 같은 이름(대소문자 무시)의 저장된 값을 유지한다(저장된 적 없는 이름에
+  `***` 면 거절). 지운 행은 파일에서 사라진다. 검증은 agent-cli 의 규칙 그대로(HTTP 헤더 이름 글자,
+  값에 줄바꿈 금지, `Authorization`·`x-api-key`·`Content-Type` 같은 하니스 소유 이름 금지, 켜진
+  이름 중복 금지) — 어기면 400 과 헤더 **이름**만 담은 문구, 파일은 그대로. 모델 목록 프로브와 🔍
+  Detect 도 같은 헤더를 보내고, base_url 이 원격이면 보드 로그에 "sends the API key and N extra
+  headers to a remote host" 경고가 남는다(값 없이 개수만).
 - **models.json** — 상태: config 의 endpoint 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
   `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 `🗑 Clean up all missing`) /
   `NEW`(서버에만 있음 — **`🔍 Detect`** 버튼이 agent-cli 의 capability 자동 탐지를 돌려
@@ -226,5 +235,6 @@ board-proxy 게이트웨이에서는 모든 방이 한 origin 으로 프록시�
 | ≥ 10.119.0 | 📋 열린 항목 칩 |
 | ≥ 10.120.0 | 🔁 제자리 배지 |
 | ≥ 10.121.0 | 🧵 작업 칩 |
+| ≥ 10.134.0 | admin 의 Extra headers·모델 목록 프로브·🔍 Detect (agent-cli 의 `Credentials` 를 쓴다 — 그 미만이면 admin 의 이 셋이 오류) |
 
 모델 백엔드(omlx-server 등)는 agent-cli 설정을 그대로 사용한다.
