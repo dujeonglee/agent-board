@@ -20,35 +20,107 @@
     })();
   </script>
   <style>
-    /* admin 전용 소품 — 본체 style.css 토큰 위에 얹는 최소 레이어 */
-    .adm-section { margin: 1.2rem 0; }
-    .adm-section h2 { font-size: 1.05rem; margin-bottom: .5rem; }
-    .adm-form { display: grid; grid-template-columns: 10rem 1fr; gap: .45rem .8rem; max-width: 44rem; align-items: center; }
-    .adm-form input, .adm-form select { padding: .35rem .5rem; }
-    .adm-actions { margin-top: .7rem; display: flex; gap: .6rem; align-items: center; }
-    .adm-note { color: var(--muted); font-size: .85rem; }
-    table.adm-models { border-collapse: collapse; width: 100%; max-width: 72rem; }
-    table.adm-models th, table.adm-models td { border-bottom: 1px solid var(--border); padding: .4rem .55rem; text-align: left; font-size: .9rem; }
+    /* admin 전용 소품 — 본체 style.css 토큰 위에 얹는 최소 레이어.
+       메인 화면(style.css)은 건드리지 않고, 여기 규칙은 전부 admin 안으로 범위를 좁힌다. */
+
+    /* ── 본문 틀: 머리줄과 같은 좌우 20px(모바일 14px), 넓은 화면은 최대 폭 + 왼쪽 정렬 ── */
+    .adm-main { padding: 20px 20px 40px; max-width: 72rem; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── 섹션 판 둘(config.json·models.json) — 그 밖에는 카드를 만들지 않는다 ── */
+    .adm-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px 18px; min-width: 0; }
+    .adm-section h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    /* 경로 노트는 제목 아래 한 줄 — 긴 경로가 판을 밀어내지 않게 아무 데서나 꺾는다 */
+    .adm-section h2 #cfg-path { flex-basis: 100%; font-weight: 400; font-size: 12px; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .adm-form { display: grid; grid-template-columns: 10rem 1fr; gap: 8px 14px; max-width: 44rem; align-items: center; }
+    .adm-form > label, #entry-form > label { color: var(--text-2); font-size: 13px; }
+    .adm-actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .adm-note { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+    .adm-status { min-height: 1.2rem; font-size: 13px; margin-top: 8px; overflow-wrap: anywhere; }
+    .adm-status.err { color: var(--fail); }
+    .adm-status.ok  { color: var(--ok); }
+
+    /* ── 입력 컨트롤 한 벌 — 메인 #new input 과 같은 모양 (admin 의 text·password·number·select, dialog 포함) ── */
+    .adm-main input:is([type=text], [type=password], [type=number]),
+    .adm-main select,
+    #entry-dlg input:is([type=text], [type=password], [type=number]),
+    #entry-dlg select {
+      padding: 8px 10px; border-radius: 8px; font-size: 13px; font-family: inherit; line-height: 1.3;
+      border: 1px solid var(--border-2); background: var(--bg); color: var(--text);
+      min-width: 0; width: 100%; box-sizing: border-box; outline: none;
+      transition: border-color .12s, box-shadow .12s;
+    }
+    .adm-main input:is([type=text], [type=password], [type=number]):hover,
+    .adm-main select:hover,
+    #entry-dlg input:is([type=text], [type=password], [type=number]):hover,
+    #entry-dlg select:hover { border-color: var(--ghost-border); }
+    .adm-main input:is([type=text], [type=password], [type=number]):focus-visible,
+    .adm-main select:focus-visible,
+    #entry-dlg input:is([type=text], [type=password], [type=number]):focus-visible,
+    #entry-dlg select:focus-visible { border-color: var(--focus-ring); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+    /* UA 가 그리는 부분(number 스피너·빈 체크박스·select 목록)도 테마 명암을 따르게 */
+    .adm-main, #entry-dlg { color-scheme: dark; }
+    :root[data-theme="light"] .adm-main, :root[data-theme="light"] #entry-dlg { color-scheme: light; }
+    .adm-main input::placeholder, #entry-dlg input::placeholder { color: var(--muted); opacity: 1; }
+    /* select — UA 화살표 대신 인라인 SVG. data URI 는 currentColor 를 못 쓰니 어두운 테마 넷은 밝은 회색, light 는 진한 회색 */
+    .adm-main select, #entry-dlg select {
+      appearance: none; -webkit-appearance: none; padding-right: 30px; cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%239aa1ad' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center; background-size: 12px 12px;
+    }
+    :root[data-theme="light"] .adm-main select, :root[data-theme="light"] #entry-dlg select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' fill='none' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    }
+    .adm-main select option, #entry-dlg select option { background: var(--surface); color: var(--text); }
+    .adm-main input[type=checkbox], #entry-dlg input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; vertical-align: middle; cursor: pointer; }
+    /* 같은 줄의 버튼도 입력과 같은 높이(13px 글자 + 8px 패딩) */
+    .adm-main .adm-actions > button, #entry-dlg .adm-actions > button { padding: 8px 14px; font-size: 13px; }
+
+    /* ── 표: 머리는 작은 대문자 톤, 행 hover, 숫자 열 tabular-nums ── */
+    .adm-table-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+    table.adm-models { border-collapse: collapse; width: 100%; }
+    table.adm-models th, table.adm-models td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: left; font-size: 13px; white-space: nowrap; }
+    table.adm-models th, table.adm-hdrs-table th { color: var(--text-2); font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+    table.adm-models th { border-bottom-color: var(--border-2); }
+    table.adm-models tbody tr:hover td { background: var(--surface-2); }
+    table.adm-models td:nth-child(3), table.adm-models td:nth-child(4), table.adm-models td:nth-child(8) { font-variant-numeric: tabular-nums; }
+    table.adm-models td:last-child { text-align: right; }
+    table.adm-models td:last-child button { margin-left: 4px; }
     .badge { display: inline-block; padding: .05rem .45rem; border-radius: .6rem; font-size: .78rem; }
     .badge.served  { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
     .badge.missing { background: var(--fail-soft-bg); color: var(--fail); }
     .badge.new     { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
     .badge.unknown { background: var(--surface-2); color: var(--muted); }
     .badge.unbound { background: var(--fail-soft-bg); color: var(--fail); }
-    .ef-guide { grid-column: 1 / -1; color: var(--muted); font-size: .85rem; margin-top: -.2rem; }
-    .adm-status { min-height: 1.2rem; }
-    .adm-status.err { color: var(--fail); }
-    .adm-status.ok  { color: var(--ok); }
-    dialog#entry-dlg { max-width: 34rem; width: 90%; border: 1px solid var(--border-2); border-radius: .5rem; background: var(--surface); color: inherit; }
-    dialog#entry-dlg::backdrop { background: #0008; }
-    #entry-form { display: grid; grid-template-columns: 14rem 1fr; gap: .4rem .7rem; align-items: center; margin: .8rem 0; }
-    /* extra_headers — 모델 서버로 가는 요청에 붙는 사용자 헤더 (값은 *** 로만 보인다) */
-    .adm-hdrs { margin-top: .9rem; max-width: 44rem; }
-    .adm-hdrs h3 { font-size: .95rem; margin: 0 0 .35rem; }
+    #models > .adm-note { margin: 12px 0 0; }
+
+    /* ── extra_headers — 모델 서버로 가는 요청에 붙는 사용자 헤더 (값은 *** 로만 보인다) ── */
+    .adm-hdrs { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); max-width: 44rem; }
+    .adm-hdrs h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+    .adm-hdrs .adm-note { margin: 10px 0 0; }
     table.adm-hdrs-table { border-collapse: collapse; width: 100%; }
-    table.adm-hdrs-table th, table.adm-hdrs-table td { padding: .25rem .4rem; text-align: left; font-size: .9rem; }
-    table.adm-hdrs-table input[type=text], table.adm-hdrs-table input[type=password] { width: 100%; padding: .3rem .45rem; box-sizing: border-box; }
-    
+    table.adm-hdrs-table th, table.adm-hdrs-table td { padding: 4px 6px 4px 0; text-align: left; font-size: 13px; vertical-align: middle; }
+    table.adm-hdrs-table th:first-child, table.adm-hdrs-table td:first-child { width: 1%; padding-right: 10px; text-align: center; }
+    table.adm-hdrs-table td:last-child { width: 1%; padding-right: 0; }
+    table.adm-hdrs-table td:last-child button { padding: 8px 12px; font-size: 13px; }
+
+    /* ── dialog — 같은 입력 규칙, 제목·폼·버튼 줄 간격 ── */
+    dialog#entry-dlg { max-width: 34rem; width: calc(100% - 28px); padding: 18px 20px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--surface); color: inherit; box-shadow: 0 12px 40px var(--shadow); }
+    dialog#entry-dlg::backdrop { background: #0008; }
+    #entry-title { margin: 0 0 14px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+    #entry-form { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 8px 12px; align-items: center; margin: 0; }
+    #entry-form > input[type=checkbox] { justify-self: start; }
+    .ef-guide { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+    #entry-dlg .adm-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+    #entry-dlg .adm-status { margin-top: 0; }
+
+    /* ── 좁은 화면 — style.css 의 모바일 규칙과 같은 14px 거터, 폼은 한 열 ── */
+    @media (max-width: 640px) {
+      .adm-main { padding: 14px 14px 32px; gap: 12px; }
+      .adm-section { padding: 14px; }
+      .adm-form, #entry-form { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+      .adm-form > input, .adm-form > select, #entry-form > input, #entry-form > select { margin-bottom: 6px; }
+      dialog#entry-dlg { padding: 16px 14px; }
+    }
   </style>
 </head>
 <body>
@@ -56,6 +128,7 @@
     <h1><a href="/" style="text-decoration:none;color:inherit">agent-board</a> · ⚙ admin</h1>
   </header>
 
+  <main class="adm-main">
   <section class="adm-section" id="cfg">
     <h2>config.json <span class="adm-note" id="cfg-path"></span></h2>
     <div class="adm-form">
@@ -94,12 +167,14 @@
       <button id="models-refresh" type="button" class="btn-icon" title="Re-probe the endpoint">↻</button>
     </h2>
     <div class="adm-status" id="models-status"></div>
+    <div class="adm-table-wrap">
     <table class="adm-models">
       <thead><tr>
         <th>model</th><th>status</th><th>ctx</th><th>max out</th><th>thinking</th><th>grammar</th><th>vision</th><th>sampling</th><th>dialect</th><th></th>
       </tr></thead>
       <tbody id="models-body"></tbody>
     </table>
+    </div>
     <p class="adm-note">
       <span class="badge served">served</span> served by the endpoint ·
       <span class="badge missing">missing</span> only in the registry (gone from the server — removal candidate) ·
@@ -110,6 +185,7 @@
       <button id="models-clean" type="button" class="btn-danger">🗑 Clean up all missing</button>
     </div>
   </section>
+  </main>
 
   <dialog id="entry-dlg">
     <h3 id="entry-title">Edit model</h3>
