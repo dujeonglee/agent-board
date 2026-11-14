@@ -693,3 +693,298 @@ class TestSamplingDefaults:
         assert 'id="ef-temperature"' in html and 'id="ef-top-p"' in html
         assert "<th>sampling</th>" in html
         assert "samplingCell(entry)" in js and "entry[key] = num" in js
+
+
+# ── extra_headers (v1.47.0) — 값은 *** 로만, 검증·헤더는 agent-cli 의 것 ──────
+
+_HV1 = "test-hdr-value-111"
+_HV2 = "test-hdr-value-222"
+
+
+def _hdrs(*items):
+    return [{"name": n, "value": v, "enabled": e} for n, v, e in items]
+
+
+class TestExtraHeadersContract:
+    """보드가 쓰는 agent-cli 이름 — 옮기거나 바꾸면 여기가 먼저 깨진다."""
+
+    def test_agent_cli_names_the_board_uses(self):
+        pytest.importorskip("agent_cli")
+        from agent_cli.providers.credentials import (
+            Credentials,
+            ExtraHeaderError,
+            credentials_from_config,
+            validate_extra_headers,
+        )
+
+        cred = credentials_from_config(
+            {"api_key": "k", "extra_headers": _hdrs(("x-a", "1", True))}
+        )
+        assert isinstance(cred, Credentials)
+        assert cred.headers("openai") == {"Authorization": "Bearer k", "x-a": "1"}
+        assert validate_extra_headers(None) == []
+        assert issubclass(ExtraHeaderError, ValueError)
+
+
+class TestExtraHeadersConfig:
+    @pytest.fixture(autouse=True)
+    def _require_agent_cli(self):
+        pytest.importorskip("agent_cli")
+
+    def test_get_masks_values_and_keeps_enabled(self, tmp_path):
+        cfg = _cfg_file(
+            tmp_path,
+            extra_headers=_hdrs(
+                ("x-service-id", _HV1, True), ("x-user-id", _HV2, False)
+            )
+            + [{"name": "x-empty", "value": ""}],
+        )
+        view = admin.get_config(cfg)
+        assert view["extra_headers"] == [
+            {"name": "x-service-id", "value": "***", "enabled": True},
+            {"name": "x-user-id", "value": "***", "enabled": False},
+            {"name": "x-empty", "value": "", "enabled": True},
+        ]
+        assert _HV1 not in json.dumps(view) and _HV2 not in json.dumps(view)
+
+    def test_get_without_key_is_empty_list(self, tmp_path):
+        assert admin.get_config(_cfg_file(tmp_path))["extra_headers"] == []
+
+    def test_put_saves_new_and_keeps_masked_by_name(self, tmp_path):
+        cfg = _cfg_file(tmp_path, extra_headers=_hdrs(("X-Service-Id", _HV1, True)))
+        admin.update_config(
+            {
+                "extra_headers": [
+                    {"name": "x-service-id", "value": "***", "enabled": False},
+                    {"name": "x-user-id", "value": _HV2, "enabled": True},
+                ]
+            },
+            cfg,
+        )
+        saved = json.loads(cfg.read_text())
+        assert saved["extra_headers"] == _hdrs(
+            ("x-service-id", _HV1, False), ("x-user-id", _HV2, True)
+        )
+        assert saved["custom_knob"] == 42 and saved["api_key"] == "sk-secret"
+
+    def test_put_omitted_rows_are_removed(self, tmp_path):
+        cfg = _cfg_file(
+            tmp_path, extra_headers=_hdrs(("x-a", _HV1, True), ("x-b", _HV2, True))
+        )
+        admin.update_config({"extra_headers": [{"name": "x-b", "value": "***"}]}, cfg)
+        assert json.loads(cfg.read_text())["extra_headers"] == _hdrs(
+            ("x-b", _HV2, True)
+        )
+
+    def test_put_without_extra_headers_leaves_them(self, tmp_path):
+        hdrs = _hdrs(("x-a", _HV1, True))
+        cfg = _cfg_file(tmp_path, extra_headers=hdrs)
+        admin.update_config({"default_model": "m2"}, cfg)
+        assert json.loads(cfg.read_text())["extra_headers"] == hdrs
+
+    def test_masked_value_for_an_unknown_name_is_refused(self, tmp_path):
+        cfg = _cfg_file(tmp_path, extra_headers=_hdrs(("x-a", _HV1, True)))
+        before = cfg.read_text()
+        with pytest.raises(admin.AdminError, match="no saved value"):
+            admin.update_config(
+                {"extra_headers": [{"name": "x-new", "value": "***"}]}, cfg
+            )
+        assert cfg.read_text() == before
+
+    def test_masked_duplicates_pair_in_order(self, tmp_path):
+        cfg = _cfg_file(
+            tmp_path, extra_headers=_hdrs(("x-a", _HV1, False), ("x-a", _HV2, True))
+        )
+        admin.update_config(
+            {
+                "extra_headers": [
+                    {"name": "x-a", "value": "***", "enabled": False},
+                    {"name": "x-a", "value": "***", "enabled": True},
+                ]
+            },
+            cfg,
+        )
+        assert json.loads(cfg.read_text())["extra_headers"] == _hdrs(
+            ("x-a", _HV1, False), ("x-a", _HV2, True)
+        )
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"name": "Authorization", "value": _HV1},
+            {"name": "x-api-key", "value": _HV1},
+            {"name": "x-a", "value": _HV1 + "\r\nX-Evil: 1"},
+            {"name": "x-a", "value": _HV1 + "\n"},
+            {"name": "bad name", "value": _HV1},
+            {"name": "", "value": _HV1},
+            "x-a: 1",
+        ],
+    )
+    def test_invalid_rows_are_refused_without_values_and_file_unchanged(
+        self, tmp_path, row
+    ):
+        cfg = _cfg_file(tmp_path)
+        before = cfg.read_text()
+        with pytest.raises(admin.AdminError) as ei:
+            admin.update_config({"extra_headers": [row]}, cfg)
+        assert _HV1 not in str(ei.value)
+        assert cfg.read_text() == before
+
+    def test_duplicate_enabled_names_refused(self, tmp_path):
+        cfg = _cfg_file(tmp_path)
+        with pytest.raises(admin.AdminError, match="more than once"):
+            admin.update_config(
+                {
+                    "extra_headers": [
+                        {"name": "x-a", "value": "1"},
+                        {"name": "X-A", "value": "2"},
+                    ]
+                },
+                cfg,
+            )
+
+    def test_non_list_refused(self, tmp_path):
+        with pytest.raises(admin.AdminError):
+            admin.update_config({"extra_headers": "x-a: 1"}, _cfg_file(tmp_path))
+
+    def test_put_without_agent_cli_is_admin_error(self, tmp_path, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, "agent_cli.providers.credentials", None)
+        with pytest.raises(admin.AdminError, match="agent_cli"):
+            admin.update_config(
+                {"extra_headers": [{"name": "x-a", "value": "1"}]}, _cfg_file(tmp_path)
+            )
+
+
+class TestExtraHeadersProbe:
+    @pytest.fixture(autouse=True)
+    def _require_agent_cli(self):
+        pytest.importorskip("agent_cli")
+
+    def _capture(self, monkeypatch):
+        seen = {}
+
+        def fake_get(url, headers=None, timeout=None):
+            seen["url"], seen["headers"] = url, dict(headers or {})
+            req = httpx.Request("GET", url)
+            return httpx.Response(200, json={"data": [{"id": "m1"}]}, request=req)
+
+        monkeypatch.setattr(admin.httpx, "get", fake_get)
+        return seen
+
+    def test_probe_sends_enabled_headers_only(self, tmp_path, monkeypatch):
+        cfg = _cfg_file(
+            tmp_path,
+            extra_headers=_hdrs(
+                ("x-service-id", _HV1, True), ("x-user-id", _HV2, False)
+            ),
+        )
+        seen = self._capture(monkeypatch)
+        admin.list_served_models(cfg)
+        assert seen["headers"] == {
+            "Authorization": "Bearer sk-secret",
+            "x-service-id": _HV1,
+        }
+
+    def test_anthropic_probe_uses_agent_cli_headers(self, tmp_path, monkeypatch):
+        cfg = _cfg_file(
+            tmp_path,
+            provider="anthropic",
+            base_url="http://127.0.0.1:9/",
+            extra_headers=_hdrs(("x-service-id", _HV1, True)),
+        )
+        seen = self._capture(monkeypatch)
+        admin.list_served_models(cfg)
+        assert list(seen["headers"].items()) == [
+            ("anthropic-version", "2023-06-01"),
+            ("x-api-key", "sk-secret"),
+            ("x-service-id", _HV1),
+        ]
+
+    def test_invalid_saved_headers_fail_the_probe_by_name(self, tmp_path, monkeypatch):
+        cfg = _cfg_file(tmp_path, extra_headers=[{"name": "host", "value": _HV1}])
+        self._capture(monkeypatch)
+        with pytest.raises(admin.AdminError) as ei:
+            admin.list_served_models(cfg)
+        assert "host" in str(ei.value) and _HV1 not in str(ei.value)
+
+    def test_remote_warning_counts_extra_headers_without_values(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        cfg = _cfg_file(
+            tmp_path,
+            base_url="http://gw.example.com/v1",
+            extra_headers=_hdrs(("x-a", _HV1, True), ("x-b", _HV2, True)),
+        )
+        self._capture(monkeypatch)
+        admin.list_served_models(cfg)
+        err = capsys.readouterr().err
+        assert "the API key and 2 extra headers to a remote host" in err
+        assert _HV1 not in err and _HV2 not in err and "sk-secret" not in err
+
+    def test_remote_warning_for_headers_without_a_key(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        cfg = _cfg_file(
+            tmp_path,
+            api_key="",
+            base_url="http://gw.example.com/v1",
+            extra_headers=_hdrs(("x-a", _HV1, True)),
+        )
+        self._capture(monkeypatch)
+        admin.list_served_models(cfg)
+        assert "sends 1 extra header to a remote host" in capsys.readouterr().err
+
+    def test_no_warning_without_secrets(self, tmp_path, monkeypatch, capsys):
+        cfg = _cfg_file(tmp_path, api_key="", base_url="http://gw.example.com/v1")
+        self._capture(monkeypatch)
+        admin.list_served_models(cfg)
+        assert "remote host" not in capsys.readouterr().err
+
+    def test_detect_passes_credentials_with_headers(self, tmp_path, monkeypatch):
+        import agent_cli.providers.capabilities as caps_mod
+
+        cfg = _cfg_file(tmp_path, extra_headers=_hdrs(("x-a", _HV1, True)))
+        seen = {}
+
+        def fake_detect(provider, base_url, model, credentials):
+            seen["headers"] = credentials.headers(provider)
+            return caps_mod.ModelCapabilities(32768, 4096, False)
+
+        monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", fake_detect)
+        admin.detect_model_entry("fresh", cfg)
+        assert seen["headers"] == {"Authorization": "Bearer sk-secret", "x-a": _HV1}
+
+
+class TestExtraHeadersApi:
+    @pytest.fixture(autouse=True)
+    def _require_agent_cli(self):
+        pytest.importorskip("agent_cli")
+
+    def test_roundtrip_masks_and_keeps(self, tmp_path):
+        cfg_json, _, c = _admin_client(tmp_path)
+        r = c.put(
+            "/api/admin/config",
+            json={"extra_headers": [{"name": "x-a", "value": _HV1, "enabled": True}]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["extra_headers"] == [
+            {"name": "x-a", "value": "***", "enabled": True}
+        ]
+        got = c.get("/api/admin/config").json()
+        assert _HV1 not in json.dumps(got)
+        got["extra_headers"][0]["enabled"] = False
+        r = c.put("/api/admin/config", json=got)
+        assert r.status_code == 200, r.text
+        saved = json.loads(cfg_json.read_text())["extra_headers"]
+        assert saved == _hdrs(("x-a", _HV1, False))
+
+    def test_invalid_is_400(self, tmp_path):
+        _, _, c = _admin_client(tmp_path)
+        r = c.put(
+            "/api/admin/config",
+            json={"extra_headers": [{"name": "x-a", "value": _HV1 + "\r\nX: 1"}]},
+        )
+        assert r.status_code == 400
+        assert _HV1 not in r.text

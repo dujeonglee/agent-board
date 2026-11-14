@@ -9,6 +9,10 @@ board 는 원래 models.json 을 읽기만 했지만(models_registry), 어드민
   ``***``/빈값이면 기존 값 유지 (평문 키가 브라우저로 나가지 않음).
 - 알려진 4필드(provider/base_url/api_key/default_model)만 폼 편집 대상 —
   그 외 키는 손대지 않고 보존.
+- ``extra_headers`` (v1.47.0): 모델 서버로 가는 요청에 붙는 사용자 헤더 목록.
+  값은 api_key 처럼 GET 에서 ``***``, PUT 에서 ``***`` 면 같은 이름의 기존 값 유지.
+  검증·요청 헤더 만들기는 agent-cli 의 것을 그대로 쓴다(규칙 하나 —
+  ``agent_cli.providers.credentials``).
 - 모델 목록은 config 의 endpoint 에 ``GET /models`` 프로브를 합쳐
   served / missing / new 로 분류. **삭제는 항상 사용자 클릭** (자동 정리
   없음 — 파괴적 동작).
@@ -70,6 +74,82 @@ class AdminError(Exception):
     """사용자에게 그대로 보여줄 수 있는 실패 (HTTP 400/502 감)."""
 
 
+def _credentials_module():
+    """agent-cli 의 자격 모듈 — 추가 헤더 검증·요청 헤더의 단일 출처.
+
+    import 불가(비정상 배포)면 탐지 경로와 같은 친절한 AdminError."""
+    import importlib
+
+    try:
+        credentials = importlib.import_module("agent_cli.providers.credentials")
+    except ImportError as e:
+        raise AdminError(
+            "the agent_cli package cannot be imported, so extra headers and the "
+            "model list probe are unavailable"
+        ) from e
+    return credentials
+
+
+def _credentials(cfg: dict):
+    """config dict → agent-cli ``Credentials`` (규칙 위반은 이름만 담은 AdminError)."""
+    cred = _credentials_module()
+    try:
+        return cred.credentials_from_config(cfg)
+    except cred.ExtraHeaderError as e:
+        raise AdminError(f"config.json extra_headers: {e}") from e
+
+
+def _extra_headers_view(raw) -> list[dict]:
+    """GET 용 — 값은 ``***``(빈 값은 빈 문자열). 손으로 적은 이상한 항목도 보이게
+    관대하게 읽는다(검증은 저장·사용 때)."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        enabled = item.get("enabled", True)
+        out.append(
+            {
+                "name": str(item.get("name", "")),
+                "value": KEY_MASK if item.get("value") else "",
+                "enabled": enabled if isinstance(enabled, bool) else True,
+            }
+        )
+    return out
+
+
+def _resolve_extra_headers(incoming, existing) -> list:
+    """PUT 의 ``extra_headers`` — ``***`` 값을 같은 이름(대소문자 무시)의 기존 값으로.
+
+    같은 이름이 여럿 저장돼 있으면 나온 순서대로 짝짓는다. 기존에 없는 이름인데
+    ``***`` 면 오류(지킬 값이 없다). 검증은 호출자가 agent-cli 규칙으로 한다."""
+    if not isinstance(incoming, list):
+        raise AdminError("'extra_headers' must be a list")
+    saved: dict[str, list[str]] = {}
+    if isinstance(existing, list):
+        for item in existing:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                saved.setdefault(item["name"].lower(), []).append(item.get("value", ""))
+    out = []
+    for i, item in enumerate(incoming):
+        if not isinstance(item, dict):
+            raise AdminError(f"extra_headers[{i}] must be an object")
+        item = dict(item)
+        name = item.get("name")
+        if isinstance(name, str):
+            item["name"] = name = name.strip()
+        if item.get("value") == KEY_MASK:
+            pool = saved.get(name.lower(), []) if isinstance(name, str) else []
+            if not pool:
+                raise AdminError(
+                    f"extra header {name!r} has no saved value to keep — enter a value"
+                )
+            item["value"] = pool.pop(0)
+        out.append(item)
+    return out
+
+
 # ── 원자적 JSON I/O ──────────────────────────────────────────────
 
 
@@ -114,16 +194,30 @@ def get_config(path: Path = DEFAULT_CONFIG_JSON) -> dict:
         "base_url": cfg.get("base_url", ""),
         "api_key": KEY_MASK if cfg.get("api_key") else "",
         "default_model": cfg.get("default_model", ""),
+        "extra_headers": _extra_headers_view(cfg.get("extra_headers")),
     }
 
 
 def update_config(fields: dict, path: Path = DEFAULT_CONFIG_JSON) -> dict:
-    """4필드만 갱신 — 그 외 키 보존, api_key ``***``/빈값은 기존 유지.
+    """4필드 + ``extra_headers`` 만 갱신 — 그 외 키 보존, api_key ``***``/빈값은 기존 유지.
 
     (빈 api_key 로 '키 제거'는 지원하지 않음 — 마스킹과 구분 불가.
     키 삭제가 필요하면 파일을 직접 편집.)
+
+    ``extra_headers`` 는 목록 전체를 받는다(빠진 항목은 지워진다). ``***`` 값은 같은
+    이름의 기존 값 유지. agent-cli 의 ``validate_extra_headers`` 를 통과해야 저장한다 —
+    위반이면 파일은 그대로다.
     """
     cfg = _read_json(path)
+    if "extra_headers" in fields:
+        cred = _credentials_module()
+        resolved = _resolve_extra_headers(
+            fields["extra_headers"], cfg.get("extra_headers")
+        )
+        try:
+            cfg["extra_headers"] = cred.validate_extra_headers(resolved)
+        except cred.ExtraHeaderError as e:
+            raise AdminError(str(e)) from e
     for k in CONFIG_FORM_FIELDS:
         if k not in fields:
             continue
@@ -144,28 +238,30 @@ def update_config(fields: dict, path: Path = DEFAULT_CONFIG_JSON) -> dict:
 def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
     """config 의 endpoint 에서 실제 서빙 중인 모델 id 목록.
 
-    OpenAI 호환: ``GET {base_url}/models`` (Bearer) — omlx/vLLM/LM Studio
-    공통. Anthropic: ``GET {base_url}/v1/models`` (x-api-key).
+    OpenAI 호환: ``GET {base_url}/models`` — omlx/vLLM/LM Studio 공통.
+    Anthropic: ``GET {base_url}/v1/models``. 헤더(키·추가 헤더)는 agent-cli 의
+    ``Credentials.headers`` 가 만든다 — 런타임이 보내는 것과 같은 모양.
     """
     cfg = _read_json(cfg_path)
     base_url = (cfg.get("base_url") or "").rstrip("/")
     if not base_url:
         raise AdminError("config.json has no base_url")
     provider = cfg.get("provider", "openai")
-    api_key = cfg.get("api_key", "")
+    credentials = _credentials(cfg)
+    headers = credentials.headers(provider)
     if provider == "anthropic":
         url = f"{base_url}/v1/models"
-        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
     else:
         url = f"{base_url}/models"
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    if api_key and base_url_is_remote(base_url):
-        # Defense-in-depth (AUDIT B-2): make it visible that the stored key is
-        # being sent to a remote host — an attacker-repointed base_url would
-        # otherwise exfiltrate it silently. (Remote is legitimate for a real
-        # remote LLM, so we warn, not block.)
+    secrets = _secret_summary(credentials)
+    if secrets and base_url_is_remote(base_url):
+        # Defense-in-depth (AUDIT B-2): make it visible that the stored key /
+        # extra headers are being sent to a remote host — an attacker-repointed
+        # base_url would otherwise exfiltrate them silently. (Remote is
+        # legitimate for a real remote LLM, so we warn, not block.) Names and
+        # counts only — never values.
         print(
-            f"  ⚠️  the admin model probe sends the API key to a remote host: {base_url}",
+            f"  ⚠️  the admin model probe sends {secrets} to a remote host: {base_url}",
             file=sys.stderr,
         )
     try:
@@ -181,6 +277,17 @@ def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
         {m.get("id") for m in items if isinstance(m, dict) and m.get("id")},
         key=str.lower,
     )
+
+
+def _secret_summary(credentials) -> str:
+    """원격 경고 문구의 "무엇을" — 값 없이 키 여부와 추가 헤더 개수만."""
+    parts = []
+    if credentials.api_key:
+        parts.append("the API key")
+    n = len(credentials.extra_headers)
+    if n:
+        parts.append(f"{n} extra header{'s' if n != 1 else ''}")
+    return " and ".join(parts)
 
 
 # ── models.json ──────────────────────────────────────────────────
@@ -333,9 +440,10 @@ def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> d
     base_url = cfg.get("base_url", "")
     if not base_url:
         raise AdminError("config.json has no base_url")
+    credentials = _credentials(cfg)
     try:
         caps = _detect_runtime_capabilities(
-            cfg.get("provider", "openai"), base_url, model_id, cfg.get("api_key", "")
+            cfg.get("provider", "openai"), base_url, model_id, credentials
         )
     except UnsupportedModelError as e:
         # 탐지기는 "쓸 수 없는 모델"(컨텍스트 창이 최소치 미만)을 None 이 아니라

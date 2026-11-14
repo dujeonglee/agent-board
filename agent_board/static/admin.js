@@ -27,6 +27,62 @@
   }
 
   // ── config.json ─────────────────────────────────────────────
+  // extra_headers 표 — 행마다 체크박스(enabled)·name·value(password, 저장된 값은 ***)·Remove.
+  // 저장은 config 의 Save 하나로 함께 간다(목록 전체를 보낸다 — 지운 행은 사라진다).
+  function addHeaderRow(h) {
+    const tr = document.createElement("tr");
+    const on = document.createElement("input");
+    on.type = "checkbox";
+    on.className = "hdr-on";
+    on.checked = h.enabled !== false;
+    on.title = "Send this header";
+    const name = document.createElement("input");
+    name.type = "text";
+    name.className = "hdr-name";
+    name.placeholder = "x-service-id";
+    name.autocomplete = "off";
+    name.value = h.name || "";
+    const value = document.createElement("input");
+    value.type = "password";
+    value.className = "hdr-value";
+    value.placeholder = "value";
+    value.autocomplete = "new-password";
+    value.value = h.value || ""; // 저장된 값은 "***" 로만 온다
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "btn-ghost hdr-remove";
+    rm.textContent = "Remove";
+    rm.addEventListener("click", () => tr.remove());
+    for (const el of [on, name, value, rm]) {
+      const td = document.createElement("td");
+      td.appendChild(el);
+      tr.appendChild(td);
+    }
+    $("cfg-hdrs-body").appendChild(tr);
+  }
+
+  function renderHeaders(list) {
+    $("cfg-hdrs-body").innerHTML = "";
+    for (const h of list || []) addHeaderRow(h);
+  }
+
+  function collectHeaders() {
+    const out = [];
+    for (const tr of $("cfg-hdrs-body").rows) {
+      const name = tr.querySelector(".hdr-name").value.trim();
+      const value = tr.querySelector(".hdr-value").value;
+      if (!name && !value) continue; // 빈 새 행은 무시
+      out.push({ name, value, enabled: tr.querySelector(".hdr-on").checked });
+    }
+    return out;
+  }
+
+  $("cfg-hdr-add").addEventListener("click", () => {
+    addHeaderRow({ name: "", value: "", enabled: true });
+    const rows = $("cfg-hdrs-body").rows;
+    rows[rows.length - 1].querySelector(".hdr-name").focus();
+  });
+
   async function loadConfig() {
     try {
       const c = await api("GET", "/api/admin/config");
@@ -35,6 +91,7 @@
       $("cfg-base-url").value = c.base_url;
       $("cfg-api-key").value = c.api_key; // "***" 또는 ""
       $("cfg-default-model").value = c.default_model;
+      renderHeaders(c.extra_headers);
     } catch (e) {
       status($("cfg-status"), "Load failed: " + e.message, false);
     }
@@ -47,6 +104,7 @@
         base_url: $("cfg-base-url").value,
         api_key: $("cfg-api-key").value,
         default_model: $("cfg-default-model").value,
+        extra_headers: collectHeaders(),
       });
       status($("cfg-status"), "Saved — applies to newly opened instances", true);
       loadConfig();

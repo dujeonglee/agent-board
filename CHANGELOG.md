@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.47.0] - 2026-11-14
+
+### Added — admin 의 Extra headers (agent-cli `extra_headers`)
+
+모델 서버로 가는 요청에 임의 헤더(`x-service-id` 등)를 붙이는 agent-cli v10.134.0 의
+`extra_headers` 를 admin 에서 편집합니다. config.json 폼 아래 표 — 행마다 체크박스(켬)·name·
+value(`type=password`)·Remove, `+ Add header`, 저장은 기존 `💾 Save` 와 함께.
+
+- `GET /api/admin/config` 에 `extra_headers: [{name, value, enabled}]` — 값은 api_key 처럼 `***`
+  (빈 값은 빈 문자열). 평문 값은 브라우저로 나가지 않습니다.
+- `PUT` 은 목록 전체를 받아 저장 — `***` 는 같은 이름(대소문자 무시, 같은 이름이 여럿이면 순서대로)
+  의 저장된 값 유지, 저장된 적 없는 이름에 `***` 면 400. 검증은 agent-cli 의
+  `validate_extra_headers` 하나(규칙이 둘이 되지 않게) — 위반이면 이름만 담은 400, 파일은 그대로.
+  agent_cli 를 import 할 수 없으면 탐지 경로와 같은 친절한 오류.
+- 모델 목록 프로브(`list_served_models`)의 헤더를 보드 자체 코드 대신 agent-cli
+  `credentials_from_config(cfg).headers(provider)` 로 만듭니다 — 런타임과 같은 모양이고 켜진 추가
+  헤더가 같이 갑니다. Anthropic 프로브는 이제 `anthropic-version` 다음 `x-api-key`(키가 있을 때만)
+  순서입니다(종전 `x-api-key` 를 빈 키여도 먼저 보냈음). 🔍 Detect 는 새 서명(`Credentials`)으로
+  agent-cli 탐지기를 부릅니다.
+- 원격 경고(AUDIT B-2)가 추가 헤더도 셉니다: `sends the API key and 2 extra headers to a remote host`
+  (값 없이 개수만). 키 없이 추가 헤더만 있어도 경고합니다.
+- 실브라우저 테스트 `tests/browser/test_admin_headers.py`(추가·끄기·지우기·저장·다시 열기에서 `***`,
+  금지 이름 거절). 실브라우저 스택은 이제 admin 이 편집할 config 를 테스트 디렉터리에 둡니다.
+
+**필요한 agent-cli: ≥ 10.134.0** — 그 미만이면 admin 의 Extra headers·모델 목록 프로브·🔍 Detect
+가 오류입니다(보드 CI 는 agent-cli main 을 깔므로 agent-cli 머지 뒤에 이 판이 따라갑니다).
+
 ## [1.46.2] - 2026-11-14
 
 ### Changed — 교차 저장소 계약 테스트가 agent-cli 의 새 모듈 경로를 읽는다

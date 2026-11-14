@@ -70,6 +70,9 @@ class BoardStack:
             data_dir=tmp_path / "data",
             workspaces_root=tmp_path / "ws",
             models_json=reg,
+            # admin 페이지가 편집하는 파일 — 사용자의 ~/.agent-cli/config.json 이 아니라
+            # 테스트 디렉터리의 것 (v1.47.0, admin 실브라우저 테스트).
+            agent_cli_config_json=tmp_path / "agent-cli-config.json",
         )
         self.store = Store(self.cfg.db_path)
         app = create_app(
