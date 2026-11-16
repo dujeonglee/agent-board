@@ -80,6 +80,22 @@ def test_setup_screen_then_two_servers_default_and_delete(board, browser):
         assert _cfg(board)["endpoint"] == "home"
         assert page.locator("#models").is_visible()
         assert page.locator("#srv-delete").is_disabled()  # 기본 서버는 못 지운다
+        # 모델을 저장하면 왼쪽 목록의 모델 수도 따라온다(폼은 그대로)
+        page.fill("#cfg-default-model", "unsaved-input")
+        page.evaluate(
+            """() => fetch('/api/admin/endpoints/home/models/m', {method: 'PUT',
+                 headers: {'Content-Type': 'application/json'},
+                 body: JSON.stringify({dialect: 'json_fc'})})"""
+        )
+        page.click("#models-refresh")  # 표에 m 이 보이게 다시 읽는다
+        page.locator("#models-body tr", has_text="m").locator(
+            "button", has_text="✎"
+        ).click()
+        page.click("#entry-save")
+        page.wait_for_function(
+            "document.querySelector('#srv-list .srv-meta').textContent.includes('1 model')"
+        )
+        assert page.locator("#cfg-default-model").input_value() == "unsaved-input"
 
         _add(page, "work", "https://gw.example.com/v1")
         assert _cfg(board)["endpoint"] == "home"  # 둘째는 기본이 아니다

@@ -152,6 +152,19 @@
     $("srv-add").setAttribute("aria-current", String(current === null));
   }
 
+  // 모델 표가 바뀐 뒤 — 표를 다시 읽고, 왼쪽 목록의 모델 수도 맞춘다(폼은 건드리지 않는다:
+  // 저장하지 않은 입력이 사라지지 않게).
+  async function modelsChanged() {
+    refreshModels();
+    try {
+      serversView = await api("GET", "/api/admin/endpoints");
+      renderBanners(serversView);
+      renderServerList();
+    } catch (_e) {
+      /* 목록 갱신 실패 — 다음 저장·새로고침이 맞춘다 */
+    }
+  }
+
   async function loadServers(preferred) {
     try {
       serversView = await api("GET", "/api/admin/endpoints");
@@ -367,7 +380,7 @@
         if (!confirm("Remove '" + row.id + "' from this server's models?")) return;
         try {
           await api("DELETE", srvUrl(current) + "/models/" + enc(row.id));
-          refreshModels();
+          modelsChanged();
         } catch (e) {
           status($("models-status"), "Remove failed: " + e.message, false);
         }
@@ -463,7 +476,7 @@
         break;
       }
     }
-    refreshModels();
+    modelsChanged();
   });
 
   // ── entry 편집 다이얼로그 ───────────────────────────────────
@@ -571,7 +584,7 @@
     try {
       await api("PUT", srvUrl(current) + "/models/" + enc(dlgModelId), entry);
       $("entry-dlg").close();
-      refreshModels();
+      modelsChanged();
     } catch (e) {
       status($("entry-status"), "Save failed: " + e.message, false);
     }
