@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.48.0] - 2026-11-17
+
+> **⚠ agent-cli v10.144.0 과 함께 올려야 합니다.** 모델 서버 설정이 서버 여러 개를 이름으로 저장하는 모양이
+> 됐고, 옛 모양 파일은 읽지 않습니다 — admin 이 셋업 화면이 되고, 첫 서버를 저장할 때 옛 파일은
+> `config.json.v1`·`models.json.v1` 로 이름만 바뀌어 남습니다.
+
+### Added — 모델 서버 여러 개, 방마다 고르기
+
+- admin: 왼쪽 서버 목록(`● default`·호스트·모델 수·방 수, `+ Add server`), 오른쪽 그 서버의 설정·Extra
+  headers·모델 표. `Make default`, `Delete`(쓰는 방 수를 보여 주고 확인, 기본 서버는 못 지움). 서버가
+  없으면 "Add your first server" 셋업 화면 → 저장 → 모델 조회 → 기본 모델 고르기. agent-cli 가 10.144.0
+  미만이면 맨 위 안내.
+- 새 글 폼: Server 선택(기본 = 선택된 서버) — 바꾸면 Model 선택지가 그 서버의 것으로, 그 서버의 기본 모델이
+  골라진다. 서버가 없으면 admin 으로 가는 안내. 글에 서버 이름을 기록하고 spawn 마다 `--endpoint` 로 넘긴다.
+- 카드의 🖥 서버 칩(읽기 전용), 복제 폼이 원본의 서버를 미리 고른다. 지운 서버를 기억하는 방은 카드 안내 +
+  Open 409 `endpoint_missing`. 옛 글은 방이 `web.json` 에 보고한 서버 이름을 배운다.
+- API: `/api/endpoints`(이름·호스트만), `/api/models?endpoint=`, `/api/admin/endpoints[/{name}[/default·/models…]]`.
+
+### Changed
+
+- `/api/admin/config`·`/api/admin/models*` 는 서버별 `/api/admin/endpoints/{name}…` 로 옮겼다.
+- admin 의 서버 저장은 바뀐 칸만 보내고, 서버는 저장 요청 시점에 파일을 다시 읽어 받은 키만 고친다 — 폼을 연
+  뒤 방이 저장한 값(`default_model` 등)을 덮지 않는다.
+
 ## [1.47.1] - 2026-11-14
 
 ### Changed — admin 화면 다듬기 (여백·입력 컨트롤)

@@ -222,28 +222,59 @@ class NewPost(BaseModel):
     # (fresh). `.agent-cli/sessions/<sid>` 가 포함되면 대화까지 이어받음.
     clone_from: str | None = None
     clone_paths: list[str] = []
+    # 모델 서버 (v1.48.0) — config.json 의 서버 이름. 비우면 지금의 기본 서버를 글에 박는다
+    # (방은 이름을 기억하므로, 나중에 기본을 바꿔도 이 방은 그대로). 복제는 원본의 서버를 보낸다.
+    endpoint: str | None = None
 
 
 class ForceActive(BaseModel):
     enabled: bool
 
 
-def model_problem(config: Config, model_id: str | None) -> dict | None:
-    """실행 가능한 모델이면 None, 아니면 ``{"reason", "model"?}``.
+def post_endpoint(config: Config, post) -> str | None:
+    """글이 쓸 서버 이름 — 기록된 이름, 기록이 없으면(v1.48.0 전 글) 지금의 기본 서버.
+
+    기록 없는 방이 뜨면 agent-cli 도 기본 서버를 쓰고 기록한다(그 뒤 보드가 web.json 에서 배운다)."""
+    if post.endpoint:
+        return post.endpoint
+    return models_registry.server_names(config.agent_cli_config_json)[1]
+
+
+def model_problem(
+    config: Config, endpoint: str | None, model_id: str | None
+) -> dict | None:
+    """실행 가능한 서버·모델이면 None, 아니면 ``{"reason", ...}``.
 
     v1.33.0 (agent-cli v10.3.0 짝): agent-cli 는 방언 바인딩 없는 모델을
     부트에서 거부하므로, 보드가 먼저 같은 판정으로 생성·변경(400)과
-    열기·재실행(409)을 막고 사유를 돌려준다 — 방 쪽 드롭다운이 바인딩
-    있는 모델만 보여 주지만, 고른 뒤 어드민에서 바인딩이 빠지거나 모델이
-    지워진 방은 이 게이트가 잡는다.
+    열기·재실행(409)을 막고 사유를 돌려준다. v1.48.0: 서버도 같은 게이트를 지난다 —
+    agent-cli 는 없는 서버 이름에 종료 코드 2 로 멈추고(보드를 거치지 않는 예약·수동 실행도),
+    보드는 띄우기 전에 막는다.
     - ``model_required``: 방에 모델이 없다 (v1.33.0 전 "(기본)" 방).
-    - ``dialect_unbound``: 모델이 레지스트리에 없거나 ``dialect`` 가 없다.
+    - ``no_server``: 저장된 서버가 없다(또는 기본이 없다) — admin 에서 서버를 추가.
+    - ``endpoint_missing``: 방의 서버 이름이 config.json 에 없다(지워짐).
+    - ``dialect_unbound``: 모델이 그 서버의 표에 없거나 ``dialect`` 가 없다.
     """
     if not model_id:
         return {"reason": "model_required"}
-    if models_registry.model_binding(config.models_json, model_id) is None:
-        return {"reason": "dialect_unbound", "model": model_id}
+    names, _default = models_registry.server_names(config.agent_cli_config_json)
+    if not endpoint:
+        return {"reason": "no_server"}
+    if endpoint not in names:
+        return {"reason": "endpoint_missing", "endpoint": endpoint}
+    if models_registry.model_binding(config.models_json, endpoint, model_id) is None:
+        return {"reason": "dialect_unbound", "model": model_id, "endpoint": endpoint}
     return None
+
+
+def room_counts(config: Config, store: Store) -> dict[str, int]:
+    """서버별 방 수 — admin 의 목록과 삭제 확인이 쓴다(기록 없는 글은 기본 서버로 센다)."""
+    counts: dict[str, int] = {}
+    for post in store.list_posts():
+        name = post_endpoint(config, post)
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    return counts
 
 
 def _post_view(
@@ -262,6 +293,14 @@ def _post_view(
     if isinstance(live_knobs, dict) and live_knobs and live_knobs != post.knobs:
         store.set_knobs(post.post_id, live_knobs)
         post = store.get(post.post_id) or post
+    # 서버 기록이 없던 글(v1.48.0 전)만 방이 보고한 이름을 배운다 — 기록된 글의 서버는
+    # 보드도 방도 바꾸지 않는다(복제로만 옮긴다).
+    live_endpoint = state.get("endpoint")
+    if not post.endpoint and live_endpoint:
+        store.set_endpoint(post.post_id, live_endpoint)
+        post = store.get(post.post_id) or post
+    endpoint = post_endpoint(config, post)
+    problem = model_problem(config, endpoint, post.model)
     # human viewers = live subscribers minus the force-active keep-alive's own one
     viewers = max(0, state.get("viewers", 0) - (1 if post.force_active else 0))
     return {
@@ -270,8 +309,11 @@ def _post_view(
         # 저장된 노브(모델 포함) — 떠 있으면 방이 보고한 값과 같다(위 거울).
         "knobs": post.knobs,
         "model": post.model,
-        # False 면 열기/재실행이 409 — 카드가 사유와 ⚙ 링크를 보여 준다.
-        "model_bound": model_problem(config, post.model) is None,
+        # 모델 서버 (v1.48.0) — 기록된 이름(없으면 지금의 기본). 카드의 서버 칩.
+        "endpoint": endpoint,
+        # False 면 열기/재실행이 409 — 카드가 사유(problem)와 ⚙ 링크를 보여 준다.
+        "model_bound": problem is None,
+        "problem": problem,
         "force_active": post.force_active,
         "created_at": post.created_at,
         "last_query": lq["text"] if lq else None,
@@ -491,9 +533,18 @@ def create_app(
         app.mount("/static", _NoCacheStaticFiles(directory=_STATIC), name="static")
 
     @app.get("/api/models")
-    async def list_models():
-        # selectable models from agent-cli's registry (admin-managed)
-        return models_registry.list_models(config.models_json)
+    async def list_models(endpoint: str | None = None):
+        """서버 ``endpoint`` 의 모델 표 (admin-managed). 생략하면 기본 서버의 것."""
+        name = endpoint or models_registry.server_names(config.agent_cli_config_json)[1]
+        return models_registry.list_models(config.models_json, name)
+
+    @app.get("/api/endpoints")
+    async def list_endpoints():
+        """새 글 폼의 Server 선택지 — 이름·호스트·기본 표시만. 주소의 경로·쿼리와 키·헤더는
+        내주지 않는다(admin API 만 base_url 전체를 보인다)."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, models_registry.list_servers, config.agent_cli_config_json
+        )
 
     @app.get("/api/knobs/spec")
     async def knobs_spec_view():
@@ -519,63 +570,138 @@ def create_app(
         loop = asyncio.get_event_loop()
         return loop.run_in_executor(None, fn, *args)
 
-    @app.get("/api/admin/config")
-    async def admin_get_config():
-        try:
-            return await _admin_call(admin.get_config, config.agent_cli_config_json)
-        except admin.AdminError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+    def _admin_http(e: admin.AdminError) -> HTTPException:
+        if isinstance(e, admin.AdminNotFound):
+            return HTTPException(status_code=404, detail=str(e))
+        if isinstance(e, admin.AdminConflict):
+            return HTTPException(status_code=409, detail=e.detail)
+        return HTTPException(status_code=400, detail=str(e))
 
-    @app.put("/api/admin/config")
-    async def admin_put_config(body: dict):
+    def _cli_gate() -> dict:
+        """agent-cli 가 서버별 설정을 아는가 — admin 맨 위 안내 (v1.48.0, 버전 게이트)."""
+        version = instances.cli_version(config.agent_cli_bin)
+        return {
+            "version": version,
+            "supports_endpoints": instances.cli_at_least(
+                config, instances.ENDPOINTS_CLI
+            ),
+            "required": ".".join(str(x) for x in instances.ENDPOINTS_CLI),
+        }
+
+    @app.get("/api/admin/endpoints")
+    async def admin_list_servers():
         try:
-            return await _admin_call(
-                admin.update_config, body, config.agent_cli_config_json
+            view = await _admin_call(
+                lambda: admin.get_servers(
+                    config.agent_cli_config_json,
+                    config.models_json,
+                    room_counts(config, store),
+                )
             )
         except admin.AdminError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise _admin_http(e) from e
+        view["cli"] = await _admin_call(_cli_gate)
+        return view
 
-    @app.get("/api/admin/models")
-    async def admin_list_models():
+    @app.post("/api/admin/endpoints")
+    async def admin_create_server(body: dict):
+        body = body or {}
+        try:
+            return await _admin_call(
+                admin.create_server,
+                body.get("name", ""),
+                body,
+                config.agent_cli_config_json,
+                config.models_json,
+            )
+        except admin.AdminError as e:
+            raise _admin_http(e) from e
+
+    @app.put("/api/admin/endpoints/{name}")
+    async def admin_update_server(name: str, body: dict):
+        try:
+            return await _admin_call(
+                admin.update_server, name, body, config.agent_cli_config_json
+            )
+        except admin.AdminError as e:
+            raise _admin_http(e) from e
+
+    @app.post("/api/admin/endpoints/{name}/default")
+    async def admin_default_server(name: str):
+        try:
+            await _admin_call(
+                admin.set_default_server, name, config.agent_cli_config_json
+            )
+        except admin.AdminError as e:
+            raise _admin_http(e) from e
+        return {"ok": True}
+
+    @app.delete("/api/admin/endpoints/{name}")
+    async def admin_delete_server(name: str, confirm: bool = False):
+        rooms = room_counts(config, store).get(name, 0)
+        try:
+            await _admin_call(
+                lambda: admin.delete_server(
+                    name,
+                    config.agent_cli_config_json,
+                    config.models_json,
+                    rooms=rooms,
+                    confirm=confirm,
+                )
+            )
+        except admin.AdminError as e:
+            raise _admin_http(e) from e
+        return {"ok": True}
+
+    @app.get("/api/admin/endpoints/{name}/models")
+    async def admin_list_models(name: str):
         try:
             view = await _admin_call(
                 admin.list_models_with_status,
+                name,
                 config.models_json,
                 config.agent_cli_config_json,
             )
         except admin.AdminError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise _admin_http(e) from e
         # 방언(dialect) 바인딩 드롭다운 옵션 (예외 없음 — 미설치면 빈 목록)
         view["dialects"] = await _admin_call(admin.list_dialect_names)
         return view
 
-    @app.post("/api/admin/models/detect")
-    async def admin_detect_model(body: dict):
+    @app.post("/api/admin/endpoints/{name}/models/detect")
+    async def admin_detect_model(name: str, body: dict):
         model_id = (body or {}).get("model", "")
         if not model_id:
             raise HTTPException(status_code=400, detail="the model field is required")
         try:
             entry = await _admin_call(
-                admin.detect_model_entry, model_id, config.agent_cli_config_json
+                admin.detect_model_entry, name, model_id, config.agent_cli_config_json
             )
+        except admin.AdminNotFound as e:
+            raise _admin_http(e) from e
         except admin.AdminError as e:
-            raise HTTPException(status_code=502, detail=str(e))
+            raise HTTPException(status_code=502, detail=str(e)) from e
         return {"model": model_id, "entry": entry}
 
-    @app.put("/api/admin/models/{model_id}")
-    async def admin_put_model(model_id: str, body: dict):
+    @app.put("/api/admin/endpoints/{name}/models/{model_id}")
+    async def admin_put_model(name: str, model_id: str, body: dict):
         try:
             await _admin_call(
-                admin.save_model_entry, model_id, body, config.models_json
+                admin.save_model_entry,
+                name,
+                model_id,
+                body,
+                config.models_json,
+                config.agent_cli_config_json,
             )
         except admin.AdminError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise _admin_http(e) from e
         return {"ok": True}
 
-    @app.delete("/api/admin/models/{model_id}")
-    async def admin_delete_model(model_id: str):
+    @app.delete("/api/admin/endpoints/{name}/models/{model_id}")
+    async def admin_delete_model(name: str, model_id: str):
         removed = await _admin_call(
-            admin.delete_model_entry, model_id, config.models_json
+            admin.delete_model_entry, name, model_id, config.models_json
         )
         if not removed:
             raise HTTPException(status_code=404, detail="model not in the registry")
@@ -661,13 +787,17 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail={"reason": "bad_knob", "error": str(e)}
             ) from e
-        problem = model_problem(config, knobs.get("model"))
+        endpoint = (body.endpoint or "").strip() or models_registry.server_names(
+            config.agent_cli_config_json
+        )[1]
+        problem = model_problem(config, endpoint, knobs.get("model"))
         if problem is not None:
             raise HTTPException(status_code=400, detail=problem)
 
         post = store.create_post(
             topic=body.topic,
             knobs=knobs,
+            endpoint=endpoint,
             # the id is also the workspace directory name — never reuse one
             # an orphaned directory (half-finished delete) already holds.
             dir_taken=lambda pid: config.workspace_for(pid).exists(),
@@ -790,7 +920,7 @@ def create_app(
         if clones.running(post_id):
             # 복사가 끝나기 전에 띄우면 반쪽 워크스페이스·세션을 연다 (v1.42.0)
             raise HTTPException(status_code=409, detail={"reason": "cloning"})
-        problem = model_problem(config, post.model)
+        problem = model_problem(config, post_endpoint(config, post), post.model)
         if problem is not None:
             raise HTTPException(status_code=409, detail=problem)
 

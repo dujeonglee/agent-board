@@ -15,9 +15,11 @@
 ## 요구사항
 
 - Python 3.10 이상
-- PATH 에 `agent-cli` (≥ 10.121.0 권장 — 그보다 낮으면 카드의 일부 표시가 빠진다.
+- PATH 에 `agent-cli` ≥ 10.144.0 (서버별 설정 — 그보다 낮으면 방이 뜨지 않고 admin 이 안내한다.
   버전별 기능은 [REFERENCE](docs/REFERENCE.md#agent-cli-버전별-기능))
-- agent-cli 의 `models.json` 에 dialect 가 정해진 모델이 하나 이상
+- agent-cli 에 모델 서버가 하나 이상 저장돼 있고(`agent-cli setup` 또는 보드의 ⚙ admin), 그 서버의 모델 중
+  dialect 가 정해진 것이 하나 이상. 서버별 설정은 agent-cli 와 함께 올린다
+  ([REFERENCE](docs/REFERENCE.md#agent-cli-버전별-기능))
 
 ## 설치 · 실행
 
@@ -84,7 +86,8 @@ AGENT_BOARD_PORT=8080 AGENT_BOARD_HOME=~/agent-board-data agent-board
 - `Keep` — 보는 사람이 없어도 방을 끄지 않는다.
 - `📋 Clone` — 파일과 대화를 골라 새 글로 복사한다. 다른 모델로 이어갈 때도 쓴다.
 - `🗑` — 글, 방, 워크스페이스를 지운다. 되돌릴 수 없다.
-- 헤더의 `⚙` — admin 페이지. agent-cli 의 `config.json`·`models.json` 을 고친다.
+- 헤더의 `⚙` — admin 페이지. agent-cli 의 모델 서버들(`config.json`)과 서버별 모델 표(`models.json`)를 고친다.
+  서버가 없으면 이 화면에서 첫 서버를 추가한다.
 
 ## 더 보기
 

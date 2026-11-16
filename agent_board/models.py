@@ -22,6 +22,10 @@ class Post:
     # 포함한다. 생성 때 한 번 받고, 그 뒤엔 방이 보고하는 값(status.json
     # ``knobs``)을 거울처럼 기록한다. 다음 spawn 은 이걸 표의 플래그로 넘긴다.
     knobs: dict = field(default_factory=dict)
+    # 모델 서버 이름 (v1.48.0, agent-cli ≥ 10.144.0 의 config.json ``endpoints``) — 생성 폼에서
+    # 한 번 고르고(기본 = 그때의 기본 서버), 방이 뜬 뒤에는 바꾸지 않는다(거울 규칙; 다른
+    # 서버는 복제로). 빈 문자열 = 기록 없음(v1.48.0 전 글) — 그 방이 뜨면 web.json 에서 배운다.
+    endpoint: str = ""
     force_active: bool = False
     created_at: str = ""
     last_opened_at: str | None = None

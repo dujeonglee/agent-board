@@ -76,6 +76,8 @@ CREATE TABLE posts (
   post_id         TEXT PRIMARY KEY,      -- 보드 발급 (6자 base32) — workspace 가 여기서 파생
   topic           TEXT NOT NULL,
   session_id      TEXT UNIQUE,           -- NULL until first open; 한 세션=한 글
+  knobs           TEXT,                  -- 노브 {이름: 값} (모델 포함, §16)
+  endpoint        TEXT NOT NULL DEFAULT '', -- 모델 서버 이름 (v1.48.0) — '' = 기록 없음(옛 글)
   force_active    INTEGER NOT NULL DEFAULT 0,
   created_at      TEXT NOT NULL,
   last_opened_at  TEXT                   -- 목록 최근순 정렬 키
@@ -100,9 +102,17 @@ CREATE INDEX idx_posts_recent ON posts(last_opened_at DESC, created_at DESC);
 |---|---|---|
 | GET | `/` | 보드 UI(글 목록) |
 | GET | `/api/posts` | 글 목록 — 각 글에 `last_query`·`status`·`force_active`·`viewers`·`knobs`·`model`·`model_bound`·`open_items`·`stuck`·`jobs` 유도 포함 (§16 거울) |
+| GET | `/api/endpoints` | 새 글 폼의 서버 선택지 (v1.48.0) `{default, servers: [{name, host, default, default_model}]}` — 키·헤더·주소의 경로·쿼리 없음 |
+| GET | `/api/models?endpoint=<이름>` | 그 서버의 모델 표 `[{id, provider, context_window, dialect}]` (생략하면 기본 서버) |
+| GET | `/api/admin/endpoints` | admin 뷰 `{path, legacy, unreadable, default, default_missing, cli: {version, supports_endpoints, required}, servers: [{name, default, provider, base_url, api_key: "***"·"", default_model, extra_headers(값 ***), models, rooms}]}` |
+| POST | `/api/admin/endpoints` | 서버 추가 `{name, provider, base_url, api_key, default_model, extra_headers}` → `{name, moved}` — 이름 규칙 400, 같은 이름 409 `exists`, 첫 서버면 기본, 옛 모양 파일은 쓰기 직전 `.v1` 로(agent-cli `retire_legacy_files`) |
+| PUT | `/api/admin/endpoints/{name}` | 받은 키만 고친다(요청 시점 재읽기; `***`/빈 키 = 유지) — 없는 서버 404 |
+| POST | `/api/admin/endpoints/{name}/default` | 기본 서버 지정 |
+| DELETE | `/api/admin/endpoints/{name}?confirm=1` | 서버 + 그 서버의 모델 칸 삭제 — 기본 서버 400, 쓰는 방이 있는데 confirm 없음 409 `{reason: in_use, rooms}` |
+| GET·POST·PUT·DELETE | `/api/admin/endpoints/{name}/models[/detect·/{model_id}]` | 그 서버의 모델 표 상태·탐지·저장·삭제 (종전 `/api/admin/models*` 의 서버별 판) |
 | GET | `/api/knobs/spec` | agent-cli 의 노브 표(`agent-cli knobs --json`, 프로세스당 1회 캐시) — `{full, knobs}`; 구버전 agent-cli 면 모델만 든 최소 표(`full: false`) (§17) |
 | GET | `/api/posts/{id}/tree` | 원본 글 워크스페이스 한 레벨 목록 (clone 트리 피커 — 보드가 fs 직접 읽음, 인스턴스 미기동도 동작) 심링크는 `{type: "link", size: 0, target}` 로 — 따라가지 않고 크기도 더하지 않는다(v1.43.0); 밖을 가리키는 링크 rel 로 펼치면 400 |
-| POST | `/api/posts` | 새 글 `{topic, knobs{model, …}, clone_from?, clone_paths?}` → 생성 (workspace 자동). `knobs` 는 표(§17)로 검증(400 `bad_knob`), `model` 필수(400 `model_required`/`dialect_unbound`). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) **v1.42.0**: clone 은 행 삽입·mkdir·**작업 시작**까지만 하고 바로 돌려준다 — 응답·목록 행의 `cloning`(진행 중일 때 스냅샷, 아니면 `null`), 복사 실패(traversal 등)는 400 대신 작업이 `failed` 로 남긴다(§4). |
+| POST | `/api/posts` | 새 글 `{topic, endpoint?, knobs{model, …}, clone_from?, clone_paths?}` → 생성 (workspace 자동). `endpoint` 를 비우면 지금의 기본 서버를 글에 기록(서버 없음 400 `no_server`, 없는 이름 400 `endpoint_missing`). `knobs` 는 표(§17)로 검증(400 `bad_knob`), `model` 필수(400 `model_required`/`dialect_unbound` — 그 서버의 표로 판정). clone_from+clone_paths 면 원본에서 선택 파일 복사(§4 clone) **v1.42.0**: clone 은 행 삽입·mkdir·**작업 시작**까지만 하고 바로 돌려준다 — 응답·목록 행의 `cloning`(진행 중일 때 스냅샷, 아니면 `null`), 복사 실패(traversal 등)는 400 대신 작업이 `failed` 로 남긴다(§4). |
 | GET | `/api/posts/{id}/clone` | 복제 작업 스냅샷 (v1.42.0) `{state: running·done·failed, bytes_done, bytes_total, files_done, files_total, current, error}` — 작업이 없으면(복제가 아닌 글·끝난 지 10분·보드 재시작) 404. 모달 250 ms·카드 1 s 폴링 |
 | DELETE | `/api/posts/{id}` | 글 삭제 + 그 글의 워크스페이스 디렉토리 삭제(보드 소유) |
 | POST | `/api/posts/{id}/open` | spawn-or-attach → 라우트 등록 → `{url}` 반환(프론트 리다이렉트). 복제 중이면 409 `{reason: "cloning"}`(재시작도 같음, v1.42.0) |
@@ -350,6 +360,11 @@ PORT_RANGE       = (50000, 60000)                  # 인스턴스 포트 할당
 - **v4.17.5** — `/api/health` 의 `awaiting_input`: ❗ 응답 필요 표시.
 - **v4.17.11** — `/api/health` 의 `viewers`(라이브 구독자 수): 접속자 수 표시(👁) +
   게시물별 모델 변경 게이트(§16). 없으면 `viewers`=0 으로 degrade(=항상 변경 가능처럼 보임).
+
+- **v10.144.0** — 서버별 설정(`config.json` `endpoints`·`models.json` 서버 칸)·`--endpoint`·`web.json` 의
+  `endpoint`. 보드 v1.48.0 은 이것을 전제로 한다(낮으면 admin 안내, `--endpoint` 를 넘기지 않음). 서버 이름 규칙·
+  옛 모양 판정·`.v1` 이름 바꾸기·`endpoint_host` 는 agent-cli `config` 의 것을 lazy import 로 쓴다 — 계약 테스트
+  `tests/test_endpoints.py::TestAgentCliContract`.
 
 ## 15. v2+ (범위 밖, 설계 여지만)
 - 글별 권한/소유권, 기존 CLI 세션 노출, 검색/필터, presence, 멀티호스트.

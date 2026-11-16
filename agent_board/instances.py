@@ -44,16 +44,25 @@ def cli_version(agent_cli_bin: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _supports_title(config: Config) -> bool:
-    """agent-cli 가 ``--title`` 을 아는가 (≥ 10.71.0). 버전을 못 읽으면 넘기지 않는다
-    — 모르는 옵션은 typer 가 부트에서 거절해 방이 아예 안 뜬다."""
+#: 서버별 설정(config.json ``endpoints``·``--endpoint``)을 아는 agent-cli (v1.48.0 짝).
+ENDPOINTS_CLI = (10, 144, 0)
+
+
+def cli_at_least(config: Config, version: tuple[int, int, int]) -> bool:
+    """spawn 하는 agent-cli 가 ``version`` 이상인가. 버전을 못 읽으면 False — 모르는 옵션은
+    typer 가 부트에서 거절해 방이 아예 안 뜬다(넘기지 않는 쪽이 안전)."""
     v = cli_version(config.agent_cli_bin)
     if not v:
         return False
     try:
-        return tuple(int(x) for x in v.split(".")[:3]) >= (10, 71, 0)
+        return tuple(int(x) for x in v.split(".")[:3]) >= version
     except ValueError:
         return False
+
+
+def _supports_title(config: Config) -> bool:
+    """agent-cli 가 ``--title`` 을 아는가 (≥ 10.71.0)."""
+    return cli_at_least(config, (10, 71, 0))
 
 
 def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> list[str]:
@@ -84,6 +93,11 @@ def build_spawn_cmd(config: Config, post: Post, *, port: int, token: str) -> lis
     # 노브(모델 포함) → 표(`agent-cli knobs --json`)의 플래그 (v1.36.0). agent-cli
     # 가 모델의 정의(provider/url/key)를 자기 레지스트리에서 푼다 — 보드는 값만.
     cmd += knobs_spec.spawn_args(knobs_spec.load(config.agent_cli_bin), post.knobs)
+    # 서버 (v1.48.0, agent-cli ≥ 10.144.0 `--endpoint`): 글에 기록된 이름을 spawn 마다 넘긴다 —
+    # 방이 기억하는 것은 이름뿐이고 주소·키는 agent-cli 가 config.json 에서 푼다. 기록이 없는
+    # 옛 글은 넘기지 않는다(agent-cli 가 세션 기록 → 기본 서버를 쓰고, 보드가 web.json 에서 배운다).
+    if post.endpoint and cli_at_least(config, ENDPOINTS_CLI):
+        cmd += ["--endpoint", post.endpoint]
     if post.session_id:
         cmd += ["--resume", post.session_id]
     return cmd

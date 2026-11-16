@@ -5,6 +5,8 @@
   const $posts = document.getElementById("posts");
   const $topic = document.getElementById("new-topic");
   const $model = document.getElementById("new-model");
+  const $endpoint = document.getElementById("new-endpoint");
+  const $noServer = document.getElementById("new-no-server");
   const $create = document.getElementById("new-create");
   const $newAdv = document.getElementById("new-adv");
   const $newKnobs = document.getElementById("new-knobs");
@@ -16,19 +18,24 @@
     localStorage.setItem("agentboard_same_tab", $sameTab.checked ? "1" : "0")
   );
 
-  let MODELS = []; // registry (전부), shared by the new-post form + per-post dropdowns
-  // 방언(dialect) 바인딩이 있는 모델만 — 방 쪽 선택지는 이것뿐이다 (v1.33.0,
+  // 모델 서버 (v1.48.0) — 저장된 서버들(`/api/endpoints`: 이름·호스트·기본·기본 모델). 방은
+  // 생성 폼에서 서버를 하나 고르고 그 이름을 기억한다. 모델 선택지는 그 서버의 것이다.
+  let SERVERS = { default: null, servers: [] };
+  // 서버 이름 → 방언(dialect) 바인딩이 있는 모델들 — 방 쪽 선택지는 이것뿐이다 (v1.33.0,
   // agent-cli v10.3.0 짝: 바인딩 없는 모델은 agent-cli 가 부트에서 거부한다).
   // 어드민(⚙)은 설정하는 곳이라 전부 보여 준다.
-  let BOUND = [];
-  const adminLink = (mid) =>
-    `<a href="/admin#model=${encodeURIComponent(mid)}" title="Set this model's dialect in admin">⚙ Set up</a>`;
+  const BOUND_BY_SERVER = new Map();
+  const adminLink = (server, mid) =>
+    `<a href="/admin#server=${encodeURIComponent(server || "")}&model=${encodeURIComponent(mid)}" title="Set this model's dialect in admin">⚙ Set up</a>`;
   // 서버 게이트의 사유(detail.reason) → 사람 문장. 400(생성·변경)/409(열기·재실행) 공용.
   function modelProblemText(detail) {
     if (!detail || typeof detail !== "object") return null;
     if (detail.reason === "model_required") return "This room has no model — pick one";
+    if (detail.reason === "no_server") return "No model server is set up — add one in ⚙ admin";
+    if (detail.reason === "endpoint_missing")
+      return `Server '${detail.endpoint}' is not in the settings — add a server with that name again in ⚙ admin, or 📋 clone the room to another server`;
     if (detail.reason === "dialect_unbound")
-      return `Model '${detail.model}' has no dialect binding — set it in ⚙ admin`;
+      return `Model '${detail.model}' has no dialect binding on server '${detail.endpoint}' — set it in ⚙ admin`;
     if (detail.reason === "bad_knob") return `Bad knob value: ${detail.error}`;
     return null;
   }
@@ -258,58 +265,120 @@
     });
   }
 
-  // 새 글·복제 폼의 모델 <select> 채우기 — 바인딩 있는 모델만, "(기본)" 없음.
-  // 하나뿐이면 미리 고르고, 없으면 안내 한 줄 + 비활성(만들기 불가).
-  function fillModelPicker(sel, preferred) {
+  // 새 글·복제 폼의 서버 <select> — 기본 서버가 먼저 골라진다. 서버가 없으면 안내 + 비활성.
+  function fillServerPicker(sel, preferred) {
     sel.innerHTML = "";
-    if (!BOUND.length) {
+    if (!SERVERS.servers.length) {
       const o = document.createElement("option");
       o.value = "";
-      o.textContent = "⚠ No model has a dialect — set one in ⚙ admin";
+      o.textContent = "⚠ No server";
       sel.appendChild(o);
       sel.disabled = true;
       return;
     }
     sel.disabled = false;
-    if (BOUND.length > 1) {
+    SERVERS.servers.forEach((sv) => {
+      const o = document.createElement("option");
+      o.value = sv.name;
+      o.textContent = sv.name + (sv.default ? " (default)" : "");
+      o.title = sv.host;
+      sel.appendChild(o);
+    });
+    const names = SERVERS.servers.map((sv) => sv.name);
+    sel.value = names.includes(preferred) ? preferred : SERVERS.default || names[0];
+  }
+
+  // 그 서버의 바인딩 있는 모델들 — 한 번 읽어 둔다(load() 가 비운다).
+  async function boundModels(server) {
+    if (!server) return [];
+    if (!BOUND_BY_SERVER.has(server)) {
+      const models = await fetch("/api/models?endpoint=" + encodeURIComponent(server))
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []);
+      BOUND_BY_SERVER.set(server, models.filter((m) => m.dialect));
+    }
+    return BOUND_BY_SERVER.get(server);
+  }
+
+  // 새 글·복제 폼의 모델 <select> 채우기 — 그 서버의 바인딩 있는 모델만, "(기본)" 없음.
+  // 고른 값이 없으면 그 서버의 기본 모델을 미리 고른다(하나뿐이면 그것). 없으면 안내 + 비활성.
+  async function fillModelPicker(sel, server, preferred) {
+    const bound = await boundModels(server);
+    sel.innerHTML = "";
+    if (!bound.length) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = server
+        ? "⚠ No model on this server has a dialect — set one in ⚙ admin"
+        : "⚠ No model server — add one in ⚙ admin";
+      sel.appendChild(o);
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    if (bound.length > 1) {
       const o = document.createElement("option");
       o.value = "";
       o.textContent = "— pick a model —";
       sel.appendChild(o);
     }
-    BOUND.forEach((m) => {
+    bound.forEach((m) => {
       const o = document.createElement("option");
       o.value = m.id;
       o.textContent = m.provider ? `${m.id} (${m.provider})` : m.id;
       sel.appendChild(o);
     });
-    sel.value = preferred && BOUND.some((m) => m.id === preferred) ? preferred : BOUND.length === 1 ? BOUND[0].id : "";
+    const sv = SERVERS.servers.find((x) => x.name === server);
+    const has = (id) => id && bound.some((m) => m.id === id);
+    sel.value = has(preferred)
+      ? preferred
+      : has(sv && sv.default_model)
+        ? sv.default_model
+        : bound.length === 1
+          ? bound[0].id
+          : "";
   }
 
   async function loadModels() {
-    const [models] = await Promise.all([
-      fetch("/api/models").then((r) => r.json()),
+    const [servers] = await Promise.all([
+      fetch("/api/endpoints").then((r) => (r.ok ? r.json() : { default: null, servers: [] })),
       loadSpec(),
     ]);
-    MODELS = models;
-    BOUND = MODELS.filter((m) => m.dialect);
-    fillModelPicker($model, $model.value);
-    $create.disabled = !BOUND.length;
+    SERVERS = servers;
+    BOUND_BY_SERVER.clear();
+    fillServerPicker($endpoint, $endpoint.value);
+    await fillModelPicker($model, $endpoint.value, $model.value);
+    $noServer.hidden = SERVERS.servers.length > 0;
+    $create.disabled = $model.disabled;
     $newAdv.hidden = !SPEC.full; // 구버전 agent-cli 는 표가 없다 → 폼 숨김
     knobForm($newKnobs, readKnobForm($newKnobs));
   }
 
+  // 서버를 바꾸면 모델 선택지가 그 서버의 것으로 바뀌고, 그 서버의 기본 모델이 골라진다.
+  $endpoint.addEventListener("change", async () => {
+    await fillModelPicker($model, $endpoint.value, "");
+    $create.disabled = $model.disabled;
+  });
+
   const esc = (s) =>
     (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // 카드 경고 줄 — 모델 없음 / 방언 미설정 (model_bound=false 일 때만).
+  // 카드 경고 줄 — 모델 없음 / 서버 없음 / 방언 미설정 (model_bound=false 일 때만).
   function modelWarning(p) {
     if (p.model_bound) return "";
-    if (!p.model)
+    const why = (p.problem && p.problem.reason) || "";
+    if (!p.model || why === "model_required")
       return `<div class="model-warn">⚠ This room has no model — 📋 clone it, pick a model and continue in the new room.</div>`;
+    if (why === "no_server")
+      return `<div class="model-warn">⚠ No model server is set up, so the room cannot open — <a href="/admin">add one in ⚙ admin</a>.</div>`;
+    if (why === "endpoint_missing")
+      return (
+        `<div class="model-warn">⚠ Server '${esc(p.endpoint)}' is not in the settings, so the room cannot open — ` +
+        `add a server named '${esc(p.endpoint)}' again in <a href="/admin">⚙ admin</a>, or 📋 clone the room to another server.</div>`
+      );
     return (
-      `<div class="model-warn">⚠ Model '${esc(p.model)}' has no dialect binding, so the room cannot open — ` +
-      adminLink(p.model) +
+      `<div class="model-warn">⚠ Model '${esc(p.model)}' has no dialect binding on server '${esc(p.endpoint)}', so the room cannot open — ` +
+      adminLink(p.endpoint, p.model) +
       " or 📋 clone it and continue with another model" +
       `</div>`
     );
@@ -450,6 +519,8 @@
       `</span>` +
       // 🤖 모델 칩 (v1.36.0): 드롭다운이 아니다 — 방이 보고한 현재 모델. 바꾸는
       // 곳은 방 안의 🤖 칩이고 보드는 그 값을 기록해 다음 재시작에 넘긴다.
+      // 🖥 서버 칩 (v1.48.0): 방의 서버 이름 — 뜬 뒤엔 바뀌지 않는다(다른 서버는 📋 복제).
+      `<span class="server-chip" title="Model server — fixed for this room; 📋 clone the room to use another server">🖥 ${esc(p.endpoint) || "⚠ none"}</span>` +
       `<span class="model-chip" title="Model — change it from the 🤖 chip inside the room">🤖 ${esc(p.model) || "⚠ none"}</span>` +
       knobChips(p) +
       (SPEC.full
@@ -727,8 +798,12 @@
       $topic.focus();
       return;
     }
+    if (!$endpoint.value) {
+      toast("No model server is set up — add one in ⚙ admin", true);
+      return;
+    }
     if (!$model.value) {
-      toast(BOUND.length ? "Pick a model" : "No model has a dialect — set one in ⚙ admin", true);
+      toast($model.disabled ? "No model on this server has a dialect — set one in ⚙ admin" : "Pick a model", true);
       $model.focus();
       return;
     }
@@ -740,6 +815,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: topic,
+          endpoint: $endpoint.value,
           knobs: Object.assign({ model: $model.value }, readKnobForm($newKnobs)),
         }),
       });
@@ -775,6 +851,10 @@
   const $cloneDlg = document.getElementById("clone-dlg");
   const $cloneTopic = document.getElementById("clone-topic");
   const $cloneModel = document.getElementById("clone-model");
+  const $cloneEndpoint = document.getElementById("clone-endpoint");
+  $cloneEndpoint.addEventListener("change", () =>
+    fillModelPicker($cloneModel, $cloneEndpoint.value, $cloneModel.value)
+  );
   const $cloneAdv = document.getElementById("clone-adv");
   const $cloneKnobs = document.getElementById("clone-knobs");
   wireAdvToggle($cloneAdv, $cloneKnobs);
@@ -798,8 +878,9 @@
     $cloneBar.hidden = true;
     $cloneCancel.textContent = "Cancel";
     clonePost = null;
-    // 모델 옵션 채우기 (new-model 과 동일 소스 — 바인딩 있는 모델만)
-    fillModelPicker($cloneModel, p.model);
+    // 서버는 원본의 것으로(복제가 서버를 복제한다), 모델은 그 서버의 바인딩 있는 모델만
+    fillServerPicker($cloneEndpoint, p.endpoint);
+    await fillModelPicker($cloneModel, $cloneEndpoint.value, p.model);
     // 노브는 원본 값으로 채운다 — 복제는 설정까지 이어받는다 (비우면 기본값)
     knobForm($cloneKnobs, p.knobs || {});
     $cloneAdv.hidden = !SPEC.full;
@@ -860,7 +941,7 @@
   }
 
   function setCloneControls(disabled) {
-    [$cloneTopic, $cloneModel, $cloneAdv, $cloneGo].forEach((el) => (el.disabled = disabled));
+    [$cloneTopic, $cloneEndpoint, $cloneModel, $cloneAdv, $cloneGo].forEach((el) => (el.disabled = disabled));
     $cloneKnobs
       .querySelectorAll("input, select, textarea, button")
       .forEach((el) => (el.disabled = disabled));
@@ -943,7 +1024,9 @@
       return;
     }
     if (!$cloneModel.value) {
-      $cloneMsg.textContent = BOUND.length ? "Pick a model" : "No model has a dialect — set one in ⚙ admin";
+      $cloneMsg.textContent = $cloneModel.disabled
+        ? "No model on this server has a dialect — set one in ⚙ admin"
+        : "Pick a model";
       $cloneModel.focus();
       return;
     }
@@ -955,6 +1038,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: topic,
+        endpoint: $cloneEndpoint.value,
         knobs: Object.assign({ model: $cloneModel.value }, readKnobForm($cloneKnobs)),
         clone_from: cloneFrom,
         clone_paths: cloneSelection(),

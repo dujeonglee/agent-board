@@ -31,11 +31,35 @@ BOUND_MODELS = {
 }
 
 
-def _registry(tmp_path, models=None):
+def _registry(tmp_path, models=None, server="home"):
+    """서버 ``server`` 의 모델 표(v1.48.0 서버별 모양)와, 없으면 그 서버 하나가 기본인 config.json."""
     import json
 
     reg = tmp_path / "models.json"
-    reg.write_text(json.dumps({"models": BOUND_MODELS if models is None else models}))
+    reg.write_text(
+        json.dumps(
+            {
+                "endpoints": {
+                    server: {"models": BOUND_MODELS if models is None else models}
+                }
+            }
+        )
+    )
+    cfg = tmp_path / "config.json"
+    if not cfg.exists():
+        cfg.write_text(
+            json.dumps(
+                {
+                    "endpoint": server,
+                    "endpoints": {
+                        server: {
+                            "provider": "openai",
+                            "base_url": "http://127.0.0.1:1/v1",
+                        }
+                    },
+                }
+            )
+        )
     return reg
 
 
@@ -112,6 +136,7 @@ def _client(tmp_path, *, orch=None, keepalive=None):
         data_dir=tmp_path / "data",
         workspaces_root=tmp_path / "ws",
         models_json=_registry(tmp_path),
+        agent_cli_config_json=tmp_path / "config.json",
     )
     store = Store(cfg.db_path)
     app = create_app(
@@ -248,6 +273,7 @@ class TestPostsApi:
             data_dir=tmp_path / "d",
             workspaces_root=tmp_path / "w",
             models_json=_registry(tmp_path),
+            agent_cli_config_json=tmp_path / "config.json",
         )
         store = Store(cfg.db_path)
         spy = SpyRouter()
@@ -337,12 +363,13 @@ class TestGatewaySelection:
 
 class TestModelSelection:
     def test_api_models_lists_registry(self, tmp_path):
-        import json
 
-        reg = tmp_path / "models.json"
-        reg.write_text(json.dumps({"models": {"Qwen-X": {"provider": "omlx"}}}))
+        reg = _registry(tmp_path, {"Qwen-X": {"provider": "omlx"}})
         cfg = Config(
-            data_dir=tmp_path / "d", workspaces_root=tmp_path / "w", models_json=reg
+            data_dir=tmp_path / "d",
+            workspaces_root=tmp_path / "w",
+            models_json=reg,
+            agent_cli_config_json=tmp_path / "config.json",
         )
         store = Store(cfg.db_path)
         c = TestClient(
@@ -627,6 +654,7 @@ class TestEventsStream:
             data_dir=tmp_path / "data",
             workspaces_root=tmp_path / "ws",
             models_json=_registry(tmp_path),
+            agent_cli_config_json=tmp_path / "config.json",
         )
         app = create_app(
             cfg,
@@ -665,6 +693,7 @@ class TestEventsStream:
             data_dir=tmp_path / "d",
             workspaces_root=tmp_path / "w",
             models_json=_registry(tmp_path),
+            agent_cli_config_json=tmp_path / "config.json",
         )
         app = create_app(
             cfg,
@@ -684,6 +713,7 @@ class TestGatewayBanner:
             data_dir=tmp_path / "d",
             workspaces_root=tmp_path / "w",
             models_json=_registry(tmp_path),
+            agent_cli_config_json=tmp_path / "config.json",
         )
         assert "board-proxy" in gateway_banner(cfg)
         assert "caddy" not in gateway_banner(cfg).lower()
@@ -1000,6 +1030,7 @@ class TestDeathEdgeRouteWiring:
             data_dir=tmp_path / "data",
             workspaces_root=tmp_path / "ws",
             models_json=_registry(tmp_path),
+            agent_cli_config_json=tmp_path / "config.json",
         )
         store = Store(cfg.db_path)
         spy = SpyRouter()
@@ -1632,7 +1663,11 @@ class TestModelGate:
         _, store, c = _client(tmp_path)
         r = c.post("/api/posts", json={"topic": "t", "knobs": {"model": "unbound"}})
         assert r.status_code == 400
-        assert r.json()["detail"] == {"reason": "dialect_unbound", "model": "unbound"}
+        assert r.json()["detail"] == {
+            "reason": "dialect_unbound",
+            "model": "unbound",
+            "endpoint": "home",
+        }
         assert store.list_posts() == []
 
     def test_create_with_unknown_model_is_400(self, tmp_path):
@@ -1673,6 +1708,7 @@ class TestModelGate:
             assert r.json()["detail"] == {
                 "reason": "dialect_unbound",
                 "model": "unbound",
+                "endpoint": "home",
             }
         assert orch.opened == [] and orch.restarted == []
 
@@ -1737,6 +1773,8 @@ class TestModelGate:
         assert '<option value="">(기본)</option>' not in js
         assert "m.dialect" in js  # 방 쪽 선택지 = 바인딩 있는 모델만
         assert "model_bound" in js and "model-warn" in js  # 카드 경고 + 열기 비활성
-        assert "/admin#model=" in js  # ⚙ 설정 딥링크
+        assert (
+            "/admin#server=" in js and "&model=" in js
+        )  # ⚙ 설정 딥링크 (서버별, v1.48.0)
         assert "dialect_unbound" in js and "model_required" in js  # 서버 사유 → 문장
         assert ".model-warn" in css

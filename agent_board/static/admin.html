@@ -113,10 +113,28 @@
     #entry-dlg .adm-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
     #entry-dlg .adm-status { margin-top: 0; }
 
+    /* ── 서버 목록(왼쪽) + 그 서버의 설정·모델(오른쪽) (v1.48.0) ── */
+    .adm-layout { display: grid; grid-template-columns: 16rem minmax(0, 1fr); gap: 16px; align-items: start; }
+    .adm-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .adm-servers h2 { margin-bottom: 10px; }
+    #srv-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    #srv-list button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+    #srv-list button:hover { background: var(--surface-2); }
+    #srv-list button[aria-current="true"] { border-color: var(--border-2); background: var(--surface-2); }
+    .srv-name { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; overflow-wrap: anywhere; }
+    .srv-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    /* hidden 속성이 .badge 의 display 에 지지 않게 (셋업 화면에 "default" 배지가 남던 것) */
+    .adm-main [hidden] { display: none !important; }
+    .badge.default { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+    .adm-banner { border: 1px solid var(--border-2); border-radius: 10px; padding: 10px 14px; font-size: 13px; line-height: 1.5; background: var(--surface); overflow-wrap: anywhere; }
+    .adm-banner.warn { border-color: var(--fail); color: var(--fail); background: var(--fail-soft-bg); }
+    #srv-intro { margin: -4px 0 14px; max-width: 44rem; }
+
     /* ── 좁은 화면 — style.css 의 모바일 규칙과 같은 14px 거터, 폼은 한 열 ── */
     @media (max-width: 640px) {
       .adm-main { padding: 14px 14px 32px; gap: 12px; }
       .adm-section { padding: 14px; }
+      .adm-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
       .adm-form, #entry-form { grid-template-columns: minmax(0, 1fr); gap: 4px; }
       .adm-form > input, .adm-form > select, #entry-form > input, #entry-form > select { margin-bottom: 6px; }
       dialog#entry-dlg { padding: 16px 14px; }
@@ -129,9 +147,22 @@
   </header>
 
   <main class="adm-main">
+  <div id="cli-gate" class="adm-banner warn" hidden></div>
+  <div id="adm-warn" class="adm-banner warn" hidden></div>
+  <div class="adm-layout">
+  <nav class="adm-section adm-servers" aria-label="Servers">
+    <h2>Servers</h2>
+    <ul id="srv-list"></ul>
+    <button id="srv-add" type="button" class="btn-ghost">+ Add server</button>
+  </nav>
+
+  <div class="adm-detail">
   <section class="adm-section" id="cfg">
-    <h2>config.json <span class="adm-note" id="cfg-path"></span></h2>
+    <h2><span id="srv-title">Server</span> <span id="srv-default-badge" class="badge default" hidden>default for new rooms</span> <span class="adm-note" id="cfg-path"></span></h2>
+    <p class="adm-note" id="srv-intro" hidden></p>
     <div class="adm-form">
+      <label for="cfg-name" id="cfg-name-label">name</label>
+      <input id="cfg-name" type="text" placeholder="home — lowercase letters, digits and -" autocomplete="off" maxlength="64">
       <label for="cfg-provider">provider</label>
       <select id="cfg-provider">
         <option value="openai">openai</option>
@@ -142,7 +173,8 @@
       <label for="cfg-api-key">api_key</label>
       <input id="cfg-api-key" type="text" placeholder="(set: *** — enter only to change)" autocomplete="off">
       <label for="cfg-default-model">default_model</label>
-      <input id="cfg-default-model" type="text" placeholder="model id">
+      <input id="cfg-default-model" type="text" placeholder="model id" list="cfg-model-list" autocomplete="off">
+      <datalist id="cfg-model-list"></datalist>
     </div>
     <div class="adm-hdrs" id="cfg-hdrs">
       <h3>Extra headers</h3>
@@ -153,18 +185,20 @@
       <div class="adm-actions">
         <button id="cfg-hdr-add" type="button" class="btn-ghost">+ Add header</button>
       </div>
-      <p class="adm-note">Sent with every request to the model server, like the API key — only checked rows. Values show as *** after saving; leave *** as is to keep the saved value.</p>
+      <p class="adm-note">Sent with every request to this server, like its API key — only checked rows. Values show as *** after saving; leave *** as is to keep the saved value.</p>
     </div>
     <div class="adm-actions">
       <button id="cfg-save" type="button" class="btn-primary">💾 Save</button>
-      <span class="adm-note">Leave api_key empty or as *** to keep the existing key. Other keys are left untouched.</span>
+      <button id="srv-default" type="button" class="btn-ghost" title="Make this the default server for new rooms and the CLI — existing rooms keep theirs">Make default</button>
+      <button id="srv-delete" type="button" class="btn-danger">Delete</button>
+      <span class="adm-note" id="cfg-save-note">Leave api_key empty or as *** to keep the existing key. Other keys are left untouched.</span>
     </div>
     <div class="adm-status" id="cfg-status"></div>
   </section>
 
   <section class="adm-section" id="models">
-    <h2>models.json
-      <button id="models-refresh" type="button" class="btn-icon" title="Re-probe the endpoint">↻</button>
+    <h2>Models on this server
+      <button id="models-refresh" type="button" class="btn-icon" title="Re-probe the server">↻</button>
     </h2>
     <div class="adm-status" id="models-status"></div>
     <div class="adm-table-wrap">
@@ -176,7 +210,7 @@
     </table>
     </div>
     <p class="adm-note">
-      <span class="badge served">served</span> served by the endpoint ·
+      <span class="badge served">served</span> served by the server ·
       <span class="badge missing">missing</span> only in the registry (gone from the server — removal candidate) ·
       <span class="badge new">NEW</span> only on the server (detect/register candidate) ·
       <span class="badge unbound">⚠ unbound</span> no dialect binding — agent-cli will not run it (set with ✎)
@@ -185,6 +219,8 @@
       <button id="models-clean" type="button" class="btn-danger">🗑 Clean up all missing</button>
     </div>
   </section>
+  </div>
+  </div>
   </main>
 
   <dialog id="entry-dlg">

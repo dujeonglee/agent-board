@@ -1,15 +1,19 @@
-"""List selectable models from agent-cli's ``models.json`` registry (DESIGN §8).
+"""agent-cli 의 서버 표(config.json)와 서버별 모델 표(models.json) 읽기 (DESIGN §8).
 
-The board does NOT manage model definitions/keys — those live in agent-cli's
-registry (``~/.agent-cli/models.json``, admin-managed). The board only reads the
-ids to populate the new-post dropdown, stores the chosen id per post, and passes
-it as ``--model <id>`` on spawn (agent-cli resolves provider/url/key itself).
+The board does NOT manage model definitions/keys here — those live in agent-cli's
+files (``~/.agent-cli/config.json``·``models.json``, admin-managed). This module
+only reads: the saved server names (new-post form's Server select), and per
+server the model ids (Model select) and their dialect bindings (the run gate).
 
-v1.33.0 (agent-cli v10.3.0/v10.4.0 짝): 방언(dialect) 바인딩이 없는 모델은
-agent-cli 가 부트/spawn 에서 거부한다 — 보드도 같은 판정(``binding_of``)으로
-방 쪽 선택지에서 빼고(어드민은 전부 보여 설정하게 한다) 열기·생성을 막는다.
-바인딩은 entry 의 ``dialect`` 키뿐이다(옛 ``wire_format`` 은 agent-cli
-v10.4.0 부터 읽지 않는다).
+모양 (agent-cli ≥ 10.144.0)::
+
+    config.json  {"endpoint": "<기본 서버>", "endpoints": {"<이름>": {...}}}
+    models.json  {"endpoints": {"<이름>": {"models": {"<id>": {...}}}}}
+
+옛 모양(최상위에 ``endpoints`` 가 없는 파일)은 agent-cli 처럼 **읽지 않는다** — 서버 없음.
+v1.33.0: 방언(dialect) 바인딩이 없는 모델은 agent-cli 가 부트에서 거부한다 — 보드도 같은
+판정(``binding_of``)으로 방 쪽 선택지에서 빼고 열기·생성을 막는다. 매 호출 파일을 읽는다
+(어드민 편집이 곧바로 보인다).
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import json
 from pathlib import Path
 
 DEFAULT_MODELS_JSON = Path.home() / ".agent-cli" / "models.json"
+DEFAULT_CONFIG_JSON = Path.home() / ".agent-cli" / "config.json"
 
 
 def binding_of(entry) -> str | None:
@@ -28,20 +33,67 @@ def binding_of(entry) -> str | None:
     return d if isinstance(d, str) and d else None
 
 
-def _entries(path: str | Path | None) -> dict:
-    path = Path(path) if path else DEFAULT_MODELS_JSON
+def _read(path: str | Path | None, default: Path) -> dict:
+    """새 모양 파일 하나 — 없거나·깨졌거나·옛 모양이면 {}."""
+    path = Path(path) if path else default
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeDecodeError):
         return {}
-    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(data, dict) or "endpoints" not in data:
+        return {}
+    return data
+
+
+def _sections(data: dict) -> dict:
+    eps = data.get("endpoints")
+    return eps if isinstance(eps, dict) else {}
+
+
+def server_names(cfg_path: str | Path | None) -> tuple[list[str], str | None]:
+    """``(저장된 서버 이름들, 기본 서버 이름)`` — 기본은 저장된 이름일 때만(없으면 None)."""
+    data = _read(cfg_path, DEFAULT_CONFIG_JSON)
+    names = sorted(n for n, v in _sections(data).items() if isinstance(v, dict))
+    default = data.get("endpoint")
+    return names, default if isinstance(default, str) and default in names else None
+
+
+def list_servers(cfg_path: str | Path | None) -> dict:
+    """새 글 폼의 Server 선택지 — ``{"default", "servers": [{name, host, default, default_model}]}``.
+
+    주소는 ``host[:port]`` 만(agent-cli `config.endpoint_host`) — 경로·쿼리·사용자 정보는
+    내주지 않는다(쿼리에 토큰을 싣는 게이트웨이가 있다). 키·헤더는 어떤 값도 없다."""
+    from agent_cli.config import endpoint_host
+
+    data = _read(cfg_path, DEFAULT_CONFIG_JSON)
+    names, default = server_names(cfg_path)
+    sections = _sections(data)
+    return {
+        "default": default,
+        "servers": [
+            {
+                "name": n,
+                "host": endpoint_host(str(sections[n].get("base_url") or "")),
+                "default": n == default,
+                # 새 글 폼이 서버를 바꿀 때 미리 고를 모델 — 비밀이 아니다
+                "default_model": str(sections[n].get("default_model") or ""),
+            }
+            for n in names
+        ],
+    }
+
+
+def _entries(models_path: str | Path | None, endpoint: str | None) -> dict:
+    if not endpoint:
+        return {}
+    section = _sections(_read(models_path, DEFAULT_MODELS_JSON)).get(endpoint)
+    models = section.get("models") if isinstance(section, dict) else None
     return models if isinstance(models, dict) else {}
 
 
-def list_models(path: str | Path | None = None) -> list[dict]:
-    """``[{id, provider, context_window, dialect}]`` sorted by id
-    (case-insensitive). ``dialect`` None = 미설정(실행 불가). Empty list if
-    the registry is missing/corrupt."""
+def list_models(models_path: str | Path | None, endpoint: str | None) -> list[dict]:
+    """서버 ``endpoint`` 의 ``[{id, provider, context_window, dialect}]`` — id 순(대소문자 무시).
+    ``dialect`` None = 미설정(실행 불가). 표가 없거나 깨졌으면 빈 목록."""
     out = [
         {
             "id": mid,
@@ -49,14 +101,16 @@ def list_models(path: str | Path | None = None) -> list[dict]:
             "context_window": (meta or {}).get("context_window"),
             "dialect": binding_of(meta),
         }
-        for mid, meta in _entries(path).items()
+        for mid, meta in _entries(models_path, endpoint).items()
     ]
     return sorted(out, key=lambda m: m["id"].lower())
 
 
-def model_binding(path: str | Path | None, model_id: str | None) -> str | None:
-    """``model_id`` 의 방언 바인딩 (미등록·미설정이면 None) — 서버 쪽 실행
-    게이트의 판정 함수. 매 호출마다 파일을 읽는다(어드민 편집 즉시 반영)."""
+def model_binding(
+    models_path: str | Path | None, endpoint: str | None, model_id: str | None
+) -> str | None:
+    """서버 ``endpoint`` 에서 ``model_id`` 의 방언 바인딩 (미등록·미설정이면 None) — 서버 쪽
+    실행 게이트의 판정 함수."""
     if not model_id:
         return None
-    return binding_of(_entries(path).get(model_id))
+    return binding_of(_entries(models_path, endpoint).get(model_id))

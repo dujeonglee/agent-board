@@ -37,11 +37,13 @@
 
   <section id="new">
     <input id="new-topic" type="text" placeholder="Topic — e.g. build a library" maxlength="200">
-    <select id="new-model" title="Model — only models with a dialect binding are listed (set it in ⚙ admin)"></select>
+    <select id="new-endpoint" title="Model server — the room keeps it; clone the room to use another server"></select>
+    <select id="new-model" title="Model — only the selected server's models with a dialect binding are listed (set it in ⚙ admin)"></select>
     <button id="new-adv" type="button" class="btn-ghost" aria-expanded="false" title="Knobs — thinking, grammar, agent cap, compaction, stall, auto-approve, audit. Empty = agent-cli defaults. After creation, change them from the chips inside the room." hidden>⚙ Advanced</button>
     <button id="new-create" type="button" class="btn-primary">+ New post</button>
     <!-- 노브 폼 (v1.36.0): 컨트롤은 agent-cli 의 표(/api/knobs/spec)에서 그려진다 -->
     <div id="new-knobs" class="knob-form" hidden></div>
+    <div id="new-no-server" class="model-warn" hidden>⚠ No model server is set up — <a href="/admin">add one in ⚙ admin</a> to create rooms.</div>
   </section>
 
   <main id="posts"></main>
@@ -58,7 +60,8 @@
     <div id="clone-src-label" class="clone-src-label"></div>
     <div class="clone-fields">
       <input id="clone-topic" type="text" placeholder="New topic" maxlength="200">
-      <select id="clone-model" title="Model — only models with a dialect binding are listed (set it in ⚙ admin)"></select>
+      <select id="clone-endpoint" title="Model server — pre-filled with the source room's; pick another to move the conversation to that server"></select>
+      <select id="clone-model" title="Model — only the selected server's models with a dialect binding are listed (set it in ⚙ admin)"></select>
       <button id="clone-adv" type="button" class="btn-ghost" aria-expanded="false" title="Knobs — pre-filled with the source room's values" hidden>⚙ Advanced</button>
     </div>
     <div id="clone-knobs" class="knob-form" hidden></div>

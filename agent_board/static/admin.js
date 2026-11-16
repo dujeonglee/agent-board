@@ -1,5 +1,6 @@
-// agent-board admin — config.json 폼 + models.json 상태 테이블.
+// agent-board admin — 서버 목록(config.json endpoints) + 그 서버의 설정 폼 + 모델 표 (v1.48.0).
 // 본체 app.js 와 격리된 별도 페이지 스크립트 (vanilla, 의존성 0).
+// 서버가 없으면 이 화면이 곧 셋업 화면이다 — "첫 서버 추가" 폼 → 저장 → 모델 조회 → 기본 모델.
 (function () {
   "use strict";
 
@@ -21,7 +22,10 @@
       try {
         detail = (await r.json()).detail || detail;
       } catch (_e) { /* non-JSON error body */ }
-      throw new Error(detail);
+      const err = new Error(typeof detail === "string" ? detail : detail.error || JSON.stringify(detail));
+      err.status = r.status;
+      err.detail = detail;
+      throw err;
     }
     return r.json();
   }
@@ -83,33 +87,215 @@
     rows[rows.length - 1].querySelector(".hdr-name").focus();
   });
 
-  async function loadConfig() {
+  // ── 서버 목록 ───────────────────────────────────────────────
+  let serversView = { servers: [], default: null };
+  let current = null; // 고른 서버 이름 — null 이면 "서버 추가" 폼
+  const enc = encodeURIComponent;
+  const srvUrl = (name) => "/api/admin/endpoints/" + enc(name);
+
+  function hostOf(url) {
     try {
-      const c = await api("GET", "/api/admin/config");
-      $("cfg-path").textContent = c.path + (c.exists ? "" : " (missing — created on save)");
-      $("cfg-provider").value = c.provider || "openai";
-      $("cfg-base-url").value = c.base_url;
-      $("cfg-api-key").value = c.api_key; // "***" 또는 ""
-      $("cfg-default-model").value = c.default_model;
-      renderHeaders(c.extra_headers);
+      return new URL(url).host;
+    } catch (_e) {
+      return url || "(no base_url)";
+    }
+  }
+
+  function renderBanners(v) {
+    const gate = $("cli-gate");
+    if (v.cli && !v.cli.supports_endpoints) {
+      gate.textContent = v.cli.version
+        ? "agent-cli " + v.cli.version + " cannot read per-server settings — upgrade agent-cli to " +
+          v.cli.required + " or later together with this board. Rooms will not start until then."
+        : "The agent-cli version could not be read — per-server settings need agent-cli " + v.cli.required + " or later.";
+      gate.hidden = false;
+    } else {
+      gate.hidden = true;
+    }
+    const warn = $("adm-warn");
+    const lines = [];
+    if (v.default_missing)
+      lines.push("No default server is set — new rooms and the CLI stop until you pick one with Make default.");
+    if (v.unreadable)
+      lines.push("Could not read the settings (" + v.unreadable + "). Adding a server keeps the file as a .v1 copy; the servers in it will not be in the new file.");
+    warn.textContent = lines.join(" ");
+    warn.hidden = !lines.length;
+  }
+
+  function renderServerList() {
+    const ul = $("srv-list");
+    ul.innerHTML = "";
+    for (const sv of serversView.servers) {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-current", String(sv.name === current));
+      const name = document.createElement("span");
+      name.className = "srv-name";
+      name.textContent = sv.name;
+      if (sv.default) {
+        const d = document.createElement("span");
+        d.className = "badge default";
+        d.textContent = "● default";
+        name.appendChild(d);
+      }
+      const meta = document.createElement("span");
+      meta.className = "srv-meta";
+      meta.textContent =
+        hostOf(sv.base_url) + " · " + sv.models + " model" + (sv.models === 1 ? "" : "s") +
+        (sv.rooms ? " · " + sv.rooms + " room" + (sv.rooms === 1 ? "" : "s") : "");
+      b.append(name, meta);
+      b.addEventListener("click", () => selectServer(sv.name));
+      li.appendChild(b);
+      ul.appendChild(li);
+    }
+    $("srv-add").setAttribute("aria-current", String(current === null));
+  }
+
+  async function loadServers(preferred) {
+    try {
+      serversView = await api("GET", "/api/admin/endpoints");
     } catch (e) {
       status($("cfg-status"), "Load failed: " + e.message, false);
+      return;
     }
+    renderBanners(serversView);
+    const names = serversView.servers.map((x) => x.name);
+    const pick =
+      [preferred, current, serversView.default, names[0]].find((n) => n && names.includes(n)) || null;
+    if (pick) selectServer(pick);
+    else showAddForm();
+  }
+
+  // 폼을 채운 시점의 값 — 저장은 **바뀐 필드만** 보낸다. 폼을 연 뒤 방이 저장한 값(예: 대화형으로
+  // 고른 default_model)이 손대지 않은 폼 칸으로 덮이지 않게(서버는 요청 시점에 파일을 다시 읽어
+  // 받은 키만 고친다).
+  let loadedFields = {};
+
+  function fillForm(sv) {
+    $("cfg-provider").value = sv.provider || "openai";
+    $("cfg-base-url").value = sv.base_url || "";
+    $("cfg-api-key").value = sv.api_key || ""; // "***" 또는 ""
+    $("cfg-default-model").value = sv.default_model || "";
+    renderHeaders(sv.extra_headers);
+    loadedFields = allFields();
+  }
+
+  function selectServer(name) {
+    const sv = serversView.servers.find((x) => x.name === name);
+    if (!sv) return showAddForm();
+    current = name;
+    renderServerList();
+    $("srv-title").textContent = name;
+    $("srv-default-badge").hidden = !sv.default;
+    $("cfg-path").textContent = serversView.path;
+    $("srv-intro").hidden = true;
+    $("cfg-name").hidden = $("cfg-name-label").hidden = true;
+    $("cfg-api-key").placeholder = "(set: *** — enter only to change)";
+    $("srv-default").hidden = $("srv-delete").hidden = false;
+    $("srv-default").disabled = sv.default;
+    $("srv-delete").disabled = sv.default;
+    $("srv-delete").title = sv.default
+      ? "The default server cannot be deleted — make another server the default first"
+      : "Delete this server";
+    $("cfg-save-note").hidden = false;
+    fillForm(sv);
+    status($("cfg-status"), "", true);
+    $("models").hidden = false;
+    refreshModels();
+  }
+
+  function showAddForm() {
+    current = null;
+    renderServerList();
+    const first = !serversView.servers.length;
+    $("srv-title").textContent = first ? "Add your first server" : "Add server";
+    $("srv-default-badge").hidden = true;
+    $("cfg-path").textContent = serversView.path || "";
+    const intro = $("srv-intro");
+    intro.textContent = first
+      ? "No model server is saved yet. Name it, point it at the server, and save — the model list is read from the server next, then pick the default model." +
+        (serversView.legacy
+          ? " Settings saved before agent-cli 10.144.0 are not read; saving keeps the old files as config.json.v1 / models.json.v1 so you can copy values from them."
+          : "")
+      : "The name cannot be changed later — rooms remember a server by its name.";
+    intro.hidden = false;
+    $("cfg-name").hidden = $("cfg-name-label").hidden = false;
+    $("cfg-api-key").placeholder = "optional — local servers usually need none";
+    $("cfg-name").value = "";
+    $("srv-default").hidden = $("srv-delete").hidden = true;
+    $("cfg-save-note").hidden = true;
+    fillForm({ provider: "openai", base_url: "", api_key: "", default_model: "", extra_headers: [] });
+    status($("cfg-status"), "", true);
+    $("models").hidden = true;
+    $("cfg-name").focus();
+  }
+
+  $("srv-add").addEventListener("click", showAddForm);
+
+  function allFields() {
+    return {
+      provider: $("cfg-provider").value,
+      base_url: $("cfg-base-url").value,
+      api_key: $("cfg-api-key").value,
+      default_model: $("cfg-default-model").value,
+      extra_headers: collectHeaders(),
+    };
+  }
+
+  function changedFields() {
+    const now = allFields();
+    const out = {};
+    for (const k of Object.keys(now)) {
+      if (JSON.stringify(now[k]) !== JSON.stringify(loadedFields[k])) out[k] = now[k];
+    }
+    return out;
   }
 
   $("cfg-save").addEventListener("click", async () => {
     try {
-      await api("PUT", "/api/admin/config", {
-        provider: $("cfg-provider").value,
-        base_url: $("cfg-base-url").value,
-        api_key: $("cfg-api-key").value,
-        default_model: $("cfg-default-model").value,
-        extra_headers: collectHeaders(),
-      });
-      status($("cfg-status"), "Saved — applies to newly opened instances", true);
-      loadConfig();
+      if (current === null) {
+        const name = $("cfg-name").value.trim();
+        const r = await api("POST", "/api/admin/endpoints", Object.assign({ name }, allFields()));
+        await loadServers(name);
+        const moved = (r.moved || []).length ? " Old files kept as: " + r.moved.join(", ") + "." : "";
+        status($("cfg-status"), "Saved server '" + name + "'." + moved +
+          ($("cfg-default-model").value ? "" : " Pick the default model below, then save."), true);
+        if (!$("cfg-default-model").value) $("cfg-default-model").focus();
+      } else {
+        await api("PUT", srvUrl(current), changedFields());
+        await loadServers(current);
+        status($("cfg-status"), "Saved — applies to rooms opened from now on", true);
+      }
     } catch (e) {
       status($("cfg-status"), "Save failed: " + e.message, false);
+    }
+  });
+
+  $("srv-default").addEventListener("click", async () => {
+    try {
+      await api("POST", srvUrl(current) + "/default");
+      await loadServers(current);
+      status($("cfg-status"), "'" + current + "' is now the default for new rooms and the CLI — existing rooms keep their server", true);
+    } catch (e) {
+      status($("cfg-status"), "Make default failed: " + e.message, false);
+    }
+  });
+
+  $("srv-delete").addEventListener("click", async () => {
+    const sv = serversView.servers.find((x) => x.name === current);
+    if (!sv) return;
+    const roomsLine = sv.rooms
+      ? "\n\n" + sv.rooms + " room(s) use this server. They will not open until you add a server named '" +
+        sv.name + "' again in admin, or clone them to another server."
+      : "";
+    if (!confirm("Delete server '" + sv.name + "' and its model table?" + roomsLine)) return;
+    try {
+      await api("DELETE", srvUrl(sv.name) + "?confirm=1");
+      current = null;
+      await loadServers();
+    } catch (e) {
+      status($("cfg-status"), "Delete failed: " + e.message, false);
     }
   });
 
@@ -178,9 +364,9 @@
       del.textContent = "🗑";
       del.title = "Remove from the registry";
       del.addEventListener("click", async () => {
-        if (!confirm("Remove '" + row.id + "' from models.json?")) return;
+        if (!confirm("Remove '" + row.id + "' from this server's models?")) return;
         try {
-          await api("DELETE", "/api/admin/models/" + encodeURIComponent(row.id));
+          await api("DELETE", srvUrl(current) + "/models/" + enc(row.id));
           refreshModels();
         } catch (e) {
           status($("models-status"), "Remove failed: " + e.message, false);
@@ -205,7 +391,7 @@
         detect.textContent = "Detecting…";
         status($("models-status"), "Detecting '" + mid + "' capabilities — may take tens of seconds", true);
         try {
-          const r = await api("POST", "/api/admin/models/detect", { model: mid });
+          const r = await api("POST", srvUrl(current) + "/models/detect", { model: mid });
           status($("models-status"), "Detection done — review the values, then save", true);
           openEntryDialog(mid, r.entry);
         } catch (e) {
@@ -234,11 +420,28 @@
     }
   }
 
+  // 기본 모델 입력의 제안 목록 — 이 서버가 서빙하는 것 + 표에 있는 것
+  function fillModelSuggestions() {
+    const list = $("cfg-model-list");
+    list.innerHTML = "";
+    const ids = [...new Set([...modelsView.models.map((m) => m.id), ...modelsView.new])];
+    for (const id of ids) {
+      const o = document.createElement("option");
+      o.value = id;
+      list.appendChild(o);
+    }
+  }
+
   async function refreshModels() {
+    if (current === null) return;
+    const name = current;
     try {
-      modelsView = await api("GET", "/api/admin/models");
-      if (!modelsView.probe_error) status($("models-status"), "", true);
+      const view = await api("GET", srvUrl(name) + "/models");
+      if (name !== current) return; // 그사이 다른 서버를 골랐다
+      modelsView = view;
+      status($("models-status"), "", true);
       render();
+      fillModelSuggestions();
       openModelFromHash();
     } catch (e) {
       status($("models-status"), "List failed: " + e.message, false);
@@ -250,11 +453,11 @@
   $("models-clean").addEventListener("click", async () => {
     const missing = modelsView.models.filter((m) => m.status === "missing");
     if (!missing.length) return;
-    if (!confirm("Remove " + missing.length + " model(s) gone from the server from models.json?\n" +
+    if (!confirm("Remove " + missing.length + " model(s) gone from the server from this server's models?\n" +
       missing.map((m) => "- " + m.id).join("\n"))) return;
     for (const m of missing) {
       try {
-        await api("DELETE", "/api/admin/models/" + encodeURIComponent(m.id));
+        await api("DELETE", srvUrl(current) + "/models/" + enc(m.id));
       } catch (e) {
         status($("models-status"), "Remove '" + m.id + "' failed: " + e.message, false);
         break;
@@ -307,18 +510,29 @@
 
   $("ef-wire").addEventListener("change", showDialectGuide);
 
-  // 딥링크 ``/admin#model=<id>`` — 방 카드의 "⚙ 설정" 이 그 모델의 편집
-  // 창을 바로 연다 (등록된 모델이면 현재 entry, NEW 면 빈 entry).
+  // 딥링크 ``/admin#server=<name>&model=<id>`` — 방 카드의 "⚙ Set up" 이 그 서버의 그 모델
+  // 편집 창을 바로 연다 (등록된 모델이면 현재 entry, NEW 면 빈 entry). 서버만 주면 그 서버를 고른다.
+  function hashParams() {
+    const out = {};
+    for (const part of (location.hash || "").replace(/^#/, "").split("&")) {
+      const i = part.indexOf("=");
+      if (i > 0) out[part.slice(0, i)] = decodeURIComponent(part.slice(i + 1));
+    }
+    return out;
+  }
   function openModelFromHash() {
-    const m = /^#model=(.+)$/.exec(location.hash || "");
-    if (!m) return;
-    const mid = decodeURIComponent(m[1]);
+    const h = hashParams();
+    if (!h.model || (h.server && h.server !== current)) return;
     history.replaceState(null, "", location.pathname); // 한 번만
-    const row = modelsView.models.find((r) => r.id === mid);
-    openEntryDialog(mid, row ? row.entry : {});
+    const row = modelsView.models.find((r) => r.id === h.model);
+    openEntryDialog(h.model, row ? row.entry : {});
   }
   // 같은 문서에서 해시만 바뀌어도(어드민 탭이 이미 열려 있을 때) 연다.
-  window.addEventListener("hashchange", openModelFromHash);
+  window.addEventListener("hashchange", () => {
+    const h = hashParams();
+    if (h.server && h.server !== current) selectServer(h.server);
+    else openModelFromHash();
+  });
 
   $("entry-cancel").addEventListener("click", () => $("entry-dlg").close());
 
@@ -355,7 +569,7 @@
       entry[key] = num;
     }
     try {
-      await api("PUT", "/api/admin/models/" + encodeURIComponent(dlgModelId), entry);
+      await api("PUT", srvUrl(current) + "/models/" + enc(dlgModelId), entry);
       $("entry-dlg").close();
       refreshModels();
     } catch (e) {
@@ -363,6 +577,5 @@
     }
   });
 
-  loadConfig();
-  refreshModels();
+  loadServers(hashParams().server);
 })();

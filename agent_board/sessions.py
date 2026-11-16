@@ -80,6 +80,9 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     pid, port = info.get("pid"), info.get("port")
     if not (pid and instances.pid_alive(pid) and port):
         return dict(_IDLE)
+    # v1.48.0: 방의 서버 이름 (agent-cli ≥10.144.0 web.json `endpoint` — title 옆의 정체 정보).
+    # 서버 기록이 없던 옛 글이 처음 뜬 뒤 보드가 배운다. 구버전은 미기록 → 키 생략.
+    endpoint = info.get("endpoint")
     # Prefer the local status.json sidecar; fall back to an HTTP health poll for
     # pre-4.27.0 instances that don't write it.
     live = instances.read_status_json(workspace, session_id)
@@ -92,6 +95,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
         "awaiting_input": bool(live.get("awaiting_input")),
         "viewers": int(live.get("viewers") or 0),
     }
+    if isinstance(endpoint, str) and endpoint:
+        out["endpoint"] = endpoint
     # v1.17.0: 상주 에이전트 요약 (agent-cli ≥7.10.0 additive 필드 —
     # 구버전 인스턴스는 미기록 → 키 생략, 프런트가 칩 숨김).
     if isinstance(live.get("agents"), dict):
