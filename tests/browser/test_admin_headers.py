@@ -14,18 +14,27 @@ _V = "test-hdr-browser-value"
 
 
 def _saved(board):
-    return json.loads(board.cfg.agent_cli_config_json.read_text())
+    """저장된 기본 서버(``home``) — v1.48.0 서버별 모양."""
+    return json.loads(board.cfg.agent_cli_config_json.read_text())["endpoints"]["home"]
 
 
 def test_add_disable_save_reopen(board, browser):
     pytest.importorskip("agent_cli.providers.credentials")
     board.cfg.agent_cli_config_json.write_text(
-        json.dumps({"provider": "openai", "base_url": "http://127.0.0.1:9/v1"})
+        json.dumps(
+            {
+                "endpoint": "home",
+                "endpoints": {
+                    "home": {"provider": "openai", "base_url": "http://127.0.0.1:9/v1"}
+                },
+            }
+        )
     )
     page = browser.new_page()
     try:
         page.goto(board.url + "admin")
-        page.wait_for_selector("#cfg-hdr-add")
+        # 서버 목록이 그려지고 기본 서버(home)가 골라진 뒤 — 폼이 그 서버의 값으로 찬 상태
+        page.wait_for_selector('#srv-list button[aria-current="true"]')
         assert page.locator("#cfg-hdrs-body tr").count() == 0
 
         # 추가 두 행 → 저장
@@ -45,7 +54,10 @@ def test_add_disable_save_reopen(board, browser):
             == "password"
         )
         page.click("#cfg-save")
-        page.wait_for_selector("#cfg-status.ok")
+        page.wait_for_function(
+            "document.querySelector('#cfg-status').textContent.length > 0"
+        )
+        assert "Saved" in page.locator("#cfg-status").inner_text()
         assert _saved(board)["extra_headers"] == [
             {"name": "x-service-id", "value": _V, "enabled": True},
             {"name": "x-drop", "value": "v2", "enabled": True},

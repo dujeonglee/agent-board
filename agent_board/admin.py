@@ -1,27 +1,30 @@
-"""Admin page domain logic — agent-cli ``config.json`` / ``models.json`` 편집.
+"""Admin page domain logic — agent-cli ``config.json`` / ``models.json`` 편집 (서버별, v1.48.0).
 
 board 는 원래 models.json 을 읽기만 했지만(models_registry), 어드민 페이지는
 **의도적으로** 그 경계를 넘어 편집 표면이 된다 (2026-07-12 사용자 결정).
 전송 계층(app.py 라우트)과 분리된 순수 도메인 모듈 — FastAPI import 없음.
 
+모양 (agent-cli ≥ 10.144.0): config.json ``{"endpoint", "endpoints": {이름: {provider, base_url,
+api_key, default_model, extra_headers}}}``, models.json ``{"endpoints": {이름: {"models": {...}}}}``.
+
 설계 요점:
-- ``config.json`` 의 ``api_key`` 는 GET 에서 ``***`` 로 마스킹, PUT 에서
-  ``***``/빈값이면 기존 값 유지 (평문 키가 브라우저로 나가지 않음).
-- 알려진 4필드(provider/base_url/api_key/default_model)만 폼 편집 대상 —
-  그 외 키는 손대지 않고 보존.
-- ``extra_headers`` (v1.47.0): 모델 서버로 가는 요청에 붙는 사용자 헤더 목록.
-  값은 api_key 처럼 GET 에서 ``***``, PUT 에서 ``***`` 면 같은 이름의 기존 값 유지.
-  검증·요청 헤더 만들기는 agent-cli 의 것을 그대로 쓴다(규칙 하나 —
-  ``agent_cli.providers.credentials``).
-- 모델 목록은 config 의 endpoint 에 ``GET /models`` 프로브를 합쳐
-  served / missing / new 로 분류. **삭제는 항상 사용자 클릭** (자동 정리
-  없음 — 파괴적 동작).
-- capability 자동 탐지는 agent-cli 의 실제 탐지기를 lazy import 재사용
-  (board 는 agent-cli 를 spawn 하는 호스트에서 돌므로 co-install 전제;
-  import 실패는 친절한 에러로).
-- 쓰기는 전부 원자적(temp+``os.replace``, 유니크 tmp — agent-cli
-  v4.27.1 레이스 교훈): agent-cli 인스턴스의 auto-detect 저장과 동시에
-  일어나도 반파일이 없다.
+- 서버마다 키(``api_key``)·추가 헤더 값은 GET 에서 ``***``, PUT 에서 ``***``/빈값이면 기존 값 유지
+  (평문 키가 브라우저로 나가지 않음).
+- 쓰기는 **저장 요청 시점에 파일을 다시 읽고** 그 서버의 알려진 필드(provider/base_url/api_key/
+  default_model + extra_headers)만 고친다 — 그 서버의 다른 키, 다른 서버, 최상위의 다른 키는
+  보존한다. 폼을 연 뒤 방이 저장한 값(예: default_model)이 폼 내용으로 덮이지 않게. 잠금은 없다
+  (agent-cli 와 같다 — 원자적 교체로 반쪽 파일만 막는다).
+- **옛 모양은 읽지 않는다** — 서버 없음. 첫 서버를 저장할 때 agent-cli 의
+  ``config.retire_legacy_files`` 로 ``.v1`` 이름만 바꿔 남긴다(CLI setup 과 같은 규칙·같은 함수).
+  옛 모양 파일에 섞어 쓰지 않는다.
+- 기본 서버 불변식: 서버가 하나라도 있으면 ``endpoint`` 는 그중 하나 — 첫 서버가 기본이 되고,
+  기본 서버는 지울 수 없다(손으로 고쳐 기본이 비면 서버를 만들 때 고쳐진다·Make default).
+- 모델 목록은 그 서버의 endpoint 에 ``GET /models`` 프로브를 합쳐 served / missing / new 로
+  분류. **삭제는 항상 사용자 클릭** (자동 정리 없음 — 파괴적 동작).
+- 검증·요청 헤더·capability 탐지·이름 규칙·옛 모양 판정은 agent-cli 의 것을 lazy import 로
+  재사용한다 (board 는 agent-cli 를 spawn 하는 호스트에서 돌므로 co-install 전제; import 실패는
+  친절한 에러로).
+- 쓰기는 전부 원자적(temp+``os.replace``, 유니크 tmp — agent-cli v4.27.1 레이스 교훈).
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from agent_board import models_registry
 
 DEFAULT_CONFIG_JSON = Path.home() / ".agent-cli" / "config.json"
 
-# 폼 편집 대상 — 이 외 키는 PUT 에서 무조건 보존.
+# 서버 폼 편집 대상 — 이 외 키는 PUT 에서 무조건 보존.
 CONFIG_FORM_FIELDS = ("provider", "base_url", "api_key", "default_model")
 KEY_MASK = "***"
 
@@ -74,6 +77,31 @@ class AdminError(Exception):
     """사용자에게 그대로 보여줄 수 있는 실패 (HTTP 400/502 감)."""
 
 
+class AdminNotFound(AdminError):
+    """그 이름의 서버(또는 모델)가 없다 (HTTP 404 감)."""
+
+
+class AdminConflict(AdminError):
+    """요청이 지금 상태와 부딪힌다 (HTTP 409 감) — ``detail`` 은 프런트가 읽는 사유."""
+
+    def __init__(self, message: str, detail: dict):
+        super().__init__(message)
+        self.detail = {**detail, "error": message}
+
+
+def _cli_config():
+    """agent-cli 의 설정 모듈 — 이름 규칙·옛 모양 판정·``.v1`` 이름 바꾸기의 단일 출처."""
+    import importlib
+
+    try:
+        return importlib.import_module("agent_cli.config")
+    except ImportError as e:
+        raise AdminError(
+            "the agent_cli package cannot be imported, so server settings cannot be "
+            "edited here"
+        ) from e
+
+
 def _credentials_module():
     """agent-cli 의 자격 모듈 — 추가 헤더 검증·요청 헤더의 단일 출처.
 
@@ -90,13 +118,13 @@ def _credentials_module():
     return credentials
 
 
-def _credentials(cfg: dict):
-    """config dict → agent-cli ``Credentials`` (규칙 위반은 이름만 담은 AdminError)."""
+def _credentials(name: str, server: dict):
+    """서버 dict → agent-cli ``Credentials`` (규칙 위반은 이름만 담은 AdminError)."""
     cred = _credentials_module()
     try:
-        return cred.credentials_from_config(cfg)
+        return cred.credentials_from_config(server)
     except cred.ExtraHeaderError as e:
-        raise AdminError(f"config.json extra_headers: {e}") from e
+        raise AdminError(f"server '{name}' extra_headers: {e}") from e
 
 
 def _extra_headers_view(raw) -> list[dict]:
@@ -181,43 +209,113 @@ def _atomic_write_json(path: Path, data: dict) -> None:
         raise
 
 
-# ── config.json ──────────────────────────────────────────────────
+# ── config.json — 서버 표 ────────────────────────────────────────
 
 
-def get_config(path: Path = DEFAULT_CONFIG_JSON) -> dict:
-    """폼 뷰 — 4필드(api_key 마스킹) + 존재 여부. 파일 부재는 빈 폼."""
-    cfg = _read_json(path)
+def _read_new_shape(path: Path | None) -> tuple[dict, bool, str]:
+    """``(새 모양 내용, 옛 모양인가, 못 읽은 사유)`` — 옛 모양·못 읽는 파일의 내용은 {} 로 둔다
+    (agent-cli 판정 — 옛 값은 읽지 않는다). 없는 파일은 ``({}, False, "")``."""
+    if not path or not path.is_file():
+        return {}, False, ""
+    try:
+        data = _read_json(path)
+    except AdminError as e:
+        return {}, False, str(e)
+    if _cli_config().is_legacy_shape(data):
+        return {}, True, ""
+    return data, False, ""
+
+
+def _servers_of(data: dict) -> dict:
+    eps = data.get("endpoints")
+    if eps is None:
+        return {}
+    if not isinstance(eps, dict) or not all(isinstance(v, dict) for v in eps.values()):
+        raise AdminError("config.json: 'endpoints' must be an object of server objects")
+    return eps
+
+
+def _config_for_write(path: Path) -> dict:
+    """쓰기 직전의 새 모양 config — 옛 모양이면 거절(섞어 쓰지 않는다; 첫 서버 추가가 .v1 로 옮긴다)."""
+    data = _read_json(path)
+    if _cli_config().is_legacy_shape(data):
+        raise AdminError(
+            "config.json has the pre-10.144.0 shape — add a server to replace it "
+            "(the old file is kept as config.json.v1)"
+        )
+    _servers_of(data)
+    return data
+
+
+def _server_view(name: str, server: dict, *, default: str | None) -> dict:
+    """서버 하나의 폼 뷰 — 키·헤더 값은 ``***``."""
     return {
-        "path": str(path),
-        "exists": bool(cfg),
-        "provider": cfg.get("provider", ""),
-        "base_url": cfg.get("base_url", ""),
-        "api_key": KEY_MASK if cfg.get("api_key") else "",
-        "default_model": cfg.get("default_model", ""),
-        "extra_headers": _extra_headers_view(cfg.get("extra_headers")),
+        "name": name,
+        "default": name == default,
+        "provider": server.get("provider", "") or "openai",
+        "base_url": server.get("base_url", ""),
+        "api_key": KEY_MASK if server.get("api_key") else "",
+        "default_model": server.get("default_model", ""),
+        "extra_headers": _extra_headers_view(server.get("extra_headers")),
     }
 
 
-def update_config(fields: dict, path: Path = DEFAULT_CONFIG_JSON) -> dict:
-    """4필드 + ``extra_headers`` 만 갱신 — 그 외 키 보존, api_key ``***``/빈값은 기존 유지.
+def get_servers(
+    cfg_path: Path = DEFAULT_CONFIG_JSON,
+    models_path: Path | None = None,
+    rooms: dict[str, int] | None = None,
+) -> dict:
+    """admin 왼쪽 목록 + 오른쪽 폼의 뷰.
 
-    (빈 api_key 로 '키 제거'는 지원하지 않음 — 마스킹과 구분 불가.
-    키 삭제가 필요하면 파일을 직접 편집.)
+    ``legacy`` = 옛 모양 파일이 있다, ``unreadable`` = 못 읽은 사유(둘 다 셋업 화면의 ".v1 로
+    남긴다" 안내 — 첫 서버 저장이 그 파일을 옮긴다).
+    ``default_missing`` = 서버는 있는데 기본이 없다(손으로 고친 파일 — Make default 로 고친다).
+    ``rooms`` 는 서버별 방 수(호출자가 글 목록에서 센다)."""
+    rooms = rooms or {}
+    data, legacy, unreadable = _read_new_shape(cfg_path)
+    if models_path:
+        _m, m_legacy, m_unreadable = _read_new_shape(models_path)
+        legacy = legacy or m_legacy
+        unreadable = unreadable or m_unreadable
+    servers = _servers_of(data)
+    default = data.get("endpoint") if data.get("endpoint") in servers else None
+    counts = _model_counts(models_path) if models_path else {}
+    return {
+        "path": str(cfg_path),
+        "models_path": str(models_path) if models_path else "",
+        "legacy": legacy,
+        "unreadable": unreadable,
+        "default": default,
+        "default_missing": bool(servers) and default is None,
+        "servers": [
+            {
+                **_server_view(n, servers[n], default=default),
+                "models": counts.get(n, 0),
+                "rooms": rooms.get(n, 0),
+            }
+            for n in sorted(servers)
+        ],
+    }
 
-    ``extra_headers`` 는 목록 전체를 받는다(빠진 항목은 지워진다). ``***`` 값은 같은
-    이름의 기존 값 유지. agent-cli 의 ``validate_extra_headers`` 를 통과해야 저장한다 —
-    위반이면 파일은 그대로다.
-    """
-    cfg = _read_json(path)
+
+def _apply_fields(name: str, server: dict, fields: dict) -> None:
+    """폼 필드를 서버 dict 에 — 알려진 4필드 + ``extra_headers`` 만, 나머지 키 보존.
+
+    ``api_key`` 가 ``***``/빈값이면 기존 키 유지(빈값으로 '키 제거'는 지원하지 않음 — 마스킹과
+    구분 불가; 지우려면 파일을 직접 편집). ``extra_headers`` 는 목록 전체를 받고(빠진 항목은
+    지워진다) ``***`` 값은 같은 이름의 기존 값 유지 — agent-cli 의 ``validate_extra_headers``
+    를 통과해야 한다(위반이면 아무것도 안 바뀐다: 호출자가 쓰기 전에 부른다)."""
+    if not isinstance(fields, dict):
+        raise AdminError("the request body must be an object")
     if "extra_headers" in fields:
         cred = _credentials_module()
         resolved = _resolve_extra_headers(
-            fields["extra_headers"], cfg.get("extra_headers")
+            fields["extra_headers"], server.get("extra_headers")
         )
         try:
-            cfg["extra_headers"] = cred.validate_extra_headers(resolved)
+            server["extra_headers"] = cred.validate_extra_headers(resolved)
         except cred.ExtraHeaderError as e:
-            raise AdminError(str(e)) from e
+            raise AdminError(f"server '{name}': {e}") from e
     for k in CONFIG_FORM_FIELDS:
         if k not in fields:
             continue
@@ -227,27 +325,124 @@ def update_config(fields: dict, path: Path = DEFAULT_CONFIG_JSON) -> dict:
         v = v.strip()
         if k == "api_key" and v in ("", KEY_MASK):
             continue  # 기존 키 유지
-        cfg[k] = v
-    _atomic_write_json(path, cfg)
-    return get_config(path)
+        server[k] = v
+
+
+def create_server(
+    name: str,
+    fields: dict,
+    cfg_path: Path = DEFAULT_CONFIG_JSON,
+    models_path: Path | None = None,
+) -> dict:
+    """서버 하나를 만든다 — ``{"name", "moved": [옛 파일을 남긴 경로]}``.
+
+    이름은 agent-cli 규칙(소문자·숫자·``-``, 만든 뒤 바꾸지 않음). 같은 이름이 있으면
+    :class:`AdminConflict`. 옛 모양 파일은 쓰기 직전에 ``.v1`` 로 이름만 바꾼다(CLI setup 과 같은
+    함수). 기본 서버가 없으면(첫 서버·손으로 비운 기본) 이 서버가 기본이 된다."""
+    cli = _cli_config()
+    if not isinstance(name, str) or not cli.ENDPOINT_NAME_RE.match(name):
+        raise AdminError("server name: use lowercase letters, digits and '-'")
+    server: dict = {}
+    _apply_fields(name, server, fields)  # 검증 먼저 — 실패하면 파일은 그대로
+    data, _legacy, _err = _read_new_shape(cfg_path)
+    if name in _servers_of(data):
+        raise AdminConflict(
+            f"a server named '{name}' already exists", {"reason": "exists"}
+        )
+    targets = [cfg_path] + ([models_path] if models_path else [])
+    moved = [str(p) for p in cli.retire_legacy_files(targets)]
+    data = _read_json(cfg_path) if cfg_path.is_file() else {}
+    servers = data.setdefault("endpoints", {})
+    servers[name] = server
+    if data.get("endpoint") not in servers:
+        data["endpoint"] = name
+    _atomic_write_json(cfg_path, data)
+    return {"name": name, "moved": moved}
+
+
+def _existing_server(data: dict, name: str) -> dict:
+    servers = _servers_of(data)
+    if name not in servers:
+        raise AdminNotFound(f"no server named '{name}'")
+    return servers[name]
+
+
+def update_server(
+    name: str, fields: dict, cfg_path: Path = DEFAULT_CONFIG_JSON
+) -> dict:
+    """서버 하나의 알려진 필드만 고친다 — 저장 요청 시점에 파일을 다시 읽는다."""
+    data = _config_for_write(cfg_path)
+    server = _existing_server(data, name)
+    _apply_fields(name, server, fields)
+    _atomic_write_json(cfg_path, data)
+    return _server_view(name, server, default=data.get("endpoint"))
+
+
+def set_default_server(name: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> None:
+    """새 방과 CLI 의 기본 서버를 ``name`` 으로 — 이미 있는 방은 그대로(방은 이름을 기억한다)."""
+    data = _config_for_write(cfg_path)
+    _existing_server(data, name)
+    data["endpoint"] = name
+    _atomic_write_json(cfg_path, data)
+
+
+def delete_server(
+    name: str,
+    cfg_path: Path = DEFAULT_CONFIG_JSON,
+    models_path: Path | None = None,
+    *,
+    rooms: int = 0,
+    confirm: bool = False,
+) -> None:
+    """서버를 지운다 — config 의 그 서버와 models.json 의 그 서버 칸.
+
+    기본 서버는 지울 수 없다(새 방이 갈 곳이 없어진다). 그 서버를 쓰는 방이 있으면 ``confirm``
+    없이 :class:`AdminConflict` (``rooms``) — 지운 뒤 그 방들은 띄울 때 "서버 없음" 으로 막힌다."""
+    data = _config_for_write(cfg_path)
+    _existing_server(data, name)
+    if data.get("endpoint") == name:
+        raise AdminError(
+            "the default server cannot be deleted — make another server the default first"
+        )
+    if rooms and not confirm:
+        raise AdminConflict(
+            f"{rooms} room(s) use server '{name}'",
+            {"reason": "in_use", "rooms": rooms},
+        )
+    del data["endpoints"][name]
+    _atomic_write_json(cfg_path, data)
+    registry, _legacy, _err = _read_new_shape(models_path)
+    if registry:
+        sections = registry.get("endpoints")
+        if isinstance(sections, dict) and name in sections:
+            del sections[name]
+            _atomic_write_json(models_path, registry)
+
+
+def _server_values(name: str, cfg_path: Path) -> dict:
+    """프로브·탐지용 서버 값 — 옛 모양이면 서버 없음."""
+    data, _legacy, error = _read_new_shape(cfg_path)
+    if error:
+        raise AdminError(error)
+    return _existing_server(data, name)
 
 
 # ── 서빙 중 모델 프로브 ──────────────────────────────────────────
 
 
-def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
-    """config 의 endpoint 에서 실제 서빙 중인 모델 id 목록.
+def list_served_models(name: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
+    """서버 ``name`` 에서 실제 서빙 중인 모델 id 목록.
 
     OpenAI 호환: ``GET {base_url}/models`` — omlx/vLLM/LM Studio 공통.
     Anthropic: ``GET {base_url}/v1/models``. 헤더(키·추가 헤더)는 agent-cli 의
     ``Credentials.headers`` 가 만든다 — 런타임이 보내는 것과 같은 모양.
     """
-    cfg = _read_json(cfg_path)
-    base_url = (cfg.get("base_url") or "").rstrip("/")
+    server = _server_values(name, cfg_path)
+    base_url = (server.get("base_url") or "").rstrip("/")
     if not base_url:
-        raise AdminError("config.json has no base_url")
-    provider = cfg.get("provider", "openai")
-    credentials = _credentials(cfg)
+        raise AdminError(f"server '{name}' has no base_url")
+    provider = server.get("provider") or "openai"
+    credentials = _credentials(name, server)
     headers = credentials.headers(provider)
     if provider == "anthropic":
         url = f"{base_url}/v1/models"
@@ -259,9 +454,10 @@ def list_served_models(cfg_path: Path = DEFAULT_CONFIG_JSON) -> list[str]:
         # extra headers are being sent to a remote host — an attacker-repointed
         # base_url would otherwise exfiltrate them silently. (Remote is
         # legitimate for a real remote LLM, so we warn, not block.) Names and
-        # counts only — never values.
+        # counts only — never values. 서버마다 그 서버의 값으로.
         print(
-            f"  ⚠️  the admin model probe sends {secrets} to a remote host: {base_url}",
+            f"  ⚠️  the admin model probe sends {secrets} to a remote host: "
+            f"{base_url} (server '{name}')",
             file=sys.stderr,
         )
     try:
@@ -290,27 +486,44 @@ def _secret_summary(credentials) -> str:
     return " and ".join(parts)
 
 
-# ── models.json ──────────────────────────────────────────────────
+# ── models.json — 서버별 모델 표 ─────────────────────────────────
+
+
+def _server_models(registry: dict, name: str) -> dict:
+    sections = registry.get("endpoints")
+    section = sections.get(name) if isinstance(sections, dict) else None
+    models = section.get("models") if isinstance(section, dict) else None
+    return models if isinstance(models, dict) else {}
+
+
+def _model_counts(models_path: Path) -> dict[str, int]:
+    registry, _legacy, _err = _read_new_shape(models_path)
+    sections = registry.get("endpoints")
+    if not isinstance(sections, dict):
+        return {}
+    return {n: len(_server_models(registry, n)) for n in sections}
 
 
 def list_models_with_status(
-    models_path: Path, cfg_path: Path = DEFAULT_CONFIG_JSON
+    name: str, models_path: Path, cfg_path: Path = DEFAULT_CONFIG_JSON
 ) -> dict:
-    """레지스트리 + 서빙 프로브의 병합 뷰.
+    """서버 ``name`` 의 모델 표 + 서빙 프로브의 병합 뷰.
 
-    ``models``: 레지스트리의 각 entry + ``status`` (``served`` — 서버에
+    ``models``: 그 서버 칸의 각 entry + ``status`` (``served`` — 서버에
     있음 / ``missing`` — 서버에서 사라짐 / ``unknown`` — 프로브 실패).
-    ``new``: 서버에는 있지만 레지스트리에 없는 id 들 (auto-detect 후보).
+    ``new``: 서버에는 있지만 표에 없는 id 들 (auto-detect 후보).
     ``probe_error``: 프로브 실패 사유 (성공 시 빈 문자열) — 프로브가
-    죽어도 레지스트리 편집은 계속 가능해야 하므로 예외를 삼켜 담는다.
+    죽어도 표 편집은 계속 가능해야 하므로 예외를 삼켜 담는다.
     """
-    registry = _read_json(models_path)
-    models = registry.get("models")
-    models = models if isinstance(models, dict) else {}
+    _server_values(name, cfg_path)  # 없는 서버는 404
+    registry, _legacy, error = _read_new_shape(models_path)
+    if error:
+        raise AdminError(error)
+    models = _server_models(registry, name)
     served: list[str] = []
     probe_error = ""
     try:
-        served = list_served_models(cfg_path)
+        served = list_served_models(name, cfg_path)
     except AdminError as e:
         probe_error = str(e)
     served_set = set(served)
@@ -357,8 +570,25 @@ def _check_sampling(entry: dict) -> None:
         entry[key] = float(value)
 
 
-def save_model_entry(model_id: str, entry: dict, models_path: Path) -> None:
-    """entry 생성/교체 — 나머지 모델·최상위 키(provider_defaults 등) 보존.
+def _models_for_write(models_path: Path) -> dict:
+    """쓰기 직전의 새 모양 models.json — 옛 모양이면 거절(섞어 쓰지 않는다)."""
+    registry = _read_json(models_path)
+    if _cli_config().is_legacy_shape(registry):
+        raise AdminError(
+            "models.json has the pre-10.144.0 shape — add a server to replace it "
+            "(the old file is kept as models.json.v1)"
+        )
+    return registry
+
+
+def save_model_entry(
+    name: str,
+    model_id: str,
+    entry: dict,
+    models_path: Path,
+    cfg_path: Path = DEFAULT_CONFIG_JSON,
+) -> None:
+    """서버 ``name`` 칸의 entry 생성/교체 — 다른 모델·다른 서버·최상위 키 보존.
 
     v1.33.0: ``dialect`` 바인딩은 필수 — 없으면 agent-cli 가 그 모델을
     실행하지 않으므로(v10.3.0) 저장 단계에서 막는다. 이름은 agent-cli 등록
@@ -376,19 +606,23 @@ def save_model_entry(model_id: str, entry: dict, models_path: Path) -> None:
     if names and dialect not in names:
         raise AdminError(f"unknown dialect '{dialect}' (one of: {', '.join(names)})")
     _check_sampling(entry)
-    registry = _read_json(models_path)
-    models = registry.setdefault("models", {})
+    _server_values(name, cfg_path)  # 없는 서버는 404
+    registry = _models_for_write(models_path)
+    sections = registry.setdefault("endpoints", {})
+    if not isinstance(sections, dict):
+        raise AdminError("'endpoints' in models.json is not an object")
+    models = sections.setdefault(name, {}).setdefault("models", {})
     if not isinstance(models, dict):
-        raise AdminError("'models' in models.json is not an object")
+        raise AdminError(f"models of server '{name}' in models.json is not an object")
     models[model_id] = entry
     _atomic_write_json(models_path, registry)
 
 
-def delete_model_entry(model_id: str, models_path: Path) -> bool:
-    """레지스트리에서 제거 — 있었으면 True."""
-    registry = _read_json(models_path)
-    models = registry.get("models")
-    if not isinstance(models, dict) or model_id not in models:
+def delete_model_entry(name: str, model_id: str, models_path: Path) -> bool:
+    """서버 ``name`` 칸에서 제거 — 있었으면 True."""
+    registry, _legacy, _err = _read_new_shape(models_path)
+    models = _server_models(registry, name)
+    if model_id not in models:
         return False
     del models[model_id]
     _atomic_write_json(models_path, registry)
@@ -417,8 +651,10 @@ def list_dialect_names() -> list[str]:
 # ── capability 자동 탐지 (agent-cli 재사용) ──────────────────────
 
 
-def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> dict:
-    """agent-cli 의 런타임 capability 탐지기로 entry 초안을 만든다.
+def detect_model_entry(
+    name: str, model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON
+) -> dict:
+    """agent-cli 의 런타임 capability 탐지기로 서버 ``name`` 의 entry 초안을 만든다.
 
     저장하지 않는다 — 호출자(UI)가 검토·수정 후 PUT 으로 저장.
     agent_cli 미설치(비정상 배포)면 친절한 에러. 수 초~수십 초 걸리는
@@ -436,14 +672,14 @@ def detect_model_entry(model_id: str, cfg_path: Path = DEFAULT_CONFIG_JSON) -> d
             "unavailable — save manual values"
         ) from e
 
-    cfg = _read_json(cfg_path)
-    base_url = cfg.get("base_url", "")
+    server = _server_values(name, cfg_path)
+    base_url = server.get("base_url", "")
     if not base_url:
-        raise AdminError("config.json has no base_url")
-    credentials = _credentials(cfg)
+        raise AdminError(f"server '{name}' has no base_url")
+    credentials = _credentials(name, server)
     try:
         caps = _detect_runtime_capabilities(
-            cfg.get("provider", "openai"), base_url, model_id, credentials
+            server.get("provider") or "openai", base_url, model_id, credentials
         )
     except UnsupportedModelError as e:
         # 탐지기는 "쓸 수 없는 모델"(컨텍스트 창이 최소치 미만)을 None 이 아니라

@@ -25,6 +25,7 @@ def _write_json(path, data):
 
 
 def _cfg_file(tmp_path, **over):
+    """서버 ``home`` 하나가 기본인 config.json (v1.48.0 모양) — ``over`` 는 그 서버의 필드."""
     p = tmp_path / "config.json"
     data = {
         "provider": "openai",
@@ -34,25 +35,61 @@ def _cfg_file(tmp_path, **over):
         "custom_knob": 42,  # 폼 밖 키 — 보존 계약 검증용
     }
     data.update(over)
-    _write_json(p, data)
+    _write_json(p, {"endpoint": "home", "endpoints": {"home": data}, "top_knob": 1})
     return p
 
 
 def _models_file(tmp_path, models=None):
+    """서버 ``home`` 칸의 models.json (v1.48.0 모양) — 최상위 키 보존 검증용 ``top_keep``."""
     p = tmp_path / "models.json"
     _write_json(
         p,
         {
-            "models": models
-            if models is not None
-            else {
-                "m1": {"context_window": 1000},
-                "gone": {"context_window": 2000},
+            "endpoints": {
+                "home": {
+                    "models": models
+                    if models is not None
+                    else {
+                        "m1": {"context_window": 1000},
+                        "gone": {"context_window": 2000},
+                    }
+                }
             },
-            "provider_defaults": {"keep": True},
+            "top_keep": {"keep": True},
         },
     )
+    if not (tmp_path / "config.json").exists():
+        _cfg_file(tmp_path)
     return p
+
+
+def _saved(path):
+    """저장된 파일의 ``home`` 서버 — config.json 이면 그 서버 dict, models.json 이면
+    ``{"models": 그 서버 칸, 최상위 키…}``."""
+    data = json.loads(path.read_text())
+    if path.name == "config.json":
+        return data["endpoints"]["home"]
+    top = {k: v for k, v in data.items() if k != "endpoints"}
+    return {"models": data["endpoints"]["home"]["models"], **top}
+
+
+def _view(path):
+    """``home`` 서버의 폼 뷰 (``get_servers`` 의 한 행)."""
+    return next(
+        row for row in admin.get_servers(path)["servers"] if row["name"] == "home"
+    )
+
+
+def _update(fields, path):
+    return admin.update_server("home", fields, path)
+
+
+def _save_entry(model_id, entry, models_path):
+    if not models_path.with_name("config.json").exists():
+        _cfg_file(models_path.parent)
+    return admin.save_model_entry(
+        "home", model_id, entry, models_path, models_path.with_name("config.json")
+    )
 
 
 def _fake_served(monkeypatch, ids):
@@ -71,48 +108,49 @@ def _fake_served(monkeypatch, ids):
 class TestAdminConfig:
     def test_get_masks_api_key(self, tmp_path):
         p = _cfg_file(tmp_path)
-        c = admin.get_config(p)
+        c = _view(p)
         assert c["api_key"] == "***"
         assert c["base_url"] == "http://127.0.0.1:8000/v1"
-        assert c["exists"] is True
+        assert c["default"] is True
 
-    def test_get_missing_file_is_empty_form(self, tmp_path):
-        c = admin.get_config(tmp_path / "none.json")
-        assert c["exists"] is False and c["api_key"] == ""
+    def test_get_missing_file_is_no_servers(self, tmp_path):
+        v = admin.get_servers(tmp_path / "none.json")
+        assert v["servers"] == [] and v["default"] is None and v["legacy"] is False
 
     def test_put_mask_sentinel_keeps_existing_key(self, tmp_path):
         p = _cfg_file(tmp_path)
-        admin.update_config({"api_key": "***", "base_url": "http://new:1/v1"}, p)
-        saved = json.loads(p.read_text())
+        _update({"api_key": "***", "base_url": "http://new:1/v1"}, p)
+        saved = _saved(p)
         assert saved["api_key"] == "sk-secret"  # 유지
         assert saved["base_url"] == "http://new:1/v1"
 
     def test_put_empty_key_keeps_existing_key(self, tmp_path):
         p = _cfg_file(tmp_path)
-        admin.update_config({"api_key": ""}, p)
-        assert json.loads(p.read_text())["api_key"] == "sk-secret"
+        _update({"api_key": ""}, p)
+        assert _saved(p)["api_key"] == "sk-secret"
 
     def test_put_new_key_replaces(self, tmp_path):
         p = _cfg_file(tmp_path)
-        admin.update_config({"api_key": "sk-new"}, p)
-        assert json.loads(p.read_text())["api_key"] == "sk-new"
+        _update({"api_key": "sk-new"}, p)
+        assert _saved(p)["api_key"] == "sk-new"
 
     def test_put_preserves_unknown_keys(self, tmp_path):
         p = _cfg_file(tmp_path)
-        admin.update_config({"default_model": "m2"}, p)
-        saved = json.loads(p.read_text())
+        _update({"default_model": "m2"}, p)
+        saved = _saved(p)
         assert saved["custom_knob"] == 42
         assert saved["default_model"] == "m2"
 
-    def test_put_creates_file_when_absent(self, tmp_path):
+    def test_put_on_a_missing_server_is_not_found(self, tmp_path):
         p = tmp_path / "sub" / "config.json"
-        admin.update_config({"provider": "openai", "base_url": "http://x/v1"}, p)
-        assert json.loads(p.read_text())["base_url"] == "http://x/v1"
+        with pytest.raises(admin.AdminNotFound):
+            _update({"provider": "openai", "base_url": "http://x/v1"}, p)
+        assert not p.exists()
 
     def test_put_rejects_non_string(self, tmp_path):
         p = _cfg_file(tmp_path)
         with pytest.raises(admin.AdminError):
-            admin.update_config({"base_url": 123}, p)
+            _update({"base_url": 123}, p)
 
 
 # ── 서빙 프로브 + 분류 ────────────────────────────────────────────
@@ -123,7 +161,7 @@ class TestModelStatus:
         cfg = _cfg_file(tmp_path)
         models = _models_file(tmp_path)  # registry: m1, gone
         _fake_served(monkeypatch, ["m1", "fresh"])  # server: m1, fresh
-        view = admin.list_models_with_status(models, cfg)
+        view = admin.list_models_with_status("home", models, cfg)
         by_id = {r["id"]: r["status"] for r in view["models"]}
         assert by_id == {"m1": "served", "gone": "missing"}
         assert view["new"] == ["fresh"]
@@ -137,7 +175,7 @@ class TestModelStatus:
             raise httpx.ConnectError("refused")
 
         monkeypatch.setattr(admin.httpx, "get", boom)
-        view = admin.list_models_with_status(models, cfg)
+        view = admin.list_models_with_status("home", models, cfg)
         assert view["probe_error"]
         assert {r["status"] for r in view["models"]} == {"unknown"}
         assert view["new"] == []  # 프로브 없인 NEW 판단 불가
@@ -154,7 +192,7 @@ class TestModelStatus:
             return httpx.Response(200, json={"data": [{"id": "c1"}]}, request=req)
 
         monkeypatch.setattr(admin.httpx, "get", fake_get)
-        assert admin.list_served_models(cfg) == ["c1"]
+        assert admin.list_served_models("home", cfg) == ["c1"]
         assert seen["url"].endswith("/v1/models")
         assert seen["headers"]["x-api-key"] == "sk-secret"
 
@@ -165,53 +203,47 @@ class TestModelStatus:
 class TestModelEntryEdit:
     def test_save_preserves_other_models_and_top_keys(self, tmp_path):
         models = _models_file(tmp_path)
-        admin.save_model_entry(
-            "m1", {"context_window": 9999, "dialect": "json_fc"}, models
-        )
-        saved = json.loads(models.read_text())
+        _save_entry("m1", {"context_window": 9999, "dialect": "json_fc"}, models)
+        saved = _saved(models)
         assert saved["models"]["m1"] == {"context_window": 9999, "dialect": "json_fc"}
         assert saved["models"]["gone"]["context_window"] == 2000
-        assert saved["provider_defaults"] == {"keep": True}
+        assert saved["top_keep"] == {"keep": True}
 
     def test_save_new_model(self, tmp_path):
         models = _models_file(tmp_path)
-        admin.save_model_entry(
-            "fresh", {"context_window": 8192, "dialect": "xml_fc"}, models
-        )
-        assert "fresh" in json.loads(models.read_text())["models"]
+        _save_entry("fresh", {"context_window": 8192, "dialect": "xml_fc"}, models)
+        assert "fresh" in _saved(models)["models"]
 
     def test_save_without_dialect_is_refused(self, tmp_path):
         # v1.33.0: 바인딩 필수 — 없으면 agent-cli 가 실행하지 않는 모델이 된다
         models = _models_file(tmp_path)
         for entry in ({"context_window": 1}, {"dialect": ""}, {"dialect": None}):
             with pytest.raises(admin.AdminError, match="dialect"):
-                admin.save_model_entry("m1", entry, models)
-        assert json.loads(models.read_text())["models"]["m1"] == {
-            "context_window": 1000
-        }  # 그대로
+                _save_entry("m1", entry, models)
+        assert _saved(models)["models"]["m1"] == {"context_window": 1000}  # 그대로
 
     def test_save_with_unknown_dialect_is_refused(self, tmp_path, monkeypatch):
         models = _models_file(tmp_path)
         monkeypatch.setattr(admin, "list_dialect_names", lambda: ["json_fc"])
         with pytest.raises(admin.AdminError, match="unknown dialect 'nope'"):
-            admin.save_model_entry("m1", {"dialect": "nope"}, models)
+            _save_entry("m1", {"dialect": "nope"}, models)
 
     def test_save_skips_name_check_when_agent_cli_missing(self, tmp_path, monkeypatch):
         models = _models_file(tmp_path)
         monkeypatch.setattr(admin, "list_dialect_names", list)
-        admin.save_model_entry("m1", {"dialect": "whatever"}, models)
-        assert json.loads(models.read_text())["models"]["m1"]["dialect"] == "whatever"
+        _save_entry("m1", {"dialect": "whatever"}, models)
+        assert _saved(models)["models"]["m1"]["dialect"] == "whatever"
 
     def test_old_wire_format_key_does_not_count_as_binding(self, tmp_path):
         models = _models_file(tmp_path)
         with pytest.raises(admin.AdminError, match="dialect"):
-            admin.save_model_entry("m1", {"wire_format": "xml_fc"}, models)
+            _save_entry("m1", {"wire_format": "xml_fc"}, models)
 
     def test_delete_removes_and_reports(self, tmp_path):
         models = _models_file(tmp_path)
-        assert admin.delete_model_entry("gone", models) is True
-        assert admin.delete_model_entry("gone", models) is False
-        assert "m1" in json.loads(models.read_text())["models"]
+        assert admin.delete_model_entry("home", "gone", models) is True
+        assert admin.delete_model_entry("home", "gone", models) is False
+        assert "m1" in _saved(models)["models"]
 
 
 # ── capability 탐지 (agent_cli 재사용) ───────────────────────────
@@ -240,7 +272,7 @@ class TestDetect:
             return fake_caps
 
         monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", fake_detect)
-        entry = admin.detect_model_entry("fresh", cfg)
+        entry = admin.detect_model_entry("home", "fresh", cfg)
         assert entry["context_window"] == 32768
         assert entry["_auto_detected"] is True
         assert seen["model"] == "fresh" and seen["provider"] == "openai"
@@ -253,7 +285,7 @@ class TestDetect:
             caps_mod, "_detect_runtime_capabilities", lambda *a, **k: None
         )
         with pytest.raises(admin.AdminError):
-            admin.detect_model_entry("fresh", cfg)
+            admin.detect_model_entry("home", "fresh", cfg)
 
     def test_detect_unsupported_model_is_admin_error_with_the_reason(
         self, tmp_path, monkeypatch
@@ -268,7 +300,7 @@ class TestDetect:
 
         monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", too_small)
         with pytest.raises(admin.AdminError, match="8,192"):
-            admin.detect_model_entry("tiny", cfg)
+            admin.detect_model_entry("home", "tiny", cfg)
 
 
 # ── HTTP 라우트 ──────────────────────────────────────────────────
@@ -302,21 +334,23 @@ class TestAdminApi:
 
     def test_get_config_masked(self, tmp_path):
         _, _, c = _admin_client(tmp_path)
-        body = c.get("/api/admin/config").json()
-        assert body["api_key"] == "***"
+        body = c.get("/api/admin/endpoints").json()
+        assert body["servers"][0]["api_key"] == "***"
         assert "sk-secret" not in json.dumps(body)
 
     def test_put_config_roundtrip(self, tmp_path):
         cfg_json, _, c = _admin_client(tmp_path)
-        r = c.put("/api/admin/config", json={"default_model": "m9", "api_key": "***"})
+        r = c.put(
+            "/api/admin/endpoints/home", json={"default_model": "m9", "api_key": "***"}
+        )
         assert r.status_code == 200
-        saved = json.loads(cfg_json.read_text())
+        saved = _saved(cfg_json)
         assert saved["default_model"] == "m9" and saved["api_key"] == "sk-secret"
 
     def test_models_listing_with_probe(self, tmp_path, monkeypatch):
         _, _, c = _admin_client(tmp_path)
         _fake_served(monkeypatch, ["m1", "fresh"])
-        body = c.get("/api/admin/models").json()
+        body = c.get("/api/admin/endpoints/home/models").json()
         assert body["new"] == ["fresh"]
         assert {r["id"]: r["status"] for r in body["models"]} == {
             "m1": "served",
@@ -331,24 +365,27 @@ class TestAdminApi:
 
         monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", too_small)
         _, _, c = _admin_client(tmp_path)
-        r = c.post("/api/admin/models/detect", json={"model": "tiny"})
+        r = c.post("/api/admin/endpoints/home/models/detect", json={"model": "tiny"})
         assert r.status_code == 502
         assert "8,192" in r.json()["detail"]
 
     def test_put_and_delete_model(self, tmp_path):
         _, models_json, c = _admin_client(tmp_path)
         r = c.put(
-            "/api/admin/models/fresh",
+            "/api/admin/endpoints/home/models/fresh",
             json={"context_window": 4096, "dialect": "json_fc"},
         )
         assert r.status_code == 200
-        assert "fresh" in json.loads(models_json.read_text())["models"]
-        assert c.delete("/api/admin/models/fresh").status_code == 200
-        assert c.delete("/api/admin/models/fresh").status_code == 404
+        assert "fresh" in _saved(models_json)["models"]
+        assert c.delete("/api/admin/endpoints/home/models/fresh").status_code == 200
+        assert c.delete("/api/admin/endpoints/home/models/fresh").status_code == 404
 
     def test_detect_endpoint_requires_model(self, tmp_path):
         _, _, c = _admin_client(tmp_path)
-        assert c.post("/api/admin/models/detect", json={}).status_code == 400
+        assert (
+            c.post("/api/admin/endpoints/home/models/detect", json={}).status_code
+            == 400
+        )
 
     def test_index_has_admin_link(self, tmp_path):
         _, _, c = _admin_client(tmp_path)
@@ -439,7 +476,7 @@ class TestDialectBinding:
 
     def test_models_view_includes_dialects(self, tmp_path, monkeypatch):
         _, _, c = _admin_client(tmp_path)
-        r = c.get("/api/admin/models")
+        r = c.get("/api/admin/endpoints/home/models")
         assert r.status_code == 200
         body = r.json()
         assert "dialects" in body
@@ -449,11 +486,9 @@ class TestDialectBinding:
     def test_put_entry_with_binding_round_trips(self, tmp_path):
         _, models_json, c = _admin_client(tmp_path)
         entry = {"context_window": 8192, "dialect": "xml_fc"}
-        r = c.put("/api/admin/models/qwen-x", json=entry)
+        r = c.put("/api/admin/endpoints/home/models/qwen-x", json=entry)
         assert r.status_code == 200
-        import json as _json
-
-        saved = _json.loads(models_json.read_text())
+        saved = _saved(models_json)
         assert saved["models"]["qwen-x"]["dialect"] == "xml_fc"
 
     def test_static_wiring_dropdown(self, tmp_path):
@@ -473,26 +508,30 @@ class TestDialectBinding:
         assert 'auto.value = ""' not in js
         assert "Pick a dialect" in js  # 빈 값은 프론트에서도 멈춘다
         assert "DIALECT_GUIDE" in js and "json_fc:" in js and "native_fc:" in js
-        assert "#model=" in js  # /admin#model=<id> 딥링크
         assert (
-            'addEventListener("hashchange", openModelFromHash)' in js
-        )  # 열린 탭도 반응
+            "h.model" in js and "h.server" in js
+        )  # /admin#server=<n>&model=<id> 딥링크
+        assert 'addEventListener("hashchange"' in js  # 열린 탭도 반응
 
     def test_put_entry_without_dialect_is_400(self, tmp_path):
         _, models_json, c = _admin_client(tmp_path)
-        r = c.put("/api/admin/models/qwen-x", json={"context_window": 8192})
+        r = c.put(
+            "/api/admin/endpoints/home/models/qwen-x", json={"context_window": 8192}
+        )
         assert r.status_code == 400
         assert "dialect" in r.json()["detail"]
-        import json as _json
-
-        assert "qwen-x" not in _json.loads(models_json.read_text())["models"]
+        assert "qwen-x" not in _saved(models_json)["models"]
 
     def test_models_view_rows_carry_dialect(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(admin, "list_served_models", lambda cfg: ["m1"])
+        monkeypatch.setattr(admin, "list_served_models", lambda name, cfg: ["m1"])
         _, _, c = _admin_client(tmp_path)
-        c.put("/api/admin/models/m1", json={"context_window": 1, "dialect": "xml_fc"})
+        c.put(
+            "/api/admin/endpoints/home/models/m1",
+            json={"context_window": 1, "dialect": "xml_fc"},
+        )
         rows = {
-            r["id"]: r["dialect"] for r in c.get("/api/admin/models").json()["models"]
+            r["id"]: r["dialect"]
+            for r in c.get("/api/admin/endpoints/home/models").json()["models"]
         }
         assert rows == {"m1": "xml_fc", "gone": None}
 
@@ -531,15 +570,8 @@ class TestBaseUrlIsRemote:
 
     def test_probe_warns_on_remote_key_send(self, tmp_path, monkeypatch, capsys):
         # A remote base_url with a key → stderr warning that the key leaves box.
-        cfg = tmp_path / "config.json"
-        cfg.write_text(
-            json.dumps(
-                {
-                    "provider": "openai",
-                    "base_url": "http://evil.example.com",
-                    "api_key": "sk-secret",
-                }
-            )
+        cfg = _cfg_file(
+            tmp_path, base_url="http://evil.example.com", api_key="sk-secret"
         )
 
         class _Resp:
@@ -550,20 +582,11 @@ class TestBaseUrlIsRemote:
                 return {"data": [{"id": "m1"}]}
 
         monkeypatch.setattr(admin.httpx, "get", lambda *a, **k: _Resp())
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         assert "remote host" in capsys.readouterr().err
 
     def test_probe_no_warn_on_local(self, tmp_path, monkeypatch, capsys):
-        cfg = tmp_path / "config.json"
-        cfg.write_text(
-            json.dumps(
-                {
-                    "provider": "openai",
-                    "base_url": "http://127.0.0.1:8000",
-                    "api_key": "sk-secret",
-                }
-            )
-        )
+        cfg = _cfg_file(tmp_path, base_url="http://127.0.0.1:8000", api_key="sk-secret")
 
         class _Resp:
             def raise_for_status(self):
@@ -573,7 +596,7 @@ class TestBaseUrlIsRemote:
                 return {"data": [{"id": "m1"}]}
 
         monkeypatch.setattr(admin.httpx, "get", lambda *a, **k: _Resp())
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         assert "원격 호스트" not in capsys.readouterr().err
 
 
@@ -590,10 +613,10 @@ class TestSupportsVisionField:
             "supports_thinking": False,
             "dialect": "json_fc",
         }
-        admin.save_model_entry("m", {**base, "supports_vision": False}, mp)
-        assert admin._read_json(mp)["models"]["m"]["supports_vision"] is False
-        admin.save_model_entry("m", base, mp)
-        assert "supports_vision" not in admin._read_json(mp)["models"]["m"]
+        _save_entry("m", {**base, "supports_vision": False}, mp)
+        assert _saved(mp)["models"]["m"]["supports_vision"] is False
+        _save_entry("m", base, mp)
+        assert "supports_vision" not in _saved(mp)["models"]["m"]
 
     def test_admin_ui_wiring(self):
         from pathlib import Path
@@ -612,7 +635,7 @@ class TestSupportsGrammarField:
 
     def test_entry_round_trips_true_false_and_absent(self, tmp_path):
         mp = tmp_path / "models.json"
-        admin.save_model_entry(
+        _save_entry(
             "m",
             {
                 "context_window": 1,
@@ -623,8 +646,8 @@ class TestSupportsGrammarField:
             },
             mp,
         )
-        assert admin._read_json(mp)["models"]["m"]["supports_grammar"] is True
-        admin.save_model_entry(
+        assert _saved(mp)["models"]["m"]["supports_grammar"] is True
+        _save_entry(
             "m",
             {
                 "context_window": 1,
@@ -634,7 +657,7 @@ class TestSupportsGrammarField:
             },
             mp,
         )
-        assert "supports_grammar" not in admin._read_json(mp)["models"]["m"]
+        assert "supports_grammar" not in _saved(mp)["models"]["m"]
 
     def test_admin_ui_wiring(self):
         from pathlib import Path
@@ -662,11 +685,11 @@ class TestSamplingDefaults:
 
     def test_entry_round_trips_and_absent_means_unrecorded(self, tmp_path):
         mp = tmp_path / "models.json"
-        admin.save_model_entry("m", {**self._BASE, "temperature": 0.2, "top_p": 1}, mp)
-        saved = admin._read_json(mp)["models"]["m"]
+        _save_entry("m", {**self._BASE, "temperature": 0.2, "top_p": 1}, mp)
+        saved = _saved(mp)["models"]["m"]
         assert saved["temperature"] == 0.2 and saved["top_p"] == 1.0
-        admin.save_model_entry("m", {**self._BASE, "temperature": None}, mp)
-        saved = admin._read_json(mp)["models"]["m"]
+        _save_entry("m", {**self._BASE, "temperature": None}, mp)
+        saved = _saved(mp)["models"]["m"]
         assert "temperature" not in saved and "top_p" not in saved
 
     @pytest.mark.parametrize(
@@ -681,7 +704,7 @@ class TestSamplingDefaults:
     def test_out_of_range_or_non_number_is_refused(self, tmp_path, bad):
         mp = tmp_path / "models.json"
         with pytest.raises(admin.AdminError):
-            admin.save_model_entry("m", {**self._BASE, **bad}, mp)
+            _save_entry("m", {**self._BASE, **bad}, mp)
         assert not mp.exists()
 
     def test_admin_ui_wiring(self):
@@ -739,7 +762,7 @@ class TestExtraHeadersConfig:
             )
             + [{"name": "x-empty", "value": ""}],
         )
-        view = admin.get_config(cfg)
+        view = _view(cfg)
         assert view["extra_headers"] == [
             {"name": "x-service-id", "value": "***", "enabled": True},
             {"name": "x-user-id", "value": "***", "enabled": False},
@@ -748,11 +771,11 @@ class TestExtraHeadersConfig:
         assert _HV1 not in json.dumps(view) and _HV2 not in json.dumps(view)
 
     def test_get_without_key_is_empty_list(self, tmp_path):
-        assert admin.get_config(_cfg_file(tmp_path))["extra_headers"] == []
+        assert _view(_cfg_file(tmp_path))["extra_headers"] == []
 
     def test_put_saves_new_and_keeps_masked_by_name(self, tmp_path):
         cfg = _cfg_file(tmp_path, extra_headers=_hdrs(("X-Service-Id", _HV1, True)))
-        admin.update_config(
+        _update(
             {
                 "extra_headers": [
                     {"name": "x-service-id", "value": "***", "enabled": False},
@@ -761,7 +784,7 @@ class TestExtraHeadersConfig:
             },
             cfg,
         )
-        saved = json.loads(cfg.read_text())
+        saved = _saved(cfg)
         assert saved["extra_headers"] == _hdrs(
             ("x-service-id", _HV1, False), ("x-user-id", _HV2, True)
         )
@@ -771,31 +794,27 @@ class TestExtraHeadersConfig:
         cfg = _cfg_file(
             tmp_path, extra_headers=_hdrs(("x-a", _HV1, True), ("x-b", _HV2, True))
         )
-        admin.update_config({"extra_headers": [{"name": "x-b", "value": "***"}]}, cfg)
-        assert json.loads(cfg.read_text())["extra_headers"] == _hdrs(
-            ("x-b", _HV2, True)
-        )
+        _update({"extra_headers": [{"name": "x-b", "value": "***"}]}, cfg)
+        assert _saved(cfg)["extra_headers"] == _hdrs(("x-b", _HV2, True))
 
     def test_put_without_extra_headers_leaves_them(self, tmp_path):
         hdrs = _hdrs(("x-a", _HV1, True))
         cfg = _cfg_file(tmp_path, extra_headers=hdrs)
-        admin.update_config({"default_model": "m2"}, cfg)
-        assert json.loads(cfg.read_text())["extra_headers"] == hdrs
+        _update({"default_model": "m2"}, cfg)
+        assert _saved(cfg)["extra_headers"] == hdrs
 
     def test_masked_value_for_an_unknown_name_is_refused(self, tmp_path):
         cfg = _cfg_file(tmp_path, extra_headers=_hdrs(("x-a", _HV1, True)))
         before = cfg.read_text()
         with pytest.raises(admin.AdminError, match="no saved value"):
-            admin.update_config(
-                {"extra_headers": [{"name": "x-new", "value": "***"}]}, cfg
-            )
+            _update({"extra_headers": [{"name": "x-new", "value": "***"}]}, cfg)
         assert cfg.read_text() == before
 
     def test_masked_duplicates_pair_in_order(self, tmp_path):
         cfg = _cfg_file(
             tmp_path, extra_headers=_hdrs(("x-a", _HV1, False), ("x-a", _HV2, True))
         )
-        admin.update_config(
+        _update(
             {
                 "extra_headers": [
                     {"name": "x-a", "value": "***", "enabled": False},
@@ -804,7 +823,7 @@ class TestExtraHeadersConfig:
             },
             cfg,
         )
-        assert json.loads(cfg.read_text())["extra_headers"] == _hdrs(
+        assert _saved(cfg)["extra_headers"] == _hdrs(
             ("x-a", _HV1, False), ("x-a", _HV2, True)
         )
 
@@ -826,14 +845,14 @@ class TestExtraHeadersConfig:
         cfg = _cfg_file(tmp_path)
         before = cfg.read_text()
         with pytest.raises(admin.AdminError) as ei:
-            admin.update_config({"extra_headers": [row]}, cfg)
+            _update({"extra_headers": [row]}, cfg)
         assert _HV1 not in str(ei.value)
         assert cfg.read_text() == before
 
     def test_duplicate_enabled_names_refused(self, tmp_path):
         cfg = _cfg_file(tmp_path)
         with pytest.raises(admin.AdminError, match="more than once"):
-            admin.update_config(
+            _update(
                 {
                     "extra_headers": [
                         {"name": "x-a", "value": "1"},
@@ -845,14 +864,14 @@ class TestExtraHeadersConfig:
 
     def test_non_list_refused(self, tmp_path):
         with pytest.raises(admin.AdminError):
-            admin.update_config({"extra_headers": "x-a: 1"}, _cfg_file(tmp_path))
+            _update({"extra_headers": "x-a: 1"}, _cfg_file(tmp_path))
 
     def test_put_without_agent_cli_is_admin_error(self, tmp_path, monkeypatch):
         import sys
 
         monkeypatch.setitem(sys.modules, "agent_cli.providers.credentials", None)
         with pytest.raises(admin.AdminError, match="agent_cli"):
-            admin.update_config(
+            _update(
                 {"extra_headers": [{"name": "x-a", "value": "1"}]}, _cfg_file(tmp_path)
             )
 
@@ -881,7 +900,7 @@ class TestExtraHeadersProbe:
             ),
         )
         seen = self._capture(monkeypatch)
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         assert seen["headers"] == {
             "Authorization": "Bearer sk-secret",
             "x-service-id": _HV1,
@@ -895,7 +914,7 @@ class TestExtraHeadersProbe:
             extra_headers=_hdrs(("x-service-id", _HV1, True)),
         )
         seen = self._capture(monkeypatch)
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         assert list(seen["headers"].items()) == [
             ("anthropic-version", "2023-06-01"),
             ("x-api-key", "sk-secret"),
@@ -906,7 +925,7 @@ class TestExtraHeadersProbe:
         cfg = _cfg_file(tmp_path, extra_headers=[{"name": "host", "value": _HV1}])
         self._capture(monkeypatch)
         with pytest.raises(admin.AdminError) as ei:
-            admin.list_served_models(cfg)
+            admin.list_served_models("home", cfg)
         assert "host" in str(ei.value) and _HV1 not in str(ei.value)
 
     def test_remote_warning_counts_extra_headers_without_values(
@@ -918,7 +937,7 @@ class TestExtraHeadersProbe:
             extra_headers=_hdrs(("x-a", _HV1, True), ("x-b", _HV2, True)),
         )
         self._capture(monkeypatch)
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         err = capsys.readouterr().err
         assert "the API key and 2 extra headers to a remote host" in err
         assert _HV1 not in err and _HV2 not in err and "sk-secret" not in err
@@ -933,13 +952,13 @@ class TestExtraHeadersProbe:
             extra_headers=_hdrs(("x-a", _HV1, True)),
         )
         self._capture(monkeypatch)
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         assert "sends 1 extra header to a remote host" in capsys.readouterr().err
 
     def test_no_warning_without_secrets(self, tmp_path, monkeypatch, capsys):
         cfg = _cfg_file(tmp_path, api_key="", base_url="http://gw.example.com/v1")
         self._capture(monkeypatch)
-        admin.list_served_models(cfg)
+        admin.list_served_models("home", cfg)
         assert "remote host" not in capsys.readouterr().err
 
     def test_detect_passes_credentials_with_headers(self, tmp_path, monkeypatch):
@@ -953,7 +972,7 @@ class TestExtraHeadersProbe:
             return caps_mod.ModelCapabilities(32768, 4096, False)
 
         monkeypatch.setattr(caps_mod, "_detect_runtime_capabilities", fake_detect)
-        admin.detect_model_entry("fresh", cfg)
+        admin.detect_model_entry("home", "fresh", cfg)
         assert seen["headers"] == {"Authorization": "Bearer sk-secret", "x-a": _HV1}
 
 
@@ -965,25 +984,25 @@ class TestExtraHeadersApi:
     def test_roundtrip_masks_and_keeps(self, tmp_path):
         cfg_json, _, c = _admin_client(tmp_path)
         r = c.put(
-            "/api/admin/config",
+            "/api/admin/endpoints/home",
             json={"extra_headers": [{"name": "x-a", "value": _HV1, "enabled": True}]},
         )
         assert r.status_code == 200, r.text
         assert r.json()["extra_headers"] == [
             {"name": "x-a", "value": "***", "enabled": True}
         ]
-        got = c.get("/api/admin/config").json()
+        got = c.get("/api/admin/endpoints").json()["servers"][0]
         assert _HV1 not in json.dumps(got)
         got["extra_headers"][0]["enabled"] = False
-        r = c.put("/api/admin/config", json=got)
+        r = c.put("/api/admin/endpoints/home", json=got)
         assert r.status_code == 200, r.text
-        saved = json.loads(cfg_json.read_text())["extra_headers"]
+        saved = _saved(cfg_json)["extra_headers"]
         assert saved == _hdrs(("x-a", _HV1, False))
 
     def test_invalid_is_400(self, tmp_path):
         _, _, c = _admin_client(tmp_path)
         r = c.put(
-            "/api/admin/config",
+            "/api/admin/endpoints/home",
             json={"extra_headers": [{"name": "x-a", "value": _HV1 + "\r\nX: 1"}]},
         )
         assert r.status_code == 400

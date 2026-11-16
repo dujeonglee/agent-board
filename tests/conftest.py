@@ -96,3 +96,17 @@ def fake_knob_spec(monkeypatch):
 
     monkeypatch.setattr(knobs_spec, "load", lambda agent_cli_bin: FAKE_SPEC)
     return FAKE_SPEC
+
+
+@pytest.fixture
+def agent_cli_config(monkeypatch, tmp_path):
+    """교차 저장소 계약용 — agent-cli 의 설정 모듈이 ``tmp_path`` 의 config.json·models.json 을
+    보게 하고, "이 프로세스의 서버" 를 비운다(agent-cli 의 `use_endpoint` 는 프로세스에 한 번 —
+    보드 수트의 재설정은 이 픽스처 한 곳)."""
+    cfgmod = pytest.importorskip("agent_cli.config")
+    monkeypatch.setattr(cfgmod, "_CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr(cfgmod, "_GLOBAL_MODELS_PATH", tmp_path / "models.json")
+    monkeypatch.setattr(cfgmod, "_current", cfgmod._UNSET)
+    cfgmod.reload_registry()
+    yield cfgmod
+    cfgmod.reload_registry()

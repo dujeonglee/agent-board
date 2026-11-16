@@ -14,6 +14,12 @@
 - [로그](#로그)
 - [agent-cli 버전별 기능](#agent-cli-버전별-기능)
 
+> **⚠ v1.48.0 — agent-cli v10.144.0 과 함께 올려야 합니다.** 모델 서버 설정이 서버 여러 개를 이름으로
+> 저장하는 모양(`config.json` 의 `endpoints`, `models.json` 의 서버별 칸)이 됐습니다. 옛 모양 파일은 agent-cli
+> 처럼 **읽지 않습니다** — admin 이 곧 셋업 화면이 되고, 첫 서버를 저장할 때 옛 파일은
+> `config.json.v1`·`models.json.v1`(있으면 `.v1-2` …)로 이름만 바뀌어 남습니다. 옛 보드의 admin 은 새 모양을
+> 읽지 못하고, 새 보드는 낮은 agent-cli 에 admin 맨 위 안내를 띄웁니다([admin](#admin)).
+
 agent-cli 는 **외부 CLI 로만 호출**하며 수정하지 않는다.
 
 ## 카드와 상태
@@ -44,11 +50,23 @@ agent-cli 는 **외부 CLI 로만 호출**하며 수정하지 않는다.
 
 ## 새 글과 노브
 
-**새 글**: 주제 + **모델(필수)** + `⚙ Advanced`(선택) → 빈 워크스페이스 자동 생성.
+**새 글**: 주제 + **서버** + **모델(필수)** + `⚙ Advanced`(선택) → 빈 워크스페이스 자동 생성.
 
-- 모델 드롭다운은 agent-cli 레지스트리(`~/.agent-cli/models.json`,
+- **서버 드롭다운** (v1.48.0, agent-cli ≥ 10.144.0): agent-cli `config.json` 에 저장된 서버들 — 기본
+  서버가 먼저 골라져 있다. 고른 이름을 글에 기록하고 spawn 마다 `--endpoint <이름>` 으로 넘긴다
+  (방은 이름만 기억한다 — 주소·키는 agent-cli 가 푼다). 서버를 바꾸면 모델 선택지가 그 서버의 것으로
+  바뀌고 그 서버의 `default_model` 이 골라진다. 서버가 없으면 폼 아래 "No model server is set up —
+  add one in ⚙ admin" 안내와 함께 만들기 비활성. 목록 API(`GET /api/endpoints`)는 이름·호스트
+  (`host[:port]`)·기본·기본 모델만 내준다 — 주소의 경로·쿼리와 키·헤더는 없다.
+- 모델 드롭다운은 그 서버의 모델 표(`~/.agent-cli/models.json` 의 그 서버 칸,
   `AGENT_BOARD_MODELS_JSON` 로 변경)에서 채워지며, 고른 id 가 spawn 시 `--model` 로
   전달됨(키/정의는 agent-cli 가 자기 레지스트리에서 해석 — 보드에 안 흩어짐).
+- **방의 서버는 뜬 뒤 바뀌지 않는다** — 카드의 🖥 서버 칩은 읽기 전용이고, 다른 서버로 옮기려면 📋
+  복제(복제 폼의 서버가 원본의 것으로 미리 골라진다). v1.48.0 전에 만든 글은 서버 기록이 없어 지금의
+  기본 서버로 보이고, 그 방이 한 번 뜨면 방이 `web.json` 에 보고한 서버 이름을 기록한다.
+  지운 서버를 기억하는 방은 카드에 "Server 'x' is not in the settings — add a server named 'x' again
+  in ⚙ admin, or 📋 clone the room to another server" 가 뜨고 Open 은 409 `endpoint_missing` —
+  보드를 거치지 않는 실행(예약·수동)은 agent-cli 가 종료 코드 2 로 같은 판정을 한다.
 - **보드는 방의 거울**(agent-cli ≥ 10.46.0 짝): `⚙ Advanced` 을 펼치면 사고·문법·
   샘플링·에이전트 상한·압축 비율·무진전 한도/시도·자동 승인·감사 노브를 줄 수 있다
   (컨트롤은 `agent-cli knobs --json` 의 표에서 그려지고, 비우면 agent-cli 기본값). 노브
@@ -65,7 +83,7 @@ agent-cli 는 **외부 CLI 로만 호출**하며 수정하지 않는다.
   만들기 비활성), 서버도 생성(400)과 열기·🔄 재실행(409)을 사유와 함께 거절한다.
   "(기본)" 선택지는 없다 — agent-cli `config.json` 의 `default_model` 에 기대지 않는다.
 - 모델이 없거나 바인딩이 빠진 글은 카드에 ⚠ 경고 줄과 **⚙ Set up** 링크
-  (`/admin#model=<id>` — 그 모델의 편집 창이 바로 열림)가 뜨고 Open 이 비활성이다.
+  (`/admin#server=<이름>&model=<id>` — 그 서버의 그 모델 편집 창이 바로 열림)가 뜨고 Open 이 비활성이다.
   인스턴스가 준비되지 못하면(부트 fail-fast) 열기 실패 토스트에 `instance.log` 꼬리의
   사유가 실린다(502).
 - 기존 코드는 글을 연 뒤 📁 업로드 또는 에이전트에게 `git clone` 으로 투입.
@@ -129,12 +147,25 @@ v1.33 까지는 보드가 스케줄러였다(DB 테이블 + 워크스페이스 �
 
 ## admin
 
-`/admin`(헤더 우측 ⚙): agent-cli 의 `config.json`/`models.json` 편집 페이지.
+`/admin`(헤더 우측 ⚙): agent-cli 의 `config.json`/`models.json` 편집 페이지 — **왼쪽 서버 목록**(이름·
+`● default`·호스트·모델 수·방 수, `+ Add server`), **오른쪽 그 서버의 설정·Extra headers·모델 표** (v1.48.0).
 
-- **config.json**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
-  화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 외 키는 보존.
+- **서버가 없으면 셋업 화면**: 오류 대신 "Add your first server" 폼(이름·provider·base_url·api_key) →
+  저장하면 그 서버의 모델을 조회해 표를 채우고, 기본 모델을 고르게 한다(`default_model` 칸은 서빙·등록된
+  모델을 제안한다). 옛 모양 파일이 있으면 그 사실과 `.v1` 로 남긴다는 안내가 같이 보인다. "가져오기" 버튼은
+  없다 — 옛 값은 `.v1` 파일에서 본다.
+- **서버 이름**은 만들 때 정하고 바꾸지 않는다(영문 소문자·숫자·`-` — agent-cli 규칙). 첫 서버가 기본이
+  된다. **Make default** 는 새 방과 CLI 의 기본을 바꾼다(이미 있는 방은 그대로). **Delete** 는 그 서버를
+  쓰는 방이 있으면 몇 개인지 보여 주고 다시 묻는다(지운 뒤 그 방들은 뜰 때 막힌다). 기본 서버는 지울 수
+  없다(Delete 비활성). 손으로 고친 파일이 "서버는 있는데 기본 없음" 이면 맨 위 경고 — Make default 로 고친다.
+- **서버 설정**: provider/base_url/api_key/default_model 4필드 폼 — api_key 는
+  화면에 `***` 로만 표시되고, `***`/빈값으로 저장하면 기존 키 유지. 그 서버의 다른 키·다른 서버는 보존.
+  저장은 **바뀐 칸만** 보내고 서버는 저장 요청 시점에 파일을 다시 읽어 받은 키만 고친다 — 폼을 연 뒤 방이
+  저장한 값(대화형으로 고른 `default_model` 등)을 덮지 않는다(파일 잠금은 없다 — agent-cli 와 같다).
   변경은 **새로 여는 인스턴스부터** 적용(떠 있는 방은 🔄 재실행).
-- **config.json** — Extra headers: 폼 아래 표. 행마다 체크박스(켬)·name·value·Remove, 아래
+- **agent-cli 버전 안내**: 서버를 spawn 하는 agent-cli 가 10.144.0 미만이면 맨 위에 "agent-cli X cannot
+  read per-server settings — upgrade …" 안내가 뜨고, 보드는 `--endpoint` 를 넘기지 않는다.
+- **서버 설정** — Extra headers (서버마다): 폼 아래 표. 행마다 체크박스(켬)·name·value·Remove, 아래
   `+ Add header`, 저장은 같은 `💾 Save`. agent-cli 의 `extra_headers` 를 편집한다 — 켜진 헤더는
   agent-cli 가 키와 함께 모델 서버로 가는 모든 요청에 싣는다. 값은 api_key 처럼 저장 뒤 `***` 로만
   보이고, `***` 를 그대로 두면 같은 이름(대소문자 무시)의 저장된 값을 유지한다(저장된 적 없는 이름에
@@ -143,7 +174,7 @@ v1.33 까지는 보드가 스케줄러였다(DB 테이블 + 워크스페이스 �
   이름 중복 금지) — 어기면 400 과 헤더 **이름**만 담은 문구, 파일은 그대로. 모델 목록 프로브와 🔍
   Detect 도 같은 헤더를 보내고, base_url 이 원격이면 보드 로그에 "sends the API key and N extra
   headers to a remote host" 경고가 남는다(값 없이 개수만).
-- **models.json** — 상태: config 의 endpoint 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
+- **Models on this server** — 상태: 그 서버의 base_url 에 `GET /models` 프로브를 합쳐 모델별 상태 표시 —
   `served`(서빙 중) / `missing`(서버에서 사라짐 — 개별 🗑 또는 `🗑 Clean up all missing`) /
   `NEW`(서버에만 있음 — **`🔍 Detect`** 버튼이 agent-cli 의 capability 자동 탐지를 돌려
   entry 초안을 채우고, 검토·수정 후 저장; 탐지 실패 시 수동 입력).
@@ -236,5 +267,6 @@ board-proxy 게이트웨이에서는 모든 방이 한 origin 으로 프록시�
 | ≥ 10.120.0 | 🔁 제자리 배지 |
 | ≥ 10.121.0 | 🧵 작업 칩 |
 | ≥ 10.134.0 | admin 의 Extra headers·모델 목록 프로브·🔍 Detect (agent-cli 의 `Credentials` 를 쓴다 — 그 미만이면 admin 의 이 셋이 오류) |
+| ≥ 10.144.0 | **필수 (v1.48.0)** — 서버별 설정(`config.json` 의 `endpoints`)·`--endpoint`·`web.json` 의 `endpoint`. 그 미만은 새 모양 설정을 읽지 못해 방이 뜨지 않는다 — admin 맨 위 안내 |
 
 모델 백엔드(omlx-server 등)는 agent-cli 설정을 그대로 사용한다.

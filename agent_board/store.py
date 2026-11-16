@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS posts (
   topic          TEXT NOT NULL,
   session_id     TEXT UNIQUE,
   knobs          TEXT,
+  endpoint       TEXT NOT NULL DEFAULT '',
   force_active   INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL,
   last_opened_at TEXT
@@ -42,10 +43,16 @@ CREATE INDEX IF NOT EXISTS idx_posts_recent
 # table, then column → the ALTER that adds it. (The dropped ``directive`` and
 # ``model_id`` columns are simply left unqueried on old DBs.)
 _MIGRATIONS = {
-    "posts": {"knobs": "ALTER TABLE posts ADD COLUMN knobs TEXT"},
+    "posts": {
+        "knobs": "ALTER TABLE posts ADD COLUMN knobs TEXT",
+        "endpoint": "ALTER TABLE posts ADD COLUMN endpoint TEXT NOT NULL DEFAULT ''",
+    },
 }
 
-_COLS = "post_id, topic, session_id, knobs, force_active, created_at, last_opened_at"
+_COLS = (
+    "post_id, topic, session_id, knobs, endpoint, force_active, created_at, "
+    "last_opened_at"
+)
 
 
 def _now() -> str:
@@ -66,6 +73,7 @@ def _row_to_post(row: sqlite3.Row) -> Post:
         topic=row["topic"],
         session_id=row["session_id"],
         knobs=_knobs_from_db(row["knobs"]),
+        endpoint=row["endpoint"] or "",
         force_active=bool(row["force_active"]),
         created_at=row["created_at"],
         last_opened_at=row["last_opened_at"],
@@ -113,6 +121,7 @@ class Store:
         *,
         topic: str,
         knobs: dict | None = None,
+        endpoint: str = "",
         dir_taken: Callable[[str], bool] | None = None,
     ) -> Post:
         """Allocate a post with a fresh short id (:mod:`agent_board.ids`).
@@ -134,15 +143,22 @@ class Store:
                 post_id=new_post_id(),
                 topic=topic,
                 knobs=dict(knobs or {}),
+                endpoint=endpoint,
                 created_at=_now(),
             )
             if dir_taken is not None and dir_taken(post.post_id):
                 continue
             try:
                 self._conn.execute(
-                    "INSERT INTO posts (post_id, topic, knobs, force_active, "
-                    "created_at) VALUES (?, ?, ?, 0, ?)",
-                    (post.post_id, post.topic, json.dumps(post.knobs), post.created_at),
+                    "INSERT INTO posts (post_id, topic, knobs, endpoint, force_active, "
+                    "created_at) VALUES (?, ?, ?, ?, 0, ?)",
+                    (
+                        post.post_id,
+                        post.topic,
+                        json.dumps(post.knobs),
+                        post.endpoint,
+                        post.created_at,
+                    ),
                 )
             except sqlite3.IntegrityError:
                 continue  # PK collision — draw again
@@ -166,6 +182,13 @@ class Store:
         self._conn.execute(
             "UPDATE posts SET knobs = ? WHERE post_id = ?",
             (json.dumps(dict(knobs)), post_id),
+        )
+        self._conn.commit()
+
+    def set_endpoint(self, post_id: str, endpoint: str) -> None:
+        """서버 기록이 없던 글에 방이 보고한 서버 이름을 적는다 (거울, v1.48.0) — 다음 spawn 이 쓴다."""
+        self._conn.execute(
+            "UPDATE posts SET endpoint = ? WHERE post_id = ?", (endpoint, post_id)
         )
         self._conn.commit()
 

@@ -64,8 +64,26 @@ class BoardStack:
         from agent_board.config import Config
         from agent_board.store import Store
 
+        # 서버 하나(home, 기본)와 그 서버의 모델 표 (v1.48.0 서버별 모양)
         reg = tmp_path / "models.json"
-        reg.write_text(json.dumps({"models": {"m": {"dialect": "json_fc"}}}))
+        reg.write_text(
+            json.dumps(
+                {"endpoints": {"home": {"models": {"m": {"dialect": "json_fc"}}}}}
+            )
+        )
+        (tmp_path / "agent-cli-config.json").write_text(
+            json.dumps(
+                {
+                    "endpoint": "home",
+                    "endpoints": {
+                        "home": {
+                            "provider": "openai",
+                            "base_url": "http://127.0.0.1:9/v1",
+                        }
+                    },
+                }
+            )
+        )
         self.cfg = Config(
             data_dir=tmp_path / "data",
             workspaces_root=tmp_path / "ws",
