@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DEFAULT_MODELS_JSON = Path.home() / ".agent-cli" / "models.json"
 DEFAULT_CONFIG_JSON = Path.home() / ".agent-cli" / "config.json"
@@ -58,13 +59,28 @@ def server_names(cfg_path: str | Path | None) -> tuple[list[str], str | None]:
     return names, default if isinstance(default, str) and default in names else None
 
 
+def endpoint_host(base_url: str) -> str:
+    """주소에서 ``host[:port]`` 만 — 경로·쿼리·사용자 정보는 버린다(토큰을 쿼리나 userinfo 에
+    싣는 게이트웨이가 있다). agent-cli ``config.endpoint_host`` 와 같은 규칙(계약 테스트가 묶는다)
+    이지만 stdlib 만 쓴다 — 새 글 폼(``/api/endpoints``)은 agent-cli 를 import 할 수 없는 배포
+    (다른 venv, ``agent_cli_bin`` 으로만 이어짐)에서도 돌아야 한다."""
+    try:
+        parts = urlsplit(base_url or "")
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return ""
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{host}:{port}" if host and port else host
+
+
 def list_servers(cfg_path: str | Path | None) -> dict:
     """새 글 폼의 Server 선택지 — ``{"default", "servers": [{name, host, default, default_model}]}``.
 
-    주소는 ``host[:port]`` 만(agent-cli `config.endpoint_host`) — 경로·쿼리·사용자 정보는
-    내주지 않는다(쿼리에 토큰을 싣는 게이트웨이가 있다). 키·헤더는 어떤 값도 없다."""
-    from agent_cli.config import endpoint_host
-
+    주소는 ``host[:port]`` 만(:func:`endpoint_host`) — 경로·쿼리·사용자 정보는 내주지 않는다
+    (쿼리에 토큰을 싣는 게이트웨이가 있다). 키·헤더는 어떤 값도 없다. agent-cli 를 import 하지
+    않는다."""
     data = _read(cfg_path, DEFAULT_CONFIG_JSON)
     names, default = server_names(cfg_path)
     sections = _sections(data)

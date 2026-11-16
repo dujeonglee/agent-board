@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import json
+import re
+import sys
 
 import httpx
 import pytest
@@ -593,6 +595,57 @@ class TestRoomServer:
         assert store.get(dst["post_id"]).endpoint == "work"
 
 
+class TestWithoutAgentCli:
+    """보드와 agent-cli 가 다른 venv 인 배포 — 새 글 폼의 표면은 agent-cli import 없이 돈다."""
+
+    def test_endpoints_api_lists_servers_without_agent_cli(self, tmp_path, monkeypatch):
+        cfg_json, _models = _paths(tmp_path)
+        _write(
+            cfg_json,
+            {
+                "endpoint": "home",
+                "endpoints": {
+                    "home": {
+                        "base_url": f"https://u:p@gw.example.com:8443/v1?t={_SECRET_QUERY}",
+                        "api_key": _KEY,
+                        "default_model": "m",
+                    }
+                },
+            },
+        )
+        monkeypatch.setitem(sys.modules, "agent_cli", None)
+        monkeypatch.setitem(sys.modules, "agent_cli.config", None)
+        _cfg, _store, _orch, c = _client(tmp_path)
+        r = c.get("/api/endpoints")
+        assert r.status_code == 200
+        assert r.json() == {
+            "default": "home",
+            "servers": [
+                {
+                    "name": "home",
+                    "host": "gw.example.com:8443",
+                    "default": True,
+                    "default_model": "m",
+                }
+            ],
+        }
+        assert _KEY not in r.text and _SECRET_QUERY not in r.text
+        assert c.get("/api/models").status_code == 200
+
+    def test_models_registry_does_not_import_agent_cli(self):
+        import ast
+        from pathlib import Path
+
+        tree = ast.parse(Path(models_registry.__file__).read_text(encoding="utf-8"))
+        imported = [
+            n.module if isinstance(n, ast.ImportFrom) else a.name
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.Import, ast.ImportFrom))
+            for a in (n.names if isinstance(n, ast.Import) else [n])
+        ]
+        assert not [m for m in imported if m and m.startswith("agent_cli")]
+
+
 # ── agent-cli 와의 계약 (교차 저장소) ─────────────────────────────────
 
 
@@ -641,6 +694,25 @@ class TestAgentCliContract:
         view = admin.get_servers(cfg, models)
         assert view["servers"][0]["api_key"] == "***" and _KEY not in json.dumps(view)
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1:8000/v1",
+            "https://gw.example.com/v1?token=secret",
+            "https://user:pw@gw.example.com:8443/x/y",
+            "http://[::1]:9/v1",
+            "http://[fe80::1]/v1",
+            "https://gw.example.com",
+            "http://h:99999/v1",  # 깨진 포트 — ValueError
+            "http://h:abc/v1",
+            "not a url",
+            "",
+        ],
+    )
+    def test_board_endpoint_host_matches_agent_cli(self, url, agent_cli_config):
+        """보드의 stdlib 판(새 글 폼용)과 agent-cli 의 규칙이 같다."""
+        assert models_registry.endpoint_host(url) == agent_cli_config.endpoint_host(url)
+
     def test_legacy_predicate_matches(self, agent_cli_config):
         """보드의 "옛 모양 = 서버 없음" 판정이 agent-cli 의 것과 같다."""
         samples = [
@@ -661,6 +733,9 @@ class TestAgentCliContract:
         from typer.testing import CliRunner
 
         out = CliRunner().invoke(app, ["web", "--help"], env={"COLUMNS": "200"}).output
+        # typer 는 GITHUB_ACTIONS 에서 도움말 색을 강제한다(env 로 끌 수 없다) — 글자 사이의
+        # ANSI 를 벗기고 본다
+        out = re.sub(r"\x1b\[[0-9;]*m", "", out)
         assert "--endpoint" in out
         assert instances.ENDPOINTS_CLI <= tuple(
             int(x) for x in __import__("agent_cli").__version__.split(".")

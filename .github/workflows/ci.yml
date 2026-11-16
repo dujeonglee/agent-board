@@ -58,6 +58,10 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      # 서버 화면 테스트(test_servers·test_admin_headers)는 agent-cli 가 없으면 조용히 빠진다 — test 잡과 같이 설치한다
+      - name: Install agent-cli (cross-repo seam)
+        run: pip install "agent-cli @ git+https://github.com/dujeonglee/agent-cli@main"
+
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
