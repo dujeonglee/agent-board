@@ -403,21 +403,25 @@
     posts.forEach((p) => $posts.appendChild(card(p)));
   }
 
-  // status → {dot css class, label}. working = LLM 응답 중, running = 대기, idle = 꺼짐
+  // status → {dot css class, label}. working = main 의 작업 구간이 도는 중(모델 호출·도구, 제자리 대기도 —
+  // 그것은 `p.waiting` 이 가른다), running = 떠 있고 한가, idle = 꺼짐
   const STATUS = {
     working: { cls: "busy", label: "Responding" },
     running: { cls: "on", label: "Idle" },
     idle: { cls: "off", label: "Off" },
   };
-  // main 유휴 + 상주 에이전트 작업 중 (v1.17.0) — 같은 원형 dot, 색만
-  // 구분(보라). "응답 중"과 합치지 않는 이유: main 은 비어 있어 지금
+  // main 이 한가하거나 제자리 대기(v1.49.0) + 상주 에이전트 작업 중 (v1.17.0) — 같은 원형 dot, 색만
+  // 구분(보라). "응답 중"과 합치지 않는 이유: main 은 모델 일을 하지 않아 지금
   // 말 걸어도 되는 상태라는 정보가 사라짐.
   const AGENTS_BUSY = { cls: "agents-busy", label: "Agents working" };
   // main 유휴 + 세션 감사 런 진행 중 (v1.35.0, agent-cli ≥ 10.42.0 `auditing`) —
   // 하니스가 방금 끝난 런의 결과를 확인하는 중. 감사자는 팀원이 아니라 🤖 칩에
   // 없고, 이 상태 한 줄이 그 자리다. 우선순위: 응답 필요 > 응답 중 > 결과 확인 중
-  // > 에이전트 작업 중 > 대기.
+  // > 에이전트 작업 중 > 제자리 대기(Waiting) > 한가(Idle).
   const AUDITING = { cls: "auditing", label: "Checking result" };
+  // main 이 제자리에서 기다리는 중 (v1.49.0, agent-cli ≥ 10.165.0 `waiting`) — 작업 구간 안이지만 모델 일을
+  // 하지 않는다(작업·질문·에이전트 회신을 기다림). 일하는 에이전트가 있으면 그쪽(Agents working)이 앞선다.
+  const WAITING = { cls: "waiting", label: "Waiting" };
 
   function agentsChip(p) {
     const a = p.agents;
@@ -425,10 +429,12 @@
     const detail = (a.list || [])
       .map((x) => {
         const who = x.name ? `${x.profile} · ${x.name}` : x.profile || x.key;
-        return `${who}: ${x.state}`;
+        return `${who}: ${x.waiting ? "waiting" : x.state}`;
       })
       .join("\n");
-    return `<span class="agents-chip" title="${esc(detail)}">🤖 ${a.working}/${a.alive}</span>`;
+    // ⏸ N (v1.49.0) — 받아들여진 `wait` 로 기다리는 에이전트(agent-cli ≥ 10.165.0 `agents.waiting`; `working` 에 들지 않는다)
+    const paused = a.waiting ? ` · ⏸ ${a.waiting}` : "";
+    return `<span class="agents-chip" title="${esc(detail)}">🤖 ${a.working}/${a.alive}${paused}</span>`;
   }
 
   // 📋 열린 항목 칩 (v1.44.0, agent-cli ≥ 10.119.0 `open_items`) — 모델이 아직
@@ -477,15 +483,22 @@
     const el = document.createElement("div");
     el.dataset.id = p.post_id; // for in-place live updates over SSE
     el.className = "post" + (p.awaiting_input ? " needs-input" : "");
-    // awaiting an ask/confirm reply takes precedence over the busy/idle label
+    // 상태 한 줄 — 위에서부터 처음 맞는 것. main 이 모델 일을 하는 중 = 작업 구간이 돌고 제자리 대기가 아님,
+    // 말을 받을 수 있는 중 = 한가하거나 제자리 대기. `waiting` 이 없는 옛 방은 종전 판정 그대로다.
     const agentsWorking = p.agents && p.agents.working > 0;
+    const mainBusy = p.status === "working" && !p.waiting;
+    const mainFree = p.status === "running" || (p.status === "working" && !!p.waiting);
     const st = p.awaiting_input
       ? { cls: "await", label: "❗ Needs your reply" }
-      : p.status === "running" && p.auditing
-        ? AUDITING
-        : p.status === "running" && agentsWorking
-          ? AGENTS_BUSY
-          : STATUS[p.status] || STATUS.idle;
+      : mainBusy
+        ? STATUS.working
+        : mainFree && p.auditing
+          ? AUDITING
+          : mainFree && agentsWorking
+            ? AGENTS_BUSY
+            : p.status === "working"
+              ? WAITING
+              : STATUS[p.status] || STATUS.idle;
     const up = p.status === "running" || p.status === "working";
     // 📋 복제 중 (v1.42.0) — 상태 자리에 진행, Open·🔄·📋 Clone 은 숨긴다(서버 409 와
     // 같은 판정). 폴러가 이 글을 맡아 끝나면 목록을 다시 그린다.

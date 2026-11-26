@@ -221,13 +221,17 @@ class TestStatus:
         )
         assert "agents" not in sessions.live_state(ws, "S1")
 
-    def test_live_state_drops_main_waiting(self, tmp_path, monkeypatch):
-        """지금 값 — agent-cli ≥10.165.0 의 ``waiting`` (main 이 제자리 대기)을 옮기지 않는다."""
+    def test_live_state_carries_main_waiting(self, tmp_path, monkeypatch):
+        """v1.49.0: agent-cli ≥10.165.0 의 ``waiting`` (main 이 제자리 대기, 참일 때만 실린다)을 옮긴다. 구버전(키
+        없음)·참이 아닌 값은 키 생략."""
         ws = self._web_json(tmp_path)
         monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
         self._status_json(ws, busy=True, waiting=True)
         state = sessions.live_state(ws, "S1")
-        assert state["status"] == "working" and "waiting" not in state
+        assert state["status"] == "working" and state["waiting"] is True
+        for absent in ({}, {"waiting": "yes"}, {"waiting": 1}):
+            self._status_json(ws, busy=True, **absent)
+            assert "waiting" not in sessions.live_state(ws, "S1")
 
     def test_live_state_passes_knobs_through_from_status_file(
         self, tmp_path, monkeypatch
@@ -441,6 +445,40 @@ class TestStatusFileCrossRepoContract:
         # 프런트 계약 필드 — app.js agentsChip/AGENTS_BUSY 가 읽는 키들
         assert {"alive", "working", "list"} <= set(state["agents"])
         assert {"key", "profile", "name", "state"} <= set(state["agents"]["list"][0])
+
+    def test_agent_cli_written_waiting_parses(self, tmp_path, monkeypatch):
+        """v1.49.0: agent-cli(≥10.165.0) 의 실제 writer·요약 빌더 — main 의 ``waiting`` 이 live_state 를 지나 남고,
+        기다리는 에이전트는 ``working`` 에서 빠져 ``waiting`` 으로 세어진다(app.js 의 카드 판정·🤖 칩이 읽는 키)."""
+        from agent_cli.instance_file import write_status_file
+        from agent_cli.render.web import WebRenderer
+
+        ws, sdir = self._ws(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        summary = WebRenderer._agents_summary_from(
+            [
+                {
+                    "key": "a",
+                    "profile": "coder",
+                    "name": "",
+                    "state": "busy",
+                    "waiting": True,
+                },
+                {"key": "b", "profile": "rev", "name": "", "state": "busy"},
+            ]
+        )
+        write_status_file(
+            sdir,
+            busy=True,
+            awaiting_input=False,
+            viewers=0,
+            agents=summary,
+            waiting=True,
+        )
+        state = sessions.live_state(ws, "S1")
+        assert state["status"] == "working" and state["waiting"] is True
+        agents = state["agents"]
+        assert (agents["alive"], agents["working"], agents["waiting"]) == (2, 1, 1)
+        assert [x["waiting"] for x in agents["list"]] == [True, False]
 
     def test_agent_cli_summary_builder_end_to_end(self, tmp_path, monkeypatch):
         """한 단계 더 실물로: agent-cli 렌더러의 요약 빌더 출력(실어휘

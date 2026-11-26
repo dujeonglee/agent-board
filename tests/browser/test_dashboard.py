@@ -80,15 +80,28 @@ def _agent(name, *, waiting):
 
 
 class TestWaiting:
-    """main 이 제자리 대기(agent-cli ≥10.165.0 의 ``waiting``)·기다리는 에이전트(``agents.waiting``·``list[].waiting``)."""
+    """main 이 제자리 대기(agent-cli ≥10.165.0 의 ``waiting``)·기다리는 에이전트(``agents.waiting``·``list[].waiting``).
+    장면 값은 agent-cli 10.177.2 가 실제로 쓴 status.json 의 모양 그대로다(IMPL-display-a2 §1.2)."""
 
-    def test_main_waiting_on_a_job_reads_as_responding(self, board, browser):
-        """지금 값 — 보드는 ``waiting`` 을 모른다: 작업을 기다리는 main 도 "Responding"."""
+    def test_main_waiting_on_a_job_is_waiting(self, board, browser):
+        """S4 — 작업만 기다리는 main: "Waiting"(깜박이지 않는 점). 종전 "Responding"."""
         c = _card(board, browser, status={"busy": True, "waiting": True})
-        assert c["st"] == "Responding" and c["dot"] == "dot busy"
+        assert c["st"] == "Waiting" and c["dot"] == "dot waiting"
 
-    def test_a_waiting_agent_has_no_pause_mark(self, board, browser):
-        """지금 값 — 기다리는 에이전트는 칩에 ⏸ 가 없고 툴팁은 작업 상태(busy)."""
+    def test_main_waiting_while_an_agent_works_is_agents_working(self, board, browser):
+        """S3 — 에이전트의 회신을 기다리는 main, 에이전트는 일함: "Agents working"(D2-추가). 종전 "Responding"."""
+        agents = {
+            "alive": 1,
+            "working": 1,
+            "waiting": 0,
+            "list": [_agent("ui", waiting=False)],
+        }
+        c = _card(board, browser, status={"busy": True, "waiting": True}, agents=agents)
+        assert c["st"] == "Agents working" and c["dot"] == "dot agents-busy"
+        assert c["chip"] == "🤖 1/1" and c["title"] == "coder · ui: busy"
+
+    def test_an_agent_waiting_alone_is_idle_with_a_pause_mark(self, board, browser):
+        """S9 — main 한가, 에이전트가 작업만 기다림: "Idle", 칩 `🤖 0/1 · ⏸ 1`, 툴팁 waiting (D2)."""
         agents = {
             "alive": 1,
             "working": 0,
@@ -96,8 +109,51 @@ class TestWaiting:
             "list": [_agent("ui", waiting=True)],
         }
         c = _card(board, browser, agents=agents)
-        assert c["st"] == "Idle" and c["chip"] == "🤖 0/1"
-        assert c["title"] == "coder · ui: busy"
+        assert c["st"] == "Idle" and c["chip"] == "🤖 0/1 · ⏸ 1"
+        assert c["title"] == "coder · ui: waiting"
+
+    def test_one_agent_waits_on_another_that_works(self, board, browser):
+        """S10 — "Agents working", 칩 `🤖 1/2 · ⏸ 1`, 툴팁은 에이전트마다."""
+        agents = {
+            "alive": 2,
+            "working": 1,
+            "waiting": 1,
+            "list": [_agent("aa", waiting=True), _agent("bb", waiting=False)],
+        }
+        c = _card(board, browser, agents=agents)
+        assert c["st"] == "Agents working" and c["chip"] == "🤖 1/2 · ⏸ 1"
+        assert c["title"] == "coder · aa: waiting\ncoder · bb: busy"
+
+    def test_main_waits_on_an_agent_that_waits_too(self, board, browser):
+        """S11 — 일하는 이가 없다: 규칙 그대로 "Waiting"(Q2). 종전 "Responding"."""
+        agents = {
+            "alive": 1,
+            "working": 0,
+            "waiting": 1,
+            "list": [_agent("aa", waiting=True)],
+        }
+        c = _card(board, browser, status={"busy": True, "waiting": True}, agents=agents)
+        assert c["st"] == "Waiting" and c["chip"] == "🤖 0/1 · ⏸ 1"
+
+    def test_a_question_comes_first(self, board, browser):
+        """S5 — 질문의 답을 기다리는 main: ❗ 가 1순위(Q1)."""
+        c = _card(
+            board,
+            browser,
+            status={"busy": True, "waiting": True, "awaiting_input": True},
+        )
+        assert c["st"] == "❗ Needs your reply"
+
+    def test_an_old_room_reads_as_before(self, board, browser):
+        """agent-cli < 10.165.0 — ``waiting`` 키가 없다: 작업 구간 중이면 "Responding", 칩은 ⏸ 없이 state."""
+        agents = {
+            "alive": 1,
+            "working": 1,
+            "list": [{"key": "a", "profile": "coder", "name": "ui", "state": "busy"}],
+        }
+        c = _card(board, browser, status={"busy": True}, agents=agents)
+        assert c["st"] == "Responding" and c["dot"] == "dot busy"
+        assert c["chip"] == "🤖 1/1" and c["title"] == "coder · ui: busy"
 
 
 class TestTabGuard:
