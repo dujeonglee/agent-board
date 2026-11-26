@@ -131,13 +131,15 @@ class BoardStack:
         open_items=None,
         stuck=None,
         jobs=None,
+        status=None,
     ):
         """게시글 + 라이브 인스턴스 사이드카. ``agents``=status.json 의
         상주 에이전트 요약, ``alive_pid``=pid_alive 통과용(기본 이 프로세스),
         ``knobs``=저장 노브(모델 포함), ``live_knobs``=status.json 의 ``knobs``,
         ``open_items``=status.json 의 ``open_items`` (v1.44.0),
         ``stuck``=status.json 의 ``stuck`` (v1.45.0),
-        ``jobs``=status.json 의 ``jobs`` (v1.46.0).
+        ``jobs``=status.json 의 ``jobs`` (v1.46.0),
+        ``status``=status.json 에 덮어쓸 그 밖의 키(``busy``·``waiting``·``awaiting_input`` 등 — v1.49.0).
         반환: post_id."""
         post = self.store.create_post(topic=topic, knobs=knobs or {"model": "m"})
         sid = str(int_from(post.post_id))
@@ -156,18 +158,19 @@ class BoardStack:
                 }
             )
         )
-        status = {"busy": False, "awaiting_input": False, "viewers": 0}
+        sidecar = {"busy": False, "awaiting_input": False, "viewers": 0}
+        sidecar.update(status or {})
         if agents is not None:
-            status["agents"] = agents
+            sidecar["agents"] = agents
         if live_knobs is not None:
-            status["knobs"] = live_knobs
+            sidecar["knobs"] = live_knobs
         if open_items is not None:
-            status["open_items"] = open_items
+            sidecar["open_items"] = open_items
         if stuck is not None:
-            status["stuck"] = stuck
+            sidecar["stuck"] = stuck
         if jobs is not None:
-            status["jobs"] = jobs
-        (sdir / "status.json").write_text(json.dumps(status))
+            sidecar["jobs"] = jobs
+        (sdir / "status.json").write_text(json.dumps(sidecar))
         return post.post_id
 
 

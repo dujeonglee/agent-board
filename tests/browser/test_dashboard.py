@@ -54,6 +54,52 @@ class TestAgentsChip:
         ctx.close()
 
 
+def _card(board, browser, **seed):
+    """글 하나를 심고 그 카드의 상태 글·점·🤖 칩·툴팁을 읽는다."""
+    board.seed_post(topic="w", **seed)
+    page = browser.new_context().new_page()
+    page.goto(board.url, wait_until="load")
+    page.wait_for_selector(".post .st .dot", timeout=8000)
+    chip = page.locator(".agents-chip")
+    return {
+        "st": page.inner_text(".post .st").split("👁")[0].strip(),
+        "dot": page.get_attribute(".post .st .dot", "class"),
+        "chip": chip.inner_text().strip() if chip.count() else "",
+        "title": chip.get_attribute("title") if chip.count() else "",
+    }
+
+
+def _agent(name, *, waiting):
+    return {
+        "key": f"agt-{name}",
+        "profile": "coder",
+        "name": name,
+        "state": "busy",
+        "waiting": waiting,
+    }
+
+
+class TestWaiting:
+    """main 이 제자리 대기(agent-cli ≥10.165.0 의 ``waiting``)·기다리는 에이전트(``agents.waiting``·``list[].waiting``)."""
+
+    def test_main_waiting_on_a_job_reads_as_responding(self, board, browser):
+        """지금 값 — 보드는 ``waiting`` 을 모른다: 작업을 기다리는 main 도 "Responding"."""
+        c = _card(board, browser, status={"busy": True, "waiting": True})
+        assert c["st"] == "Responding" and c["dot"] == "dot busy"
+
+    def test_a_waiting_agent_has_no_pause_mark(self, board, browser):
+        """지금 값 — 기다리는 에이전트는 칩에 ⏸ 가 없고 툴팁은 작업 상태(busy)."""
+        agents = {
+            "alive": 1,
+            "working": 0,
+            "waiting": 1,
+            "list": [_agent("ui", waiting=True)],
+        }
+        c = _card(board, browser, agents=agents)
+        assert c["st"] == "Idle" and c["chip"] == "🤖 0/1"
+        assert c["title"] == "coder · ui: busy"
+
+
 class TestTabGuard:
     def test_open_blocked_when_five_tabs_hold_connections(self, board, browser):
         """대시보드 탭 5개가 연결을 잡으면(각 /api/events SSE) 6번째 열기

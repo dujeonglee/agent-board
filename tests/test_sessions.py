@@ -221,6 +221,14 @@ class TestStatus:
         )
         assert "agents" not in sessions.live_state(ws, "S1")
 
+    def test_live_state_drops_main_waiting(self, tmp_path, monkeypatch):
+        """지금 값 — agent-cli ≥10.165.0 의 ``waiting`` (main 이 제자리 대기)을 옮기지 않는다."""
+        ws = self._web_json(tmp_path)
+        monkeypatch.setattr(sessions.instances, "pid_alive", lambda pid: True)
+        self._status_json(ws, busy=True, waiting=True)
+        state = sessions.live_state(ws, "S1")
+        assert state["status"] == "working" and "waiting" not in state
+
     def test_live_state_passes_knobs_through_from_status_file(
         self, tmp_path, monkeypatch
     ):

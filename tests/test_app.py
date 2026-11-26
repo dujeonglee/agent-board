@@ -1448,6 +1448,27 @@ class TestJobsChip:
         assert "jobs/stop" not in js
 
 
+class TestMainWaiting:
+    def test_post_has_no_waiting(self, tmp_path, monkeypatch):
+        """지금 값 — 카드 payload 에 main 의 제자리 대기가 없다."""
+        from agent_board import sessions
+
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "working",
+                "awaiting_input": False,
+                "viewers": 0,
+                "waiting": True,
+            },
+        )
+        (p,) = c.get("/api/posts").json()
+        assert "waiting" not in p
+
+
 class TestCloneJob:
     """v1.42.0: 복제는 백그라운드 작업 — POST 는 바로 `cloning` 을 싣고 돌아오고,
     진행은 ``GET /api/posts/{id}/clone`` 이 읽는다."""
