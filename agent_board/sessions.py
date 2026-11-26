@@ -56,7 +56,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     """``{"status", "awaiting_input", "viewers"}`` — read from the instance's
     ``status.json`` sidecar (a local file), falling back to ``GET /api/health``:
 
-    - status: ``working`` (LLM responding) / ``running`` (up, idle) / ``idle`` (down),
+    - status: ``working`` (main's run is in flight — model, tools, or waiting in place; see ``waiting``)
+      / ``running`` (up, idle) / ``idle`` (down),
     - awaiting_input: an ask/confirm prompt is waiting for a reply,
     - viewers: live browser subscribers on the instance (0 when down),
     - auditing (v1.35.0, additive): a session-audit run is in flight,
@@ -67,6 +68,8 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
       new result ``{turns, since_turn, asking}`` (agent-cli >= 10.120.0).
     - jobs (v1.46.0, additive): running background jobs
       ``{count, list: [{id, pid, owner, command, started_at}]}`` (agent-cli >= 10.121.0).
+    - waiting (v1.49.0, additive): main is waiting in place on an accepted ``wait``
+      (``busy`` is true too) — agent-cli >= 10.165.0. Present only when true.
 
     agent-cli >= 4.27.0 writes ``status.json`` on every change, so the common
     path is a file read (no HTTP). Older instances have no file → fall back to
@@ -134,6 +137,10 @@ def live_state(workspace: Path, session_id: str | None) -> dict:
     jb = live.get("jobs")
     if _jobs_ok(jb):
         out["jobs"] = jb
+    # v1.49.0: main 이 제자리에서 기다리는 중 (agent-cli ≥10.165.0 additive 필드 `waiting` — 참일 때만 실린다).
+    # 카드의 "Waiting" 과 "모델 일을 하는 중" 판정의 소스. 구버전·참이 아닌 값은 키 생략 → 종전 판정.
+    if live.get("waiting") is True:
+        out["waiting"] = True
     return out
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.49.0] - 2026-11-26
+
+> agent-cli v10.165.0 이상의 방에서 보인다(`status.json` 의 `waiting`·`agents.waiting`). 그 미만의 방은 종전과 같다.
+
+### Changed — 기다림을 기다림으로
+
+- 카드 상태에 **`Waiting`** — main 이 제자리에서 기다리는 중(작업·에이전트의 회신 등, 일하는 에이전트 없음). 점은
+  Responding 과 같은 색이고 깜박이지 않는다. 종전에는 기다리는 main 도 `Responding` 이었다.
+- `Responding` 은 main 이 일하는 중(모델 호출·도구)일 때만. main 이 에이전트의 회신을 기다리고 그 에이전트가 일하면
+  `Agents working`.
+- 상태는 표 하나에서 위에서부터 처음 맞는 것: `❗ Needs your reply` > `Responding` > `Checking result` >
+  `Agents working` > `Waiting` > `Idle`/`Off`. 질문·확인을 기다리는 방은 여전히 `❗ Needs your reply`.
+- 🤖 칩: 기다리는 에이전트가 있으면 `🤖 1/2 · ⏸ 1`, 툴팁은 그 에이전트를 `waiting` 으로.
+
 ## [1.48.0] - 2026-11-17
 
 > **⚠ agent-cli v10.144.0 과 함께 올려야 합니다.** 모델 서버 설정이 서버 여러 개를 이름으로 저장하는 모양이

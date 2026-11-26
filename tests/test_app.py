@@ -1448,6 +1448,49 @@ class TestJobsChip:
         assert "jobs/stop" not in js
 
 
+class TestMainWaiting:
+    """v1.49.0: main 의 제자리 대기(agent-cli ≥10.165.0 `waiting`)가 post 로 나온다(구버전은 None)."""
+
+    def test_post_carries_waiting(self, tmp_path, monkeypatch):
+        from agent_board import sessions
+
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        monkeypatch.setattr(
+            sessions,
+            "live_state",
+            lambda ws, sid: {
+                "status": "working",
+                "awaiting_input": False,
+                "viewers": 0,
+                "waiting": True,
+            },
+        )
+        (p,) = c.get("/api/posts").json()
+        assert p["waiting"] is True
+
+    def test_post_without_waiting_is_null(self, tmp_path):
+        _cfg, store, c = _client(tmp_path)
+        store.create_post(topic="t")
+        (p,) = c.get("/api/posts").json()
+        assert p["waiting"] is None
+
+    def test_card_wiring(self, tmp_path):
+        """우선순위 표 하나: 응답 필요 > 응답 중 > 결과 확인 중 > 에이전트 작업 중 > 제자리 대기 > 상태."""
+        _, _, c = _client(tmp_path)
+        js = c.get("/static/app.js").text
+        css = c.get("/static/style.css").text
+        assert 'label: "Waiting"' in js and "p.waiting" in js
+        assert (
+            js.index('"❗ Needs your reply"')
+            < js.index("? STATUS.working")
+            < js.index("? AUDITING")
+            < js.index("? AGENTS_BUSY")
+            < js.index("? WAITING")
+        )
+        assert ".dot.waiting { background: var(--accent); }" in css
+
+
 class TestCloneJob:
     """v1.42.0: 복제는 백그라운드 작업 — POST 는 바로 `cloning` 을 싣고 돌아오고,
     진행은 ``GET /api/posts/{id}/clone`` 이 읽는다."""

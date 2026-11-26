@@ -26,12 +26,13 @@ agent-cli 는 **외부 CLI 로만 호출**하며 수정하지 않는다.
 
 - 인스턴스는 **온디맨드로 떴다가 idle 시 스스로 종료**(agent-cli `--idle-timeout`),
   다음 접속에 `--resume` 으로 재기동. 보드를 재시작해도 살아있는 인스턴스에 재attach.
-- 게시글마다 **상태 표시**: 🔵 Responding(main LLM 생성) / 🟠 Checking result(main 유휴,
-  세션 감사 런 진행 — agent-cli ≥ 10.42.0) / 🟣 Agents working(main 유휴,
-  상주 에이전트 가동 — agent-cli ≥ 7.10.0) / 🟢 Idle / ⚪ Off. 방이 ask/confirm 답을 기다리면
+- 게시글마다 **상태 표시**: 🔵 Responding(main 이 일하는 중 — 모델 호출·도구) / 🟠 Checking result(main 유휴,
+  세션 감사 런 진행 — agent-cli ≥ 10.42.0) / 🟣 Agents working(main 유휴 또는 제자리 대기,
+  상주 에이전트 가동 — agent-cli ≥ 7.10.0) / 🔵 Waiting(main 이 제자리 대기 — 깜박이지 않는 점, 일하는
+  에이전트 없음 — agent-cli ≥ 10.165.0, v1.49.0) / 🟢 Idle / ⚪ Off. 위에서부터 처음 맞는 것 하나다. 방이 ask/confirm 답을 기다리면
   이 라벨들보다 앞서 `❗ Needs your reply` 가 뜬다.
-- 떠 있는 방에는 **실시간 접속자 수**(👁)와 **상주 에이전트 칩**(`🤖 작업중/전체`, hover 시
-  에이전트별 상태 — 없으면 숨김)가 붙는다.
+- 떠 있는 방에는 **실시간 접속자 수**(👁)와 **상주 에이전트 칩**(`🤖 작업중/전체`, 기다리는 에이전트가 있으면 `· ⏸ N`; hover 시
+  에이전트별 상태 — 기다리는 에이전트는 `waiting`; 없으면 숨김)가 붙는다.
 - 목록은 **SSE 라이브 push** 로 갱신 — 프론트가 주기적으로 폴링하지 않고, 보드가 각 글의
   on-disk 상태(mtime)를 감시해 바뀐 행만 즉시 밀어준다.
 - 카드의 배지·칩(방이 `status.json` 에 쓴 값을 거울로 보인다):
@@ -266,6 +267,7 @@ board-proxy 게이트웨이에서는 모든 방이 한 origin 으로 프록시�
 | ≥ 10.119.0 | 📋 열린 항목 칩 |
 | ≥ 10.120.0 | 🔁 제자리 배지 |
 | ≥ 10.121.0 | 🧵 작업 칩 |
+| ≥ 10.165.0 | 🔵 Waiting·🤖 칩의 ⏸(`status.json` 의 `waiting`·`agents.waiting`) — 그 미만은 제자리 대기 main 이 Responding |
 | ≥ 10.134.0 | admin 의 Extra headers·모델 목록 프로브·🔍 Detect (agent-cli 의 `Credentials` 를 쓴다 — 그 미만이면 admin 의 이 셋이 오류) |
 | ≥ 10.144.0 | **필수 (v1.48.0)** — 서버별 설정(`config.json` 의 `endpoints`)·`--endpoint`·`web.json` 의 `endpoint`. 그 미만은 새 모양 설정을 읽지 못해 방이 뜨지 않는다 — admin 맨 위 안내 |
 
